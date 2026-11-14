@@ -19,10 +19,12 @@ warm   one session per page: each op once as warm-up (discarded), then --n timed
 Refs for click/fill come from a fresh snapshot before each timed call (untimed), the way an agent acts.
 Output size (chars/4) is recorded too.
 
-Usage: python3 -I bench/latency/run.py [--arms ad-14,bh,pw,ab,tabref] [--display headless|xvfb|host] [--n 7]
+A sample counts only when the call exits 0 and its output shows the op worked (Adapter.ok: the page title after
+open, the Count button in a snapshot, the tool's success marker after click/fill, the marker text after a read).
+Usage: python3 -I bench/latency/run.py [--arms ad-14,bh,pw,ab,tabref] [--display xvfb|headless|host] [--n 7]
        [--cold 7] [--tabref-checkout <dir>]
-ad-14 needs a display, so with --display headless (the default) its rows run in a private Xvfb session; the row
-records which. Results: $BENCH_RUNS/latency/<stamp>.json; table: python3 -I bench/report.py latency
+Every arm runs in the same display mode (default: headed Chrome in a private Xvfb; ad-14 cannot run headless).
+Results: $BENCH_RUNS/latency/<stamp>.json; table: python3 -I bench/report.py latency
 """
 import argparse
 import os
@@ -56,12 +58,28 @@ BH_CLICK = ("nodes = cdp('Accessibility.getFullAXTree')['nodes']\n"
             "print(js(\"document.getElementById('out').textContent\"))\n")
 
 
+PAGE = re.compile(r"(Simple|Heavy) page|Latency fixture")
+
+
 class Adapter:
+    """Per tool: the command for each op and how to tell from its output that the op worked. `done` holds the
+    marker each tool prints for a successful click and fill."""
     tool = ""
     needs_ref = False
+    done = {}
 
     def __init__(self, port):
         self.port = port
+
+    def ok(self, op, out):
+        if op == "open":
+            return PAGE.search(out) is not None
+        if op == "snapshot":
+            return "Count" in out
+        if op == "text":
+            return MARK in out
+        marker = self.done.get(op)
+        return marker is None or re.search(marker, out) is not None
 
     def cold(self, url):
         return [self.open(url)]
@@ -73,6 +91,7 @@ class Adapter:
 class AD(Adapter):
     tool = "agent-desktop"
     needs_ref = True
+    done = {"click": r'"ok":\s*true', "fill": r'"ok":\s*true'}
     APP = ["--app", "Google Chrome"]
 
     def open(self, url):
@@ -101,6 +120,7 @@ class AD(Adapter):
 
 class BH(Adapter):
     tool = "browser-harness"
+    done = {"click": r"clicked [1-9]", "fill": re.escape(NAME)}
 
     def cold(self, url):
         return [([], f"new_tab({url!r})\nwait_for_load()\nprint(page_info())\n")]
@@ -125,6 +145,7 @@ class BH(Adapter):
 class PW(Adapter):
     tool = "playwright-cli"
     needs_ref = True
+    done = {"click": r"\.click\(", "fill": r"\.fill\("}
 
     def cold(self, url):
         return [([f"attach", f"--cdp=http://127.0.0.1:{self.port}"], None), self.open(url)]
@@ -156,6 +177,7 @@ class PW(Adapter):
 class AB(Adapter):
     tool = "agent-browser"
     needs_ref = True
+    done = {"click": "✓", "fill": "✓"}
 
     def _c(self, *args):
         return ["--cdp", str(self.port), *args], None
@@ -239,14 +261,15 @@ class Session:
         self.log = self.work / "tool.log"
 
     def call(self, argv_stdin):
+        """One tool call in its own session. Its time is the wrapper's log line; a call killed at the timeout never
+        logs one, so it counts as rc 124 at its wall time."""
         argv, stdin = argv_stdin
         before = len(core.tool_log_lines(self.log))
-        p = subprocess.run([self.wrapper, *argv], input=stdin, cwd=self.work, env=self.env, capture_output=True,
-                           text=True, timeout=120)
+        rc, out, err, wall, timed_out = core.run_in_session([self.wrapper, *argv], self.work, self.env, 120, stdin)
         lines = core.tool_log_lines(self.log)[before:]
-        secs = sum(x["t1"] - x["t0"] for x in lines) if lines else None
-        out = (p.stdout or "") + (p.stderr or "")
-        return {"s": secs, "rc": p.returncode, "chars": len(out), "out": out}
+        secs = wall if timed_out else (sum(x["t1"] - x["t0"] for x in lines) if lines else None)
+        out = out + err
+        return {"s": secs, "rc": rc, "chars": len(out), "out": out}
 
     def refs(self):
         r = self.call(self.adapter.snapshot({}))
@@ -268,8 +291,10 @@ def cold_samples(arm, page_url, display, home, tabref, root, n):
         try:
             calls = [s.call(c) for c in s.adapter.cold(page_url)]
             first_snap = s.call(s.adapter.snapshot({}))
-            out.append({"open_s": sum(c["s"] or 0 for c in calls), "open_ok": all(c["rc"] == 0 for c in calls),
-                        "snapshot_s": first_snap["s"], "snapshot_ok": first_snap["rc"] == 0})
+            out.append({"open_s": sum(c["s"] or 0 for c in calls),
+                        "open_ok": all(c["rc"] == 0 for c in calls) and s.adapter.ok("open", calls[-1]["out"]),
+                        "snapshot_s": first_snap["s"],
+                        "snapshot_ok": first_snap["rc"] == 0 and s.adapter.ok("snapshot", first_snap["out"])})
         finally:
             s.close()
     return out
@@ -293,9 +318,9 @@ def warm_samples(arm, page_url, display, home, tabref, root, n):
                 r = s.call(cmd)
                 if i == 0:
                     continue
-                if r["rc"] != 0 or r["s"] is None:
+                if r["rc"] != 0 or r["s"] is None or not s.adapter.ok(op, r["out"]):
                     fails += 1
-                    err = r["out"][-300:]
+                    err = ("" if r["rc"] else "output shows no success: ") + r["out"][-300:]
                     continue
                 samples.append(r["s"])
                 chars.append(r["chars"])
@@ -310,7 +335,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arms", default="ad-14,bh,pw,ab,tabref")
     ap.add_argument("--pages", default="simple,heavy")
-    ap.add_argument("--display", default="headless", choices=["headless", "xvfb", "host"])
+    ap.add_argument("--display", default="xvfb", choices=["headless", "xvfb", "host"],
+                    help="xvfb (default): every arm headed in a private Xvfb; headless skips ad-14")
     ap.add_argument("--n", type=int, default=7)
     ap.add_argument("--cold", type=int, default=7)
     ap.add_argument("--tabref-checkout", default=None)
@@ -319,13 +345,14 @@ def main():
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     SETTLE[0], CHROME[0] = a.settle, a.chrome
+    core.check_frozen()
     core.exit_on_sigterm()
     runs = core.runs_dir() / "latency"
     stamp = time.strftime("%Y%m%d-%H%M%S")
     root = runs / f"work-{stamp}"
     home = runs / "home"
     tabref = core.tabref_bin(a.tabref_checkout)
-    result = {"stamp": stamp, "host": os.uname().nodename, "display": a.display, "n": a.n, "cold_n": a.cold, "settle_s": a.settle,
+    result = {"stamp": stamp, "host": core.host_label(), "display": a.display, "n": a.n, "cold_n": a.cold, "settle_s": a.settle,
               "load1_start": os.getloadavg()[0],
               "chrome": subprocess.run([a.chrome, "--version"], capture_output=True, text=True).stdout.strip(),
               "rows": []}
@@ -341,7 +368,11 @@ def main():
                 print(f"SKIP {why}", flush=True)
                 result["rows"].append({"arm": arm, "skipped": why})
                 continue
-            mode = "xvfb" if arm == "ad-14" and a.display == "headless" else a.display
+            mode = a.display
+            if arm == "ad-14" and mode == "headless":
+                print("SKIP ad-14: needs a display (use --display xvfb)", flush=True)
+                result["rows"].append({"arm": arm, "skipped": "ad-14 needs a display; run with --display xvfb"})
+                continue
             if mode not in displays:
                 displays[mode] = core.Display(mode, runs / f"display-{stamp}-{mode}").start()
             for page in a.pages.split(","):
@@ -365,7 +396,7 @@ def main():
     result["load1_end"] = os.getloadavg()[0]
     out = Path(a.out) if a.out else runs / f"{stamp}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(result, indent=1))
+    out.write_text(core.scrub(json.dumps(result, indent=1)))
     shutil.rmtree(root, ignore_errors=True)
     print(f"wrote {out}")
 

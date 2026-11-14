@@ -42,12 +42,12 @@ fi
 run="sudo -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin"
 B=/home/bench/tabref-bench/bench
 case $mode in
-  latency) vx "cd $B && $run python3 -I latency/run.py --display headless --chrome $chrome $*" ;;
-  replay) vx "cd $B && $run python3 -I replay/run.py --display headless --chrome $chrome $*" ;;
+  latency) vx "cd $B && $run python3 -I latency/run.py --display xvfb --chrome $chrome $*" ;;
+  replay) vx "cd $B && $run python3 -I replay/run.py --display xvfb --chrome $chrome $*" ;;
   models)
     : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY for a model pass}"
     boxd machine exec --env "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$name" -- bash -c \
-      "cd $B && sudo --preserve-env=ANTHROPIC_API_KEY -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin ANTHROPIC_API_KEY=\"\$ANTHROPIC_API_KEY\" python3 -I harness/run_web.py --display xvfb --chrome $chrome --host boxd $*" ;;
+      "cd $B && sudo --preserve-env=ANTHROPIC_API_KEY -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin python3 -I harness/run_web.py --display xvfb --chrome $chrome --host vm $*" ;;
   *) echo "unknown mode $mode" >&2; exit 2 ;;
 esac
 vx "sudo tar -C /home/bench -czf /tmp/runs.tgz runs"

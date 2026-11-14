@@ -210,8 +210,18 @@ class Display:
 
 
 def profile_processes(profile):
-    out = subprocess.run(["pgrep", "-f", "--", f"--user-data-dir={profile}"], capture_output=True, text=True).stdout
-    return [int(p) for p in out.split()]
+    """Chrome processes of this profile: an argv entry equal to --user-data-dir=<profile> (not a mention of it)."""
+    flag = f"--user-data-dir={profile}".encode()
+    out = subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", "--", f"--user-data-dir={profile}"], capture_output=True,
+                         text=True).stdout
+    pids = []
+    for p in out.split():
+        try:
+            if flag in Path(f"/proc/{p}/cmdline").read_bytes().split(b"\0"):
+                pids.append(int(p))
+        except OSError:
+            pass
+    return pids
 
 
 def write_profile(profile, downloads):
@@ -311,7 +321,9 @@ def core_dir():
     """run_web_linux's /opt/bench/core: node, npm, npx, jq and claude, linked into one PATH folder."""
     core = runs_dir() / "core"
     core.mkdir(parents=True, exist_ok=True)
-    links = {n: shutil.which(n) for n in ("node", "npm", "npx", "jq")}
+    node = tools_dir() / "node-v26.13.0" / "bin"
+    links = {n: str(node / n) if (node / n).exists() else shutil.which(n) for n in ("node", "npm", "npx")}
+    links["jq"] = shutil.which("jq")
     links["claude"] = str(claude_bin()) if claude_bin().exists() else shutil.which("claude")
     for name, target in links.items():
         if target:
@@ -348,19 +360,21 @@ def arm_env(arm, work, cdp_port, display, home, tabref=None):
 
 
 def stop_arm_daemons(arm, env=None):
-    """Daemons a CDP tool started for a run must not carry state into the next one. Patterns name the bench's
-    own install folders, so the operator's own copies of these tools are never touched."""
-    t = str(tools_dir())
-    pats = {"bh": [f"{t}/bh-venv"], "pw": [f"{t}/playwright-cli-0.1.24"], "ab": [f"{t}/agent-browser-0.42.0"],
-            "tabref": [str((env or {}).get("TABREF_BIN") or tabref_bin())]}
-    if arm == "tabref" and env and Path(env["TABREF_BIN"]).exists():
-        stop_env = dict(env, TABREF_HOME=str(Path(env["HO_ARM_HOME"]) / "tabref-home"), TABREF_CDP=env["HO_CDP_PORT"])
+    """Daemons a CDP tool started for a run must not carry state into the next one. Only processes that carry this
+    run's own HO_ARM_HOME or TABREF_HOME in their environment are stopped (every wrapper exports both), so other
+    runs, other sessions and the operator's own copies of these tools are never touched. tabref gets its own
+    `tabref daemon stop` first."""
+    if not env:
+        return
+    tabref_home = str(Path(env["HO_ARM_HOME"]) / "tabref-home")
+    if arm == "tabref" and Path(env["TABREF_BIN"]).exists():
+        stop_env = dict(env, TABREF_HOME=tabref_home, TABREF_CDP=env["HO_CDP_PORT"])
+        stop_env.pop("ANTHROPIC_API_KEY", None)
         try:
             subprocess.run([env["TABREF_BIN"], "daemon", "stop"], env=stop_env, capture_output=True, timeout=15)
         except subprocess.SubprocessError:
             pass
-    for pat in pats.get(arm, []):
-        kill_matching(pat)
+    kill_marked([f"HO_ARM_HOME={env['HO_ARM_HOME']}".encode(), f"TABREF_HOME={tabref_home}".encode()])
 
 
 def ancestors():
@@ -374,22 +388,114 @@ def ancestors():
     return out
 
 
-def kill_matching(pat):
-    """pkill -f for daemons: only processes whose program or script (argv[0] or argv[1]) lies under `pat`, and never
-    this process or its parents. A shell whose command line merely mentions the path (an operator's, another
-    bench run's) is left alone."""
-    found = subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", "--", pat], capture_output=True, text=True).stdout
-    mine = ancestors()
-    for pid in (int(x) for x in found.split()):
+def marked_pids(markers):
+    """This user's processes whose environment holds one of `markers` (exact KEY=VALUE entries)."""
+    mine, uid, out = ancestors(), os.getuid(), []
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit() or int(d.name) in mine:
+            continue
         try:
-            argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[:2]
+            if d.stat().st_uid != uid:
+                continue
+            entries = set((d / "environ").read_bytes().split(b"\0"))
         except OSError:
             continue
-        if pid not in mine and any(a.decode(errors="replace").startswith(pat) for a in argv):
+        if any(m in entries for m in markers):
+            out.append(int(d.name))
+    return out
+
+
+def kill_marked(markers, grace=3.0):
+    pids = marked_pids(markers)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
             try:
-                os.kill(pid, signal.SIGTERM)
+                os.kill(pid, sig)
             except ProcessLookupError:
                 pass
+        deadline = time.time() + grace
+        while time.time() < deadline and any(Path(f"/proc/{p}").exists() for p in pids):
+            time.sleep(0.1)
+        pids = [p for p in pids if Path(f"/proc/{p}").exists()]
+        if not pids:
+            return
+
+
+def real_dirs(work):
+    """The run's work folder plus the folders its ad-home and arm-home links point to (rglob does not follow them)."""
+    out = [Path(work)]
+    for name in ("ad-home", "arm-home"):
+        link = Path(work) / name
+        if link.is_symlink():
+            out.append(link.resolve())
+    return out
+
+
+def on_vm():
+    try:
+        return subprocess.run(["systemd-detect-virt", "--vm"], capture_output=True, text=True,
+                              timeout=10).stdout.strip() not in ("", "none")
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def scrub(text):
+    """Result text without the operator's paths: the checkout becomes `.`, the home `~`."""
+    text = str(text).replace(str(main_checkout()) + "/", "./").replace(str(BENCH.parent) + "/", "./")
+    return text.replace(str(Path.home()), "~")
+
+
+def host_label():
+    """A generic host name for result rows: BENCH_HOST, else `vm` or `laptop` (no machine names in results)."""
+    return os.environ.get("BENCH_HOST") or ("vm" if on_vm() else "laptop")
+
+
+BENCH_USER = os.environ.get("BENCH_USER", "tabbench")
+
+
+def isolation_problem(display_mode):
+    """Why a model pass must not run here, or None. On a VM anything goes (the VM is the sandbox). Elsewhere the
+    model must run as the dedicated unprivileged user (tools/tabbench.sh sets it up): not root, no admin groups, no
+    readable home of another user, and never on the operator's display or D-Bus."""
+    if on_vm():
+        return None
+    import grp
+    import pwd
+    me = pwd.getpwuid(os.getuid())
+    if me.pw_name != BENCH_USER:
+        return (f"model passes run only as the user {BENCH_USER!r} or on a VM; this is {me.pw_name!r}. "
+                "Set it up once with bench/tools/tabbench.sh setup")
+    groups = {g.gr_name for g in grp.getgrall() if me.pw_name in g.gr_mem} | {grp.getgrgid(me.pw_gid).gr_name}
+    admin = groups & {"sudo", "wheel", "adm", "admin", "lxd", "docker", "libvirt"}
+    if os.getuid() == 0 or admin:
+        return f"{me.pw_name} must be unprivileged; it is in {sorted(admin) or ['root']}"
+    readable = [str(h) for h in Path("/home").iterdir()
+                if h.is_dir() and h != Path(me.pw_dir) and os.access(h, os.R_OK | os.X_OK)]
+    if readable:
+        return (f"{me.pw_name} can read {readable}; make them private (e.g. `chmod 750 {readable[0]}`) "
+                "so the model cannot read the operator's files")
+    if display_mode == "host":
+        return "--display host would hand the model the operator's display and D-Bus; use xvfb (or run on a VM)"
+    return None
+
+
+def run_in_session(argv, cwd, env, timeout, stdin=None):
+    """Run one tool call in its own session; on timeout the whole process group is killed (a daemon the tool forked
+    cannot hold the call open) and the call reports rc 124 at its wall time. Returns rc, stdout, stderr, seconds,
+    timed_out."""
+    t0 = time.time()
+    p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        out, err = p.communicate(stdin, timeout=timeout)
+        return p.returncode, out or "", err or "", time.time() - t0, False
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        out, err = p.communicate()
+        return 124, out or "", (err or "") + f"\nCommand timed out after {timeout} s", time.time() - t0, True
 
 
 def tool_log_lines(path):
@@ -410,23 +516,27 @@ def tool_log_totals(path):
 
 
 class Site:
-    """heldout/web/server.py (frozen) on 127.0.0.1:<port>, started if nothing answers there."""
+    """heldout/web/server.py (frozen), started by this run on 127.0.0.1:<port>; a port in use is an error."""
 
     def __init__(self, base="http://127.0.0.1:8792", log=None):
         self.base, self.log, self.proc = base, log, None
 
     def start(self):
-        try:
-            http_json(f"{self.base}/__state")
-            return self
-        except Exception:
-            pass
+        port = int(self.base.rsplit(":", 1)[1])
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                raise SystemExit(f"port {port} is taken: another site (or another bench) is there; pass --base with "
+                                 "a free port rather than sharing its state")
         if self.log:
             Path(self.log).parent.mkdir(parents=True, exist_ok=True)
         fh = open(self.log, "a") if self.log else subprocess.DEVNULL
         self.proc = subprocess.Popen([sys.executable, "-I", str(HELDOUT / "web" / "server.py"), self.base.rsplit(":", 1)[1]],
                                      stdout=fh, stderr=fh, start_new_session=True)
         for _ in range(50):
+            if self.proc.poll() is not None:
+                raise SystemExit("web/server.py exited at start")
             try:
                 http_json(f"{self.base}/__state")
                 return self

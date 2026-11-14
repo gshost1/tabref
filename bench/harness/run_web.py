@@ -7,10 +7,15 @@ the same allow-list), the 600 s cap, a fresh Chrome profile per run, the stray-s
 per-round task rotation, and the row fields. Arms rotate per round too, like orchestrate.py's blocks.
 Changed: paths (core.py), a clean environment and a bench-only HOME for claude and the tools, the display mode,
 Claude Code 2.1.322 from $BENCH_TOOLS (override: BENCH_CLAUDE), and the key: ANTHROPIC_API_KEY must already be in
-the environment (or --key-file names a file); the runner never looks for one and never writes it anywhere.
+this process's environment; the runner never looks for one and never writes it anywhere.
+Isolation: a model pass runs only on a VM or as the dedicated unprivileged user (core.isolation_problem;
+bench/tools/tabbench.sh sets that user up on a laptop and hands it the key on stdin).
+Spend: Claude Code's total_cost_usd per run; a run that hit the cap has no result event, so it is charged the
+largest per-run cost seen so far in the pass (at least --budget/10). It is a valid failure, not an invalid row.
 
 One command per pass (spend stops at --budget, from Claude Code's total_cost_usd per run):
-  ANTHROPIC_API_KEY=... python3 -I bench/harness/run_web.py --arms tabref --rounds 0-4 --model claude-sonnet-5-5
+  VM:     ANTHROPIC_API_KEY=... python3 -I bench/harness/run_web.py --arms tabref --rounds 0-4 --model claude-sonnet-5-5
+  laptop: <key on stdin> | bench/tools/tabbench.sh run --arms tabref --rounds 0-4   (as the tabbench user)
   [--display xvfb|headless|host] [--tasks hw1,hp3] [--budget 5] [--tabref-checkout <dir>]
 Rows go to $BENCH_RUNS/results-web.jsonl (default bench/runs/); report: python3 -I bench/report.py models.
 """
@@ -60,12 +65,15 @@ def version(cmd, env=None):
 
 
 def bench_dialogs(display, env):
-    """run_web_linux.bench_dialogs: Chrome dialogs on AT-SPI, read by agent-desktop 1.4.0 (needs a display)."""
+    """run_web_linux.bench_dialogs: Chrome dialogs on AT-SPI, read by agent-desktop 1.4.0 (needs a display). It uses
+    its own agent-desktop home, so the check never touches the ad-14 arm's state."""
     if display.mode == "headless" or not core.ad_bin().exists():
         return []
+    check_env = dict(env, **display.env, AGENT_DESKTOP_HOME=core.short_dir("dialog-check-ad-home"))
+    check_env.pop("ANTHROPIC_API_KEY", None)
     try:
         out = subprocess.run([str(core.ad_bin()), "list-surfaces", "--app", "chrome"], capture_output=True, text=True,
-                             timeout=15, env=dict(env, **display.env)).stdout
+                             timeout=15, env=check_env).stdout
         surfaces = json.loads(out).get("data", {}).get("surfaces", [])
     except Exception:
         return []
@@ -73,9 +81,10 @@ def bench_dialogs(display, env):
 
 
 def collect_strays(since, work, dest):
-    """browser bench strays.py, unchanged: fresh files named ':*' in the run's work folder are moved out."""
+    """browser bench strays.py: fresh files named ':*' in the run's work folder are moved out. The folders behind
+    the work folder's ad-home and arm-home links are scanned too."""
     found = []
-    for p in Path(work).rglob(":*"):
+    for p in (x for d in core.real_dirs(work) for x in d.rglob(":*")):
         try:
             if p.is_file() and p.lstat().st_mtime >= since:
                 found.append(p)
@@ -87,6 +96,25 @@ def collect_strays(since, work, dest):
         shutil.move(str(p), str(Path(dest) / p.name))
         moved.append(f"{p.parent.name}/{p.name[-60:]}")
     return moved
+
+
+def assistant_usage(lines):
+    """Usage summed over the assistant messages of a stream (one count per message id): what a run that never
+    reached its result event consumed."""
+    seen, total = set(), {}
+    for line in lines:
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        msg = ev.get("message") if isinstance(ev, dict) and ev.get("type") == "assistant" else None
+        if not isinstance(msg, dict) or msg.get("id") in seen:
+            continue
+        seen.add(msg.get("id"))
+        for k, v in (msg.get("usage") or {}).items():
+            if isinstance(v, (int, float)):
+                total[k] = total.get(k, 0) + v
+    return total
 
 
 def summarize_stream(lines):
@@ -130,7 +158,7 @@ class Runner:
         self.home = self.runs / "home"
         self.home.mkdir(parents=True, exist_ok=True)
         self.tabref = core.tabref_bin(a.tabref_checkout)
-        self.spent = 0.0
+        self.spent, self.max_cost = 0.0, 0.0
         self.versions = {"claude": version([str(core.claude_bin()), "--version"]),
                          "chrome": version([a.chrome, "--version"]),
                          "tabref": version([str(self.tabref), "--version"]) if self.tabref.exists() else None}
@@ -146,7 +174,7 @@ class Runner:
         channel = arms.WEB_ARMS[arm]
         base_row = {"suite": "web", "arm": arm, "arm_version": arms.arm_version(arm, self.versions["tabref"]), "task": tid,
                     "round": rnd, "model": a.model, "channel": channel, "seed": seed, "host": a.host,
-                    "vm": os.uname().nodename, "display": self.display.mode, "claude_version": self.versions["claude"],
+                    "vm": core.host_label(), "display": self.display.mode, "claude_version": self.versions["claude"],
                     "chrome_version": self.versions["chrome"]}
         exp = self.site.reset(seed)
         try:
@@ -233,7 +261,7 @@ class Runner:
         if ab_sock:
             shutil.rmtree(ab_sock, ignore_errors=True)
         shutil.rmtree(profile, ignore_errors=True)
-        u = final.get("usage", {})
+        u = final.get("usage") or assistant_usage((stdout or "").splitlines())
         calls, seconds = core.tool_log_totals(work / "tool.log")
         record = {**base_row, "success": bool(ok), "verify": why, "wall_s": round(wall, 1), "cli_s": seconds,
                   "cli_calls": calls, "num_turns": final.get("num_turns"),
@@ -245,11 +273,16 @@ class Runner:
                   "cost_usd_list": final.get("total_cost_usd"), "duration_api_ms": final.get("duration_api_ms"),
                   "timed_out": timed_out, "chrome_alive_at_end": chrome_alive, "answer": answer[:500], "strays": strays,
                   "valid": True, "disk_free_gb": round(shutil.disk_usage(str(self.runs)).free / 1024 ** 3, 2)}
-        if not final:
+        if not final and not timed_out:
             record.update({"valid": False, "invalid_reason": f"no result event from claude: {(stderr or '')[-300:]}"})
         if record["disk_free_gb"] < 2 or "No space left on device" in (stderr or ""):
             record.update({"valid": False, "invalid_reason": "low disk or ENOSPC"})
-        self.spent += record["cost_usd_list"] or 0.0
+        cost = record["cost_usd_list"]
+        if cost is None:
+            cost = max(self.max_cost, self.a.budget / 10)
+            record["cost_charged_estimate"] = round(cost, 4)
+        self.max_cost = max(self.max_cost, record["cost_usd_list"] or 0.0)
+        self.spent += cost
         self.write_row(record)
         print(f"{run_id} {arm:6} ok={ok!s:5} wall={wall:6.1f}s cli={seconds:5.1f}s turns={final.get('num_turns')} "
               f"in={record['input_total']} ${record['cost_usd_list']} | {why[:160]}", flush=True)
@@ -263,19 +296,22 @@ def main():
     ap.add_argument("--model", default="claude-sonnet-5-5")
     ap.add_argument("--base", default="http://127.0.0.1:8792")
     ap.add_argument("--timeout", type=int, default=TIMEOUT_S)
-    ap.add_argument("--host", default="laptop")
+    ap.add_argument("--host", default=None, help="host label for rows (default: vm or laptop)")
     ap.add_argument("--display", default="xvfb", choices=["xvfb", "headless", "host"])
     ap.add_argument("--chrome", default="/usr/bin/google-chrome")
     ap.add_argument("--tabref-checkout", default=None)
     ap.add_argument("--budget", type=float, default=5.0, help="stop starting runs once this many USD are spent")
-    ap.add_argument("--key-file", default=None, help="read the API key from this file (else ANTHROPIC_API_KEY)")
     ap.add_argument("--out", default=str(core.runs_dir()))
     a = ap.parse_args()
+    a.host = a.host or core.host_label()
     core.check_frozen()
     core.exit_on_sigterm()
-    key = Path(a.key_file).read_text().strip() if a.key_file else os.environ.get("ANTHROPIC_API_KEY", "")
+    why = core.isolation_problem(a.display)
+    if why:
+        raise SystemExit(f"refusing a model pass: {why}")
+    key = os.environ.pop("ANTHROPIC_API_KEY", "")
     if not key:
-        raise SystemExit("no API key: set ANTHROPIC_API_KEY (or --key-file); model passes cannot run without one")
+        raise SystemExit("no API key: ANTHROPIC_API_KEY must be in this process's environment")
     if not core.claude_bin().exists():
         raise SystemExit(f"claude not found at {core.claude_bin()}: run bench/tools/install.sh or set BENCH_CLAUDE")
     want = a.arms.split(",")

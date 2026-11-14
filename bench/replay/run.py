@@ -100,6 +100,7 @@ class Replay:
         self.rows_path.parent.mkdir(parents=True, exist_ok=True)
 
     def start_run(self, arm, tid, rnd):
+        self.timeout_s = 0.0
         seed = th.web_seed(tid, rnd)
         exp = self.site.reset(seed)
         exp.update(th.web_expectations(tid))
@@ -126,17 +127,15 @@ class Replay:
         shutil.rmtree(work / "profile", ignore_errors=True)
 
     def bash(self, cmd, work, env):
-        t0 = time.time()
-        try:
-            p = subprocess.run(["bash", "-c", cmd], cwd=work, env=env, capture_output=True, text=True, timeout=STEP_TIMEOUT,
-                               stdin=subprocess.DEVNULL)
-            rc, out = p.returncode, (p.stdout or "") + (p.stderr or "")
-        except subprocess.TimeoutExpired as e:
-            rc, out = 124, f"{e.stdout or ''}{e.stderr or ''}\nCommand timed out after {STEP_TIMEOUT} s"
-            out = out if isinstance(out, str) else out.decode(errors="replace")
+        """One Bash call as Claude Code would run it, in its own session; a timeout kills its process group and
+        is counted as rc 124 at its wall time (the wrapper never got to log it)."""
+        rc, out, err, secs, timed_out = core.run_in_session(["bash", "-c", cmd], work, env, STEP_TIMEOUT)
+        out = out + err
         if rc != 0:
             out = f"Exit code {rc}\n{out}"
-        return rc, out[:MAX_CHARS], time.time() - t0
+        if timed_out:
+            self.timeout_s += secs
+        return rc, out[:MAX_CHARS], secs
 
     def verify(self, tid, ctx, answer):
         try:
@@ -146,7 +145,7 @@ class Replay:
 
     def write(self, row):
         with open(self.rows_path, "a") as fh:
-            fh.write(json.dumps(row) + "\n")
+            fh.write(core.scrub(json.dumps(row)) + "\n")
         print(f"{row['arm']:6} {row['task']} r{row['round']} {row['mode']:8} ok={row['success']!s:5} "
               f"tool={row.get('tool_s')}s calls={row.get('tool_calls')} out_tok={row.get('out_tokens')} "
               f"(rec {row.get('rec_tool_s')}s, {row.get('rec_out_tokens')} tok, ok={row.get('rec_success')}) "
@@ -155,10 +154,10 @@ class Replay:
     def recorded(self, rec):
         arm, tid, rnd = rec["arm"], rec["task"], rec["round"]
         row = {"arm": arm, "task": tid, "round": rnd, "mode": "recorded", "seed": rec["seed"], "display": self.display.mode,
-               "host": os.uname().nodename, "load1": os.getloadavg()[0],
+               "host": core.host_label(), "load1": os.getloadavg()[0],
                "rec_success": rec["rec_success"], "rec_tool_s": rec["rec_cli_s"], "rec_tool_calls": rec["rec_cli_calls"],
                "rec_wall_s": rec["rec_wall_s"], "rec_turns": rec["rec_turns"], "rec_tokens": rec["rec_tokens"],
-               "rec_out_tokens": sum(s.get("rec_chars", 0) for s in rec["steps"]) // 4}
+               "rec_out_tokens": sum(s.get("rec_chars", 0) for s in rec["steps"] if not s.get("denied")) // 4}
         try:
             seed, exp, work, port, env, chrome, ctx = self.start_run(arm, tid, rnd)
         except Exception as e:
@@ -199,6 +198,7 @@ class Replay:
             ok, why = self.verify(tid, ctx, rec["answer"])
         finally:
             calls, secs = core.tool_log_totals(work / "tool.log")
+            secs = round(secs + self.timeout_s, 3)
             self.finish(arm, work, env, chrome)
         self.write({**row, "success": bool(ok), "verify": why, "valid": True, "tool_s": secs, "tool_calls": calls,
                     "bash_calls": len(steps), "out_tokens": sum(x["chars"] for x in steps) // 4,
@@ -207,7 +207,7 @@ class Replay:
     def scripted(self, tid, rnd):
         arm = "tabref"
         row = {"arm": arm, "task": tid, "round": rnd, "mode": "scripted", "seed": th.web_seed(tid, rnd),
-               "display": self.display.mode, "host": os.uname().nodename, "load1": os.getloadavg()[0]}
+               "display": self.display.mode, "host": core.host_label(), "load1": os.getloadavg()[0]}
         path = HERE / "tabref" / f"{tid}.py"
         spec = importlib.util.spec_from_file_location(f"tabref_{tid}", path)
         mod = importlib.util.module_from_spec(spec)
@@ -227,6 +227,7 @@ class Replay:
             ok, why = self.verify(tid, ctx, answer)
         finally:
             calls, secs = core.tool_log_totals(work / "tool.log")
+            secs = round(secs + self.timeout_s, 3)
             self.finish(arm, work, env, chrome)
         self.write({**row, "success": bool(ok) and not err, "verify": why, "valid": True, "error": err, "answer": answer[:300],
                     "tool_s": secs, "tool_calls": calls, "bash_calls": len(t.steps),
@@ -298,7 +299,8 @@ def main():
     ap.add_argument("--arms", default="ad-14,bh,pw,ab,tabref")
     ap.add_argument("--tasks", default=",".join(ORDER))
     ap.add_argument("--rounds", default="0-4")
-    ap.add_argument("--display", default="headless", choices=["headless", "xvfb", "host"])
+    ap.add_argument("--display", default="xvfb", choices=["headless", "xvfb", "host"],
+                    help="xvfb (default) for every arm alike; headless skips ad-14, which needs a display")
     ap.add_argument("--chrome", default="/usr/bin/google-chrome")
     ap.add_argument("--tabref-checkout", default=None)
     ap.add_argument("--settle", type=float, default=5.0,
@@ -321,7 +323,10 @@ def main():
                 if why:
                     print(f"SKIP {why}", flush=True)
                     continue
-                mode = "xvfb" if arm == "ad-14" and a.display == "headless" else a.display
+                mode = a.display
+                if arm == "ad-14" and mode == "headless":
+                    print("SKIP ad-14: needs a display (use --display xvfb)", flush=True)
+                    continue
                 if mode not in displays:
                     displays[mode] = core.Display(mode, runs / f"display-{mode}").start()
                 r = Replay(a, displays[mode], site, tabref)
