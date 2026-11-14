@@ -1,19 +1,30 @@
+pub(crate) mod act_target;
+pub(crate) mod acted;
 pub(crate) mod action_report;
+pub(crate) mod batch_step;
 pub(crate) mod check;
 pub(crate) mod click;
 pub(crate) mod close;
+pub(crate) mod do_batch;
+pub(crate) mod do_expand;
+pub(crate) mod do_read_steps;
+pub(crate) mod do_step;
 pub(crate) mod fill;
 pub(crate) mod find;
 pub(crate) mod hover;
 pub(crate) mod js;
 pub(crate) mod open;
+pub(crate) mod page_url;
 pub(crate) mod press;
 pub(crate) mod read;
 pub(crate) mod scroll;
 pub(crate) mod select;
 pub(crate) mod skill;
 pub(crate) mod snap;
+pub(crate) mod step_done;
+pub(crate) mod step_words;
 pub(crate) mod tab;
+pub(crate) mod target_spec;
 pub(crate) mod tabs;
 pub(crate) mod upload;
 pub(crate) mod wait;
@@ -27,6 +38,9 @@ use crate::cli::command::Command;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::session_options::SessionOptions;
+
+const TIMEOUT_MS: u64 = 10_000;
+const DO_TIMEOUT_MS: u64 = 120_000;
 
 /// Runs the parsed command. Every command but `skill` runs against one
 /// [`Session`], built here and nowhere else.
@@ -49,14 +63,17 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
     let options = SessionOptions {
         cdp: cli.cdp.clone(),
         tab: cli.tab.clone(),
-        timeout_ms: cli.timeout,
+        timeout_ms: cli.timeout.unwrap_or(match cli.command {
+            Command::Do { .. } => DO_TIMEOUT_MS,
+            _ => TIMEOUT_MS,
+        }),
         launch,
     };
     let mut session = Session::open(&options)?;
-    dispatch(&mut session, &cli.command)
+    dispatch(&mut session, &cli.command, cli.json)
 }
 
-fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
+fn dispatch(session: &mut Session, command: &Command, json: bool) -> Result<Outcome, AppError> {
     match command {
         Command::Open { url, .. } => open::run(session, url),
         Command::Snap { all, root } => snap::run(session, *all, root.as_deref()),
@@ -90,6 +107,17 @@ fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppErro
             )?,
         ),
         Command::Js { expression } => js::run(session, expression),
+        Command::Do {
+            steps,
+            step_timeout,
+        } => do_batch::run(
+            session,
+            steps.as_deref(),
+            do_batch::BatchMode {
+                step_timeout_ms: *step_timeout,
+                json,
+            },
+        ),
         Command::Tabs => tabs::run(session),
         Command::Tab { tab } => tab::run(session, tab),
         Command::Close { tab } => close::run(session, tab.as_deref()),

@@ -25,40 +25,40 @@ pub(crate) enum Command {
     },
     /// Click an element
     Click {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
     },
     /// Replace a field's text and read it back
     Fill {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
         text: String,
     },
     /// Choose an option of a <select> by its label, value or text
     Select {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
         option: String,
     },
     /// Tick a checkbox, radio button or switch
     Check {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
     },
     /// Clear a checkbox or switch
     Uncheck {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
     },
     /// Press a key (Enter, Tab, Escape, ArrowDown, Control+a, ...), in REF when given
     Press {
         key: String,
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: Option<String>,
     },
     /// Move the pointer over an element
     Hover {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
     },
     /// Scroll the page (down, up, left, right) or bring REF into view
@@ -67,7 +67,7 @@ pub(crate) enum Command {
         #[arg(default_value = "down", value_name = "DIRECTION|REF")]
         direction: String,
         /// Scroll the container that holds this ref instead of the page
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: Option<String>,
         /// Distance in CSS pixels (default: most of a screen)
         #[arg(long)]
@@ -75,7 +75,7 @@ pub(crate) enum Command {
     },
     /// Set the files of an <input type=file>
     Upload {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
         #[arg(required = true)]
         files: Vec<PathBuf>,
@@ -89,7 +89,7 @@ pub(crate) enum Command {
     },
     /// Print the page's text, or one element's
     Read {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: Option<String>,
     },
     /// Wait until a condition holds (bounded by --timeout)
@@ -106,6 +106,14 @@ pub(crate) enum Command {
         /// Until the network has been quiet for 500 ms
         #[arg(long)]
         idle: bool,
+    },
+    /// Run several steps in one call, one per line, from STEPS or stdin
+    Do {
+        /// The steps; read from stdin when left out or `-`
+        steps: Option<String>,
+        /// Time limit of each step, in milliseconds
+        #[arg(long, default_value_t = 10_000, value_name = "MS")]
+        step_timeout: u64,
     },
     /// Evaluate a JavaScript expression in the page and print its value
     Js { expression: String },
@@ -136,6 +144,7 @@ impl Command {
             Self::Find { .. } => "find",
             Self::Read { .. } => "read",
             Self::Wait { .. } => "wait",
+            Self::Do { .. } => "do",
             Self::Js { .. } => "js",
             Self::Tabs => "tabs",
             Self::Tab { .. } => "tab",
