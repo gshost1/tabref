@@ -24,3 +24,14 @@ fn an_existing_local_file_becomes_a_file_url() {
     assert!(url.starts_with("file:///"), "{url}");
     assert!(url.ends_with(".html"));
 }
+
+#[test]
+fn a_loopback_host_defaults_to_plain_http() {
+    assert_eq!(normalize_url("localhost:8000/a"), "http://localhost:8000/a");
+    assert_eq!(normalize_url("127.0.0.1"), "http://127.0.0.1");
+    assert_eq!(normalize_url("[::1]:3000"), "http://[::1]:3000");
+    assert_eq!(
+        normalize_url("localhost.example.com"),
+        "https://localhost.example.com"
+    );
+}

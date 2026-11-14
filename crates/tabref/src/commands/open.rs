@@ -39,7 +39,8 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
     Ok(report)
 }
 
-/// `example.com` becomes `https://example.com`, an existing local file a
+/// `example.com` becomes `https://example.com`, a loopback host such as
+/// `localhost:8000` gets `http://`, an existing local file becomes a
 /// `file://` URL, and anything with a scheme stays as it is.
 pub(crate) fn normalize_url(url: &str) -> String {
     let url = url.trim();
@@ -53,6 +54,17 @@ pub(crate) fn normalize_url(url: &str) -> String {
         let text = absolute.to_string_lossy().replace('\\', "/");
         let separator = if text.starts_with('/') { "" } else { "/" };
         return format!("file://{separator}{text}");
+    }
+    let host = url.split(['/', '?', '#']).next().unwrap_or_default();
+    let bare_host = host.rsplit_once(':').map_or(host, |(name, port)| {
+        if port.chars().all(|c| c.is_ascii_digit()) {
+            name
+        } else {
+            host
+        }
+    });
+    if matches!(bare_host, "localhost" | "127.0.0.1" | "[::1]") {
+        return format!("http://{url}");
     }
     format!("https://{url}")
 }
