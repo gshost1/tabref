@@ -4,6 +4,7 @@ use tabref_page::{PageInfo, page_text, read_element};
 
 use crate::output::outcome::Outcome;
 use crate::session::Session;
+use crate::view::node_line::quote_text;
 
 const PAGE_TEXT_LIMIT: usize = 20_000;
 
@@ -41,7 +42,7 @@ pub(crate) fn run(session: &mut Session, target: Option<&str>) -> Result<Outcome
     let page = session.page()?;
     let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
     let (text, cut) = page_text(session.connection(), &page, PAGE_TEXT_LIMIT, deadline)?;
-    let mut out = format!("page \"{}\" {}\n{text}", info.title, info.url);
+    let mut out = format!("page {} {}\n{text}", quote_text(&info.title), info.url);
     if cut {
         out.push_str(&format!(
             "\n... cut at {PAGE_TEXT_LIMIT} characters; use 'tabref find' for the rest"
