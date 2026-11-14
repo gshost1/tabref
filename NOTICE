@@ -6,3 +6,50 @@ Apache License, Version 2.0, copyright the agent-desktop authors. The derived
 code (the Chrome DevTools Protocol client, accessibility snapshot reader,
 element actions and the shared ref, snapshot, envelope, error and wait types)
 was extracted from the agent-desktop fork at commit 95e0aec8e and modified.
+
+PROVENANCE
+
+Paths on the left are in this repository; paths on the right are in
+agent-desktop at 95e0aec8e. "Modified" files were trimmed, renamed
+(AdapterError became AppError) or extended; tests beside each file
+(*_tests.rs) were ported with it where the fork had them.
+
+crates/tabref-cdp/src/transport/*        crates/web/src/transport/* (modified)
+crates/tabref-cdp/src/cdp/*              crates/web/src/cdp/* (connection.rs
+                                         adds JavaScript dialog answering)
+crates/tabref-cdp/src/discovery/active_port.rs, browser_endpoint.rs,
+  connect.rs, connect_error.rs, endpoint_source.rs, http_get.rs,
+  json_version.rs, user_data_dir.rs      crates/web/src/discovery/* (modified)
+crates/tabref-cdp/src/discovery/websocket_url.rs
+                                         crates/core/src/system/devtools_websocket_url.rs
+crates/tabref-cdp/src/discovery/http_response.rs
+                                         crates/core/src/system/cdp_endpoint.rs (part)
+crates/tabref-cdp/src/target/navigate.rs, page_session.rs, page_target.rs,
+  targets.rs                             crates/web/src/target/* (modified)
+crates/tabref-cdp/src/target/frame_tree.rs, frame_entry.rs
+                                         crates/web/src/tree/frame_tree.rs, frame_entry.rs
+crates/tabref-page/src/tree/*            crates/web/src/tree/* (modified; node_read.rs
+                                         adds read_node_identity)
+crates/tabref-page/src/act/*             crates/web/src/act/* (modified; key_press.rs
+                                         and key_stroke.rs add characters and
+                                         modifiers; hover.rs, upload.rs are new)
+crates/tabref-page/src/settle/action_settle.rs
+                                         crates/web/src/channel/download/action_settle.rs
+                                         (navigation and dialogs only)
+crates/tabref-core/src/error/delivery_semantics.rs
+                                         crates/core/src/actions/delivery_semantics.rs
+crates/tabref-core/src/error/*, response/*
+                                         crates/core/src/response/* (merged and trimmed)
+crates/tabref-core/src/wait/deadline.rs  crates/core/src/wait/deadline.rs (trimmed)
+crates/tabref-core/src/tree/*            crates/core/src/tree/{node,node_identity,
+                                         node_presentation,node_descriptor,name_source,
+                                         point,roles,state}.rs and
+                                         crates/core/src/actions/capability.rs (trimmed)
+crates/tabref-core/src/refs/*            crates/core/src/refs/{mod,ref_token,ref_alloc,
+                                         refs_store}.rs (rewritten smaller)
+crates/tabref-core/src/storage/state_root.rs
+                                         crates/core/src/storage/state_root.rs (trimmed)
+crates/tabref/src/view/node_line.rs      crates/core/src/snapshot/ref_lines.rs (part)
+scripts/check-rust-file-size.sh, check_rust_comments.py,
+  check_rust_comments_test.py            scripts/* of the same names
+rust-toolchain.toml, clippy.toml         the files of the same names
