@@ -1,11 +1,13 @@
 tabref
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-This product includes code derived from agent-desktop, licensed under the
-Apache License, Version 2.0, copyright the agent-desktop authors. The derived
-code (the Chrome DevTools Protocol client, accessibility snapshot reader,
-element actions and the shared ref, snapshot, envelope, error and wait types)
-was extracted from the agent-desktop fork at commit 95e0aec8e and modified.
+This product includes code derived from agent-desktop
+(https://github.com/vercel-labs/agent-desktop), licensed under the Apache
+License, Version 2.0, copyright the agent-desktop authors. The derived code
+(the Chrome DevTools Protocol client, accessibility snapshot reader, element
+actions and the shared ref, snapshot, envelope, error and wait types) was
+extracted from the fork gshost1/agent-desktop
+(https://github.com/gshost1/agent-desktop) at commit 95e0aec8e and modified.
 
 PROVENANCE
 
