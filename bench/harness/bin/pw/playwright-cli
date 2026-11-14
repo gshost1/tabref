@@ -1,0 +1,6 @@
+#!/bin/bash
+# Arm pw: @playwright/cli 0.1.24 (npm --ignore-scripts). Same as the Linux run's /opt/bench/ho-bin/pw/playwright-cli
+# (03-ho.sh): update check and browser download off; only the install folder differs.
+H=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+export NO_UPDATE_NOTIFIER=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+exec "${HO_WRAP:-$H/heldout/linux/wrap.sh}" "${BENCH_TOOLS:?}/playwright-cli-0.1.24/node_modules/.bin/playwright-cli" "$@"
