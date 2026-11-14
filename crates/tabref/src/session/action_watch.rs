@@ -34,9 +34,10 @@ impl Session {
     pub(crate) fn finish_action(&mut self) -> Result<ActionEffects, AppError> {
         let deadline = self.deadline();
         let settled = settle_action(self.connection(), deadline)?;
+        let watched = self.tab_id()?;
         let new_tab = self
             .connection()
-            .drain_events(is_new_page)
+            .drain_events(|event| is_page_opened_by(event, &watched))
             .last()
             .and_then(|event| event.params.pointer("/targetInfo/targetId"))
             .and_then(Value::as_str)
@@ -59,11 +60,20 @@ fn is_target_event(event: &CdpEvent) -> bool {
     event.session_id.is_none() && event.method.starts_with("Target.target")
 }
 
-fn is_new_page(event: &CdpEvent) -> bool {
-    event.method == "Target.targetCreated"
-        && event
+/// A page target the watched tab opened, as `window.open` or a
+/// `target=_blank` link does: Chrome names its opener.
+fn is_page_opened_by(event: &CdpEvent, opener: &str) -> bool {
+    let info = |key: &str| {
+        event
             .params
-            .pointer("/targetInfo/type")
+            .pointer(&format!("/targetInfo/{key}"))
             .and_then(Value::as_str)
-            == Some("page")
+    };
+    event.method == "Target.targetCreated"
+        && info("type") == Some("page")
+        && info("openerId") == Some(opener)
 }
+
+#[cfg(test)]
+#[path = "action_watch_tests.rs"]
+mod tests;
