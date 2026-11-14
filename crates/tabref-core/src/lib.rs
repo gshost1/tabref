@@ -25,7 +25,9 @@ pub use refs::snapshot_id::{new_snapshot_id, validate_snapshot_id};
 pub use response::envelope::{ENVELOPE_VERSION, Response};
 pub use response::error_payload::ErrorPayload;
 pub use response::recovery_hint::RecoveryHint;
-pub use storage::private_file::{read_bounded, write_atomic};
+pub use storage::private_file::{
+    create_new_private_dir, create_private_dir, read_bounded, write_atomic,
+};
 pub use storage::state_root::{STATE_ROOT_ENV, resolve_state_root};
 pub use tree::capability;
 pub use tree::name_source::NameSource;

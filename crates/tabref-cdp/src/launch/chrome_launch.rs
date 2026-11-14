@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, new_snapshot_id};
+use tabref_core::{
+    AppError, Deadline, DeliverySemantics, ErrorCode, create_new_private_dir, create_private_dir,
+    new_snapshot_id,
+};
 
 use super::chrome_binary::find_chrome;
 use super::launch_options::LaunchOptions;
@@ -73,8 +76,9 @@ fn profile_dir(options: &LaunchOptions) -> Result<PathBuf, AppError> {
         .profile_root
         .clone()
         .unwrap_or_else(std::env::temp_dir);
+    create_private_dir(&root)?;
     let dir = root.join(format!("tabref-profile-{}", new_snapshot_id()));
-    std::fs::create_dir_all(&dir)?;
+    create_new_private_dir(&dir)?;
     Ok(dir)
 }
 

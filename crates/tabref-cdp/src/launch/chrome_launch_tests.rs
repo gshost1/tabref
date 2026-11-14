@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tabref_core::{Deadline, ErrorCode};
 
-use super::{browser_args, launch_chrome};
+use super::{browser_args, launch_chrome, profile_dir};
 use crate::LaunchOptions;
 
 #[test]
@@ -36,4 +36,18 @@ fn a_binary_that_does_not_exist_fails_before_waiting() {
     let error = launch_chrome(&options, Deadline::after(2_000).unwrap()).unwrap_err();
     assert_eq!(error.code, ErrorCode::ActionFailed);
     assert_eq!(error.kind(), Some("chrome_spawn_failed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_throwaway_profile_is_private_to_the_user() {
+    use std::os::unix::fs::PermissionsExt;
+    let options = LaunchOptions {
+        profile_root: Some(std::env::temp_dir()),
+        ..LaunchOptions::default()
+    };
+    let dir = profile_dir(&options).unwrap();
+    let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+    std::fs::remove_dir(&dir).unwrap();
+    assert_eq!(mode, 0o700);
 }
