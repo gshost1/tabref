@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tabref_cdp::{CdpEvent, wait_for_load};
-use tabref_core::AppError;
-use tabref_page::{settle_action, watch_navigation};
+use tabref_core::{AppError, Deadline};
+use tabref_page::WatchedAction;
 
 use super::Session;
 use super::action_effects::ActionEffects;
@@ -12,12 +12,15 @@ const NEW_TAB_LOAD: Duration = Duration::from_millis(3_000);
 
 impl Session {
     /// Starts watching `tab_id` for what the next action sets off: its
-    /// navigations and dialogs, and tabs it opens.
-    pub(crate) fn watch_action(&mut self, tab_id: &str) -> Result<(), AppError> {
+    /// navigations, requests, dialogs and DOM changes, and tabs it opens.
+    pub(crate) fn watch_action(
+        &mut self,
+        tab_id: &str,
+        deadline: Deadline,
+    ) -> Result<WatchedAction, AppError> {
         let tab = self.attach(tab_id)?;
-        let deadline = self.deadline();
+        let watched = WatchedAction::start(self.connection(), &tab, deadline)?;
         let connection = self.connection();
-        watch_navigation(connection, &tab, deadline)?;
         connection.call(
             "Target.setDiscoverTargets",
             json!({ "discover": true }),
@@ -25,19 +28,22 @@ impl Session {
             deadline,
         )?;
         connection.discard_events(is_target_event);
-        Ok(())
+        Ok(watched)
     }
 
     /// Waits for the watched action to settle and reports its effects. A
     /// tab the action opened becomes the current tab once it has loaded, or
     /// three seconds have passed.
-    pub(crate) fn finish_action(&mut self) -> Result<ActionEffects, AppError> {
-        let deadline = self.deadline();
-        let settled = settle_action(self.connection(), deadline)?;
-        let watched = self.tab_id()?;
+    pub(crate) fn finish_action(
+        &mut self,
+        watched: &WatchedAction,
+        deadline: Deadline,
+    ) -> Result<ActionEffects, AppError> {
+        let (settled, page) = watched.finish(self.connection(), deadline)?;
+        let opener = watched.session.target_id.clone();
         let new_tab = self
             .connection()
-            .drain_events(|event| is_page_opened_by(event, &watched))
+            .drain_events(|event| is_page_opened_by(event, &opener))
             .last()
             .and_then(|event| event.params.pointer("/targetInfo/targetId"))
             .and_then(Value::as_str)
@@ -49,9 +55,10 @@ impl Session {
             let _ = wait_for_load(self.connection(), &page, deadline.capped(NEW_TAB_LOAD));
         }
         Ok(ActionEffects {
-            navigated: settled.navigated,
-            dialogs: settled.dialogs,
+            settled,
             new_tab,
+            url_before: watched.mark.url.clone(),
+            page,
         })
     }
 }
