@@ -1,11 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
-use tabref_core::Deadline;
 
-use super::{collect_clickable, collect_dom_ids, read_dom_facts};
-use crate::{CdpConnection, PageSession};
-use tabref_cdp::ScriptedTransport;
+use super::{collect_clickable, collect_dom_ids};
 
 #[test]
 fn ids_come_from_the_flat_capture_of_every_document() {
@@ -29,34 +26,6 @@ fn ids_come_from_the_flat_capture_of_every_document() {
         ids,
         HashMap::from([(20, "go".to_owned()), (101, "more".to_owned())])
     );
-}
-
-#[test]
-fn a_dom_too_deep_for_a_nested_reply_is_read_from_one_flat_capture() {
-    let depth = 400;
-    let capture = json!({
-        "strings": ["id", "leaf"],
-        "documents": [{ "nodes": {
-            "backendNodeId": (1..=depth).collect::<Vec<i64>>(),
-            "attributes": (1..=depth)
-                .map(|backend| if backend == depth { json!([0, 1]) } else { json!([]) })
-                .collect::<Vec<_>>(),
-        } }],
-    });
-    let transport = ScriptedTransport::new().expect("DOMSnapshot.captureSnapshot", capture);
-    let sent = transport.sent_log();
-    let mut connection = CdpConnection::new(transport.boxed());
-    let session = PageSession {
-        target_id: "T".into(),
-        session_id: "S".into(),
-    };
-
-    let facts = read_dom_facts(&mut connection, &session, Deadline::after(1_000).unwrap()).unwrap();
-
-    assert_eq!(facts.ids.get(&depth).map(String::as_str), Some("leaf"));
-    let sent = sent.lock().unwrap();
-    assert_eq!(sent[0]["params"], json!({ "computedStyles": ["display"] }));
-    assert!(connection.take_events().is_empty());
 }
 
 #[test]

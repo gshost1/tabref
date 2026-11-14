@@ -44,6 +44,7 @@ pub(crate) fn subtree_report(
             "title": captured.info.title,
             "ref_count": captured.ref_count,
             "unreadable_frames": captured.unreadable_frames,
+            "skipped_frames": captured.skipped_frames,
             "lines": lines,
         }),
     )

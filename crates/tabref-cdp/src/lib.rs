@@ -25,7 +25,7 @@ pub use launch::chrome_launch::launch_chrome;
 pub use launch::launch_options::LaunchOptions;
 pub use launch::launched_browser::LaunchedBrowser;
 pub use target::frame_entry::FrameEntry;
-pub use target::frame_tree::{current_loader, list_frames};
+pub use target::frame_tree::{current_loader, list_frames, parse_frame_tree};
 pub use target::navigate::{navigate, wait_for_load};
 pub use target::page_session::PageSession;
 pub use target::page_target::PageTarget;

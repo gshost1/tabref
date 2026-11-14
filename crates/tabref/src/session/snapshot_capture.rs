@@ -24,6 +24,7 @@ impl Session {
             info,
             ref_count,
             unreadable_frames: snapshot.unreadable_frames.len(),
+            skipped_frames: snapshot.skipped_frames,
         })
     }
 }
