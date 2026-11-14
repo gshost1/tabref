@@ -6,7 +6,8 @@ use command::Command;
 
 /// Read and drive Chrome from the command line over the DevTools protocol.
 /// Every element in a snapshot gets a ref (@s8f3k2p9:e4) that the action
-/// commands take.
+/// commands take; they also take a name the page shows ("Save"), resolved
+/// when the action runs.
 #[derive(Debug, Parser)]
 #[command(name = "tabref", version, max_term_width = 100)]
 pub(crate) struct Cli {
@@ -19,9 +20,10 @@ pub(crate) struct Cli {
     /// Print the JSON envelope {version, ok, command, data|error}
     #[arg(long, global = true)]
     pub(crate) json: bool,
-    /// Deadline for the whole command, in milliseconds
-    #[arg(long, global = true, default_value_t = 10_000, value_name = "MS")]
-    pub(crate) timeout: u64,
+    /// Deadline for the whole command, in milliseconds (default 10000, and
+    /// 120000 for `do`)
+    #[arg(long, global = true, value_name = "MS")]
+    pub(crate) timeout: Option<u64>,
     #[command(subcommand)]
     pub(crate) command: Command,
 }
