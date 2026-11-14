@@ -1,7 +1,7 @@
 use serde_json::Value;
 use tabref_core::{AppError, Deadline};
 
-use super::evaluate::evaluate;
+use super::evaluate::evaluate_quietly;
 use crate::{CdpConnection, PageSession};
 
 /// The rendered text of the page's main document, `document.body.innerText`,
@@ -13,7 +13,7 @@ pub fn page_text(
     limit: usize,
     deadline: Deadline,
 ) -> Result<(String, bool), AppError> {
-    let value = evaluate(
+    let value = evaluate_quietly(
         connection,
         session,
         "document.body ? document.body.innerText : document.documentElement.innerText",

@@ -7,10 +7,33 @@ use crate::{CdpConnection, PageSession};
 /// JSON. A promise is awaited. A value JSON cannot carry, such as a DOM node
 /// or a function, comes back as its description string, and `undefined` as
 /// `null`. A thrown exception is `ACTION_FAILED` with the exception text.
+/// The expression runs as a user gesture, so it may open a window or start
+/// media as the agent's own script.
 pub fn evaluate(
     connection: &mut CdpConnection,
     session: &PageSession,
     expression: &str,
+    deadline: Deadline,
+) -> Result<Value, AppError> {
+    run(connection, session, expression, true, deadline)
+}
+
+/// [`evaluate`] for tabref's own reads and scrolls, which must not count as
+/// a user gesture a page could act on.
+pub(crate) fn evaluate_quietly(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    expression: &str,
+    deadline: Deadline,
+) -> Result<Value, AppError> {
+    run(connection, session, expression, false, deadline)
+}
+
+fn run(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    expression: &str,
+    user_gesture: bool,
     deadline: Deadline,
 ) -> Result<Value, AppError> {
     let mut reply = connection.call(
@@ -19,7 +42,7 @@ pub fn evaluate(
             "expression": expression,
             "returnByValue": true,
             "awaitPromise": true,
-            "userGesture": true,
+            "userGesture": user_gesture,
             "replMode": true,
         }),
         Some(&session.session_id),

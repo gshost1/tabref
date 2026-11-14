@@ -1,6 +1,6 @@
 use tabref_core::{AppError, Deadline};
 
-use super::evaluate::evaluate;
+use super::evaluate::evaluate_quietly;
 use crate::{CdpConnection, PageSession};
 
 const SCROLL_PAGE: &str = r"((dx, dy) => {
@@ -37,5 +37,5 @@ pub fn scroll_page(
     deadline: Deadline,
 ) -> Result<bool, AppError> {
     let expression = format!("{SCROLL_PAGE}({}, {})", delta.0, delta.1);
-    Ok(evaluate(connection, session, &expression, deadline)?.as_bool() == Some(true))
+    Ok(evaluate_quietly(connection, session, &expression, deadline)?.as_bool() == Some(true))
 }
