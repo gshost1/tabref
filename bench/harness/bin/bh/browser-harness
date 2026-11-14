@@ -1,0 +1,8 @@
+#!/bin/bash
+# Arm bh: browser-harness 0.1.13 (binary wheels, bench/tools/install.sh). Same as the Linux run's
+# /opt/bench/ho-bin/bh/browser-harness (03-ho.sh); only the install and runs folders differ.
+H=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+export BH_TELEMETRY=0 BH_UPDATE_CHECK=0 ANONYMIZED_TELEMETRY=false
+export BU_CDP_URL="http://127.0.0.1:${HO_CDP_PORT:-$(cat "${HO_RUNS:-$H/runs}/web-current-port")}"
+export BH_RUNTIME_DIR="${HO_ARM_HOME:-$HOME/.ho-bh}/bh-runtime"
+exec "${HO_WRAP:-$H/heldout/linux/wrap.sh}" "${BENCH_TOOLS:?}/bh-venv/bin/browser-harness" "$@"
