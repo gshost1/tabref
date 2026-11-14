@@ -1,0 +1,23 @@
+[package]
+name         = "tabref"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+publish      = false
+description  = "A Chrome DevTools CLI that AI agents call to read and drive web pages"
+
+[[bin]]
+name = "tabref"
+path = "src/main.rs"
+
+[dependencies]
+tabref-core.workspace = true
+tabref-cdp.workspace  = true
+tabref-page.workspace = true
+clap.workspace        = true
+serde.workspace       = true
+serde_json.workspace  = true
+
+[lints]
+workspace = true

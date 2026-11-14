@@ -1,0 +1,42 @@
+//! Reads a page into an accessibility tree and acts on its elements over
+//! CDP. The snapshot reader grafts out-of-process iframes beneath their owner
+//! elements, promotes click-listening elements to controls, and merges inline
+//! text into readable runs. Actions address a DOM node by its element token,
+//! prove the node's document is still the one the snapshot read, refuse a
+//! press another element would intercept, and read back what they changed.
+
+mod act;
+mod page;
+mod settle;
+mod tree;
+
+pub(crate) use tabref_cdp::{CdpConnection, CdpEvent, PageSession};
+
+pub use act::append_text::append_text;
+pub use act::assigned_input::AssignedInput;
+pub use act::checked::set_checked;
+pub use act::click::{click, click_times};
+pub use act::element_reading::ElementReading;
+pub use act::fill::fill;
+pub use act::fill_outcome::FillOutcome;
+pub use act::focus::focus;
+pub use act::hover::hover;
+pub use act::key_press::{press_key, supported_key_names};
+pub use act::read::read_element;
+pub use act::scroll::{box_center, scroll_into_view};
+pub use act::scroll_by::scroll_by;
+pub use act::select_option::select_option;
+pub use act::upload::upload_files;
+pub use act::upload_outcome::UploadOutcome;
+pub use page::evaluate::evaluate;
+pub use page::page_info::PageInfo;
+pub use page::page_scroll::scroll_page;
+pub use page::page_text::page_text;
+pub use settle::action_settle::{settle_action, watch_navigation};
+pub use settle::settle_outcome::SettleOutcome;
+pub use tree::element_token::ElementToken;
+pub use tree::node_origin::NodeOrigin;
+pub use tree::node_read::{read_node, read_node_identity};
+pub use tree::snapshot::{snapshot_page, snapshot_page_within_budget};
+pub use tree::web_roles::map_cdp_role;
+pub use tree::web_snapshot::WebSnapshot;

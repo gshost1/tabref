@@ -1,6 +1,7 @@
-target/
+/target/
 /TASKS.md
 /.plan/
 /.fresh-sealed/
 *.swp
 .DS_Store
+__pycache__/
