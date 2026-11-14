@@ -1,0 +1,5 @@
+#!/bin/bash
+# Arm ad-14: agent-desktop 1.4.0, the fork release binary (checksum-verified by bench/tools/install.sh).
+# Same as the Linux run's /opt/bench/ho-bin/ad-14/agent-desktop (03-ho.sh); only the install folder differs.
+H=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+exec "${HO_WRAP:-$H/heldout/linux/wrap.sh}" "${BENCH_TOOLS:?}/agent-desktop-1.4.0/agent-desktop" "$@"

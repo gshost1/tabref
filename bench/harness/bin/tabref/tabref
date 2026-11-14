@@ -1,0 +1,12 @@
+#!/bin/bash
+# Arm tabref: the tabref CLI under test (TABREF_BIN, default <checkout>/target/release/tabref). It attaches to the
+# run's harness-launched Chrome: TABREF_CDP is the run's DevTools port (`--cdp <port>` does the same). State and
+# daemon live in a per-run TABREF_HOME, so nothing carries over between runs. The agent-desktop bridge points
+# nowhere (TABREF_AGENT_DESKTOP), so the arm measures tabref alone.
+H=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+bin=${TABREF_BIN:?}
+[[ -x $bin ]] || { echo "bench wrapper: tabref binary not found at $bin" >&2; exit 2; }
+export TABREF_CDP="${HO_CDP_PORT:-$(cat "${HO_RUNS:-$H/runs}/web-current-port")}"
+export TABREF_HOME="${HO_ARM_HOME:-$HOME/.ho-tabref}/tabref-home"
+export TABREF_AGENT_DESKTOP=/nonexistent
+exec "${HO_WRAP:-$H/heldout/linux/wrap.sh}" "$bin" "$@"
