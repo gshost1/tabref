@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::http_get::http_get_loopback;
@@ -8,8 +10,17 @@ use crate::{BrowserEndpoint, EndpointSource, WebSocketUrl};
 /// `ws://` loopback URL on that same port, so a responder that is not this
 /// port's DevTools server is never mistaken for one.
 pub fn endpoint_from_port(port: u16, deadline: Deadline) -> Result<BrowserEndpoint, AppError> {
-    let body = http_get_loopback(port, "/json/version", deadline)?;
-    parse_version_body(port, &body)
+    endpoint_from_address(SocketAddr::from(([127, 0, 0, 1], port)), deadline)
+}
+
+/// [`endpoint_from_port`] for a DevTools server on a given loopback
+/// address, such as `[::1]:9222`.
+pub fn endpoint_from_address(
+    address: SocketAddr,
+    deadline: Deadline,
+) -> Result<BrowserEndpoint, AppError> {
+    let body = http_get_loopback(address, "/json/version", deadline)?;
+    parse_version_body(address.port(), &body)
 }
 
 pub(crate) fn parse_version_body(port: u16, body: &str) -> Result<BrowserEndpoint, AppError> {

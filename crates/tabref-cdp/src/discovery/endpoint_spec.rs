@@ -1,14 +1,19 @@
 use tabref_core::{AppError, Deadline};
 
-use super::json_version::endpoint_from_port;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+
+use super::json_version::endpoint_from_address;
 use crate::{BrowserEndpoint, EndpointSource, WebSocketUrl};
 
 /// Where `--cdp` (or `TABREF_CDP`) says the browser listens: a port, an
 /// `http://` DevTools address, or the browser's `ws://` debugger URL. Every
-/// form must name a loopback host.
+/// form must name a loopback host. A bare port and `127.0.0.1` mean IPv4,
+/// `[::1]` IPv6, and `localhost` tries IPv4 and then IPv6.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EndpointSpec {
     Port(u16),
+    Ipv6Port(u16),
+    Localhost(u16),
     WebSocket(WebSocketUrl),
 }
 
@@ -28,14 +33,17 @@ impl EndpointSpec {
         let (host, port) = authority
             .rsplit_once(':')
             .ok_or_else(|| unrecognized(text))?;
-        if !matches!(host, "127.0.0.1" | "localhost" | "[::1]") {
-            return Err(AppError::invalid_args(format!(
+        let port = port.parse::<u16>().map_err(|_| unrecognized(text))?;
+        let spec = port_spec(port, text)?;
+        match host {
+            "127.0.0.1" => Ok(spec),
+            "[::1]" => Ok(Self::Ipv6Port(port)),
+            "localhost" => Ok(Self::Localhost(port)),
+            _ => Err(AppError::invalid_args(format!(
                 "Refusing DevTools address '{text}': the host is not a loopback address"
             ))
-            .with_suggestion("tabref connects only to a browser on this machine"));
+            .with_suggestion("tabref connects only to a browser on this machine")),
         }
-        let port = port.parse::<u16>().map_err(|_| unrecognized(text))?;
-        port_spec(port, text)
     }
 
     /// The browser endpoint this spec names. A port is asked for its
@@ -43,7 +51,10 @@ impl EndpointSpec {
     /// taken as given.
     pub fn resolve(&self, deadline: Deadline) -> Result<BrowserEndpoint, AppError> {
         match self {
-            Self::Port(port) => endpoint_from_port(*port, deadline),
+            Self::Port(port) => endpoint_from_address(ipv4(*port), deadline),
+            Self::Ipv6Port(port) => endpoint_from_address(ipv6(*port), deadline),
+            Self::Localhost(port) => endpoint_from_address(ipv4(*port), deadline)
+                .or_else(|_| endpoint_from_address(ipv6(*port), deadline)),
             Self::WebSocket(url) => Ok(BrowserEndpoint {
                 websocket_url: url.clone(),
                 source: EndpointSource::WebSocketUrl,
@@ -51,6 +62,14 @@ impl EndpointSpec {
             }),
         }
     }
+}
+
+fn ipv4(port: u16) -> SocketAddr {
+    SocketAddr::from((Ipv4Addr::LOCALHOST, port))
+}
+
+fn ipv6(port: u16) -> SocketAddr {
+    SocketAddr::from((Ipv6Addr::LOCALHOST, port))
 }
 
 fn port_spec(port: u16, text: &str) -> Result<EndpointSpec, AppError> {

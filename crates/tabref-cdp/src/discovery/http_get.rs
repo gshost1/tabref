@@ -10,23 +10,22 @@ use crate::transport::transport_error::{transport_failed, transport_timeout};
 
 const MIN_IO_SLICE: Duration = Duration::from_millis(1);
 
-/// Issues one `GET` to `127.0.0.1:port` and returns the body of its `200`
+/// Issues one `GET` to the loopback `address` and returns the body of its `200`
 /// response. The reader ends the read once Content-Length
 /// bytes of body arrive, because Chromium holds the connection open after
 /// answering; every step is bounded by what remains of `deadline`.
 pub(crate) fn http_get_loopback(
-    port: u16,
+    address: SocketAddr,
     path: &str,
     deadline: Deadline,
 ) -> Result<String, AppError> {
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let port = address.port();
     let mut stream = TcpStream::connect_timeout(&address, slice(deadline)?)
         .map_err(|error| endpoint_unreachable(port, &error.to_string()))?;
     stream
         .set_write_timeout(Some(slice(deadline)?))
         .map_err(|error| transport_failed("http", error.to_string()))?;
-    let request =
-        format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
     stream
         .write_all(request.as_bytes())
         .map_err(|error| transport_failed("http", error.to_string()))?;
