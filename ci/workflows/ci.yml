@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned toolchain
+        shell: bash
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feat/') }}
+
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all -- --check
+
+      - name: Source rules (400-line files, no inline comments)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/check-rust-file-size.sh
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked --workspace
+
+      - name: Live Chrome tests
+        if: runner.os == 'Linux'
+        env:
+          TABREF_LIVE: "1"
+          TABREF_CHROME_ARGS: "--no-sandbox"
+        run: cargo test --locked -p tabref-page --test live_page && cargo test --locked -p tabref --test live_cli
