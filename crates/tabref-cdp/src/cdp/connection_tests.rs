@@ -239,3 +239,73 @@ fn a_dialog_that_opens_while_a_click_waits_is_accepted_and_stays_buffered() {
     let dialogs = connection.drain_events(|event| event.method == "Page.javascriptDialogOpening");
     assert_eq!(dialogs.len(), 1);
 }
+
+#[test]
+fn pipelined_requests_are_collected_in_any_order() {
+    let transport = ScriptedTransport::new()
+        .expect("Page.getFrameTree", json!({ "frameTree": 1 }))
+        .expect("DOMSnapshot.captureSnapshot", json!({ "documents": 2 }));
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let tree = connection
+        .send("Page.getFrameTree", json!({}), Some("S"), deadline())
+        .unwrap();
+    let dom = connection
+        .send(
+            "DOMSnapshot.captureSnapshot",
+            json!({}),
+            Some("S"),
+            deadline(),
+        )
+        .unwrap();
+
+    assert_eq!(connection.reply(dom, deadline()).unwrap()["documents"], 2);
+    let (id, outcome) = connection.next_reply(&[tree], deadline()).unwrap();
+    assert_eq!(id, tree);
+    assert_eq!(outcome.unwrap()["frameTree"], 1);
+}
+
+#[test]
+fn a_repeated_enable_on_the_same_session_is_answered_without_the_browser() {
+    let transport = ScriptedTransport::new()
+        .expect("Page.enable", json!({}))
+        .expect("Page.enable", json!({}));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    for session in ["S", "S", "S", "T"] {
+        connection
+            .call("Page.enable", json!({}), Some(session), deadline())
+            .unwrap();
+    }
+
+    let sent = sent.lock().unwrap();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1]["sessionId"], "T");
+}
+
+#[test]
+fn pending_frames_are_polled_into_the_event_buffer_and_detaches_recorded() {
+    let transport = ScriptedTransport::new()
+        .push_inbound(json!({ "method": "Page.frameNavigated", "params": {}, "sessionId": "S" }))
+        .push_inbound(json!({ "method": "Target.detachedFromTarget",
+            "params": { "sessionId": "S" } }));
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    connection.poll_pending(deadline()).unwrap();
+
+    assert!(connection.is_session_detached("S"));
+    assert_eq!(connection.take_events().len(), 2);
+    assert!(!connection.is_closed());
+}
+
+#[test]
+fn a_timeout_leaves_the_connection_usable() {
+    let transport = ScriptedTransport::new().expect_silence("Page.navigate");
+    let mut connection = CdpConnection::new(transport.boxed());
+    let error = connection
+        .call("Page.navigate", json!({}), Some("S"), deadline())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Timeout);
+    assert!(!connection.is_closed());
+}
