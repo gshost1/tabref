@@ -4,3 +4,4 @@ target/
 /.fresh-sealed/
 *.swp
 .DS_Store
+/.bench-tools/

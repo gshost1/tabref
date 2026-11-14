@@ -2,13 +2,18 @@
 # Installs the competitor arms at the held-out bench's exact versions into $BENCH_TOOLS (default: the main
 # checkout's .bench-tools/, untracked). Same sources, flags and checks as the fork's bench/heldout/arms/ARMS.md
 # and the Linux run (03-ho.sh, ab-install.sh); only the install folder differs. Safe to rerun.
+#   node   v26.13.0 from nodejs.org, sha256 = SHASUMS256.txt (every npm step uses it; nothing from PATH)
+#   uv     0.13.7 release asset, sha256 = its .sha256 file; it installs CPython 3.12.16 for bh's venv
 #   ad-14  agent-desktop 1.4.0  gh release v1.4.0 (gshost1/agent-desktop), checked against checksums.txt
-#   pw     @playwright/cli 0.1.24  npm --ignore-scripts (no browser download)
-#   ab     agent-browser 0.42.0    npm --ignore-scripts; packaged linux-x64 binary checked against the release digest
-#   bh     browser-harness 0.1.13  binary wheels only (pip download --only-binary=:all:), wheel sha256 = PyPI
-# Usage: bench/tools/install.sh [--python python3.12]
+#   pw     @playwright/cli 0.1.24  npm ci from tools/locks/ (whole tree pinned, registry integrity checked)
+#   ab     agent-browser 0.42.0    npm ci from tools/locks/; packaged linux-x64 binary = the release digest
+#   bh     browser-harness 0.1.13  binary wheels only (pip download --only-binary=:all:), every wheel = PyPI sha256
+#   claude Claude Code 2.1.322 (the Linux pass's version) npm ci from tools/locks/, for model passes
+# All npm steps: --ignore-scripts --no-audit --no-fund.
+# Usage: bench/tools/install.sh [--python <python3.12>]   (default: uv's pinned CPython 3.12.16)
 set -euo pipefail
-PY=python3.12
+NODE_V=v26.13.0 UV_V=0.13.7 PY_V=3.12.16
+PY=""
 [[ ${1:-} == --python ]] && PY=$2
 here=$(cd "$(dirname "$0")" && pwd)
 common=$(git -C "$here" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
@@ -18,7 +23,30 @@ mkdir -p "$T/downloads" "$T/skills"
 T=$(cd "$T" && pwd)
 echo "tools: $T"
 arch=$(uname -m)
-[[ $arch == x86_64 || $arch == aarch64 ]] || { echo "unsupported arch $arch" >&2; exit 2; }
+case $arch in x86_64) na=x64 ;; aarch64) na=arm64 ;; *) echo "unsupported arch $arch" >&2; exit 2 ;; esac
+
+# Node, exact version
+N=$T/node-$NODE_V
+if [[ ! -x $N/bin/node ]]; then
+  d=$T/downloads/node-$NODE_V; rm -rf "$d"; mkdir -p "$d"
+  f=node-$NODE_V-linux-$na.tar.xz
+  curl -fsSL -o "$d/SHASUMS256.txt" "https://nodejs.org/dist/$NODE_V/SHASUMS256.txt"
+  curl -fsSL -o "$d/$f" "https://nodejs.org/dist/$NODE_V/$f"
+  (cd "$d" && grep " $f\$" SHASUMS256.txt | sha256sum -c -)
+  mkdir -p "$N"; tar -xJf "$d/$f" -C "$N" --strip-components=1
+fi
+export PATH=$N/bin:/usr/bin:/bin
+[[ $(node --version) == "$NODE_V" ]] || { echo "node is not $NODE_V" >&2; exit 1; }
+
+npm_ci() {  # <folder name>: the committed package.json + package-lock.json, installed exactly
+  local p=$T/$1
+  mkdir -p "$p"
+  cp "$here/locks/$1/package.json" "$here/locks/$1/package-lock.json" "$p/"
+  if ! cmp -s "$here/locks/$1/package-lock.json" "$p/node_modules/.package-lock.json.bench" 2>/dev/null; then
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --prefix "$p" --ignore-scripts --no-audit --no-fund
+    cp "$here/locks/$1/package-lock.json" "$p/node_modules/.package-lock.json.bench"
+  fi
+}
 
 # agent-desktop 1.4.0 (fork release)
 AD=agent-desktop-v1.4.0-$arch-unknown-linux-gnu.tar.gz
@@ -37,24 +65,36 @@ fi
 [[ -x $T/agent-desktop-1.4.0/agent-desktop ]] || { echo "agent-desktop binary not at the archive root" >&2; exit 1; }
 
 # @playwright/cli 0.1.24
-if [[ ! -x $T/playwright-cli-0.1.24/node_modules/.bin/playwright-cli ]]; then
-  mkdir -p "$T/playwright-cli-0.1.24"
-  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --prefix "$T/playwright-cli-0.1.24" --ignore-scripts --no-audit --no-fund \
-    --save-exact @playwright/cli@0.1.24
-fi
+npm_ci playwright-cli-0.1.24
 mkdir -p "$T/skills/playwright-cli"
 cp -R "$T/playwright-cli-0.1.24/node_modules/@playwright/cli/skills/playwright-cli/." "$T/skills/playwright-cli/"
 
 # agent-browser 0.42.0
-if [[ ! -d $T/agent-browser-0.42.0/node_modules/agent-browser ]]; then
-  mkdir -p "$T/agent-browser-0.42.0"
-  npm install --prefix "$T/agent-browser-0.42.0" --ignore-scripts --no-audit --no-fund --save-exact agent-browser@0.42.0
-fi
-AB=$T/agent-browser-0.42.0/node_modules/agent-browser/bin/agent-browser-linux-${arch/x86_64/x64}
-AB=${AB/aarch64/arm64}
+npm_ci agent-browser-0.42.0
+AB=$T/agent-browser-0.42.0/node_modules/agent-browser/bin/agent-browser-linux-$na
 chmod +x "$AB"
 if [[ $arch == x86_64 ]]; then
   echo "b69e0f5ea76dcb51f8f75da6bcb87c7f4d81f79b5738f1f08bd121b51cb3dc57  $AB" | sha256sum -c -
+fi
+
+# Claude Code 2.1.322 (model passes only); with --ignore-scripts the runner calls the platform binary directly
+npm_ci claude-code-2.1.322
+CC=$T/claude-code-2.1.322/node_modules/@anthropic-ai/claude-code-linux-$na/claude
+
+# Python for bh: uv's pinned CPython unless --python was given
+if [[ -z $PY ]]; then
+  UV=$T/uv-$UV_V/uv
+  if [[ ! -x $UV ]]; then
+    d=$T/downloads/uv-$UV_V; rm -rf "$d"; mkdir -p "$d" "$T/uv-$UV_V"
+    f=uv-$arch-unknown-linux-gnu.tar.gz
+    curl -fsSL -o "$d/$f" "https://github.com/astral-sh/uv/releases/download/$UV_V/$f"
+    curl -fsSL -o "$d/$f.sha256" "https://github.com/astral-sh/uv/releases/download/$UV_V/$f.sha256"
+    (cd "$d" && sha256sum -c "$f.sha256")
+    tar -xzf "$d/$f" -C "$T/uv-$UV_V" --strip-components=1
+  fi
+  export UV_PYTHON_INSTALL_DIR=$T/python UV_NO_CONFIG=1
+  "$UV" python install "$PY_V" >/dev/null
+  PY=$("$UV" python find "$PY_V")
 fi
 
 # browser-harness 0.1.13 from binary wheels
@@ -82,23 +122,14 @@ PY
 [[ -x $T/bh-venv/bin/browser-harness ]] || \
   "$T/bh-venv/bin/python" -m pip install --disable-pip-version-check --no-index --find-links "$W" --only-binary=:all: browser-harness==0.1.13
 
-# Claude Code 2.1.322, the version the Linux pass ran (model runs only). npm checks the registry integrity; with
-# --ignore-scripts the wrapper's postinstall is skipped, so the runner calls the platform binary directly.
-CC=$T/claude-code-2.1.322/node_modules/@anthropic-ai/claude-code-linux-${arch/x86_64/x64}/claude
-CC=${CC/aarch64/arm64}
-if [[ ! -x $CC ]]; then
-  mkdir -p "$T/claude-code-2.1.322"
-  npm install --prefix "$T/claude-code-2.1.322" --ignore-scripts --no-audit --no-fund --save-exact @anthropic-ai/claude-code@2.1.322
-fi
-
 {
   echo "installed $(date -u +%FT%TZ) on $(uname -sm)"
+  echo "node: $(node --version)"
   echo "claude: $(DISABLE_AUTOUPDATER=1 "$CC" --version 2>&1 | head -1)"
   echo "agent-desktop: $("$T/agent-desktop-1.4.0/agent-desktop" --version 2>&1 | head -1)"
   echo "playwright-cli: $(cd "$T/playwright-cli-0.1.24" && npm ls --depth=0 2>/dev/null | grep @playwright/cli)"
   echo "agent-browser: $("$AB" --version 2>&1 | head -1)"
   echo "browser-harness: $("$T/bh-venv/bin/python" -m pip show browser-harness 2>/dev/null | grep ^Version)"
   echo "python (bh): $("$T/bh-venv/bin/python" --version)"
-  echo "node: $(node --version)"
   echo "chrome: $( (google-chrome --version || chromium --version) 2>/dev/null)"
 } | tee "$T/VERSIONS.txt"

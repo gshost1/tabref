@@ -1,6 +1,6 @@
 {
  "stamp": "20261114-143019",
- "host": "keysrs-server",
+ "host": "laptop",
  "display": "headless",
  "n": 7,
  "cold_n": 7,
@@ -736,7 +736,7 @@
   },
   {
    "arm": "tabref",
-   "skipped": "tabref: /home/george/Projects/tabref/target/release/tabref not found"
+   "skipped": "tabref: ./target/release/tabref not found"
   },
   {
    "arm": "pw",
