@@ -2,8 +2,10 @@
 //! Each returns the value in the input's own format, as the browser reports
 //! it back, or `None` when the text is not a value of that kind.
 
+/// A calendar date as `YYYY-MM-DD`, from `YYYY-M-D` or `YYYY/MM/DD`.
 pub(crate) fn date(text: &str) -> Option<String> {
-    let mut parts = text.split('-');
+    let separator = if text.contains('/') { '/' } else { '-' };
+    let mut parts = text.trim().split(separator);
     let year = year(parts.next()?)?;
     let month = bounded(parts.next()?, 1..=2, 1..=12)?;
     let day = bounded(parts.next()?, 1..=2, 1..=31)?;
@@ -100,6 +102,32 @@ pub(crate) fn number(text: &str) -> Option<String> {
     }
     let value = if value == 0.0 { 0.0 } else { value };
     Some(format!("{value}"))
+}
+
+/// A valid floating-point number string as HTML defines it, kept as given
+/// so `62.00` stays `62.00`; a leading `+` is dropped, since a number input
+/// would sanitize it to empty.
+pub(crate) fn decimal(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    let trimmed = trimmed.strip_prefix('+').unwrap_or(trimmed);
+    let unsigned = trimmed.strip_prefix('-').unwrap_or(trimmed);
+    let (mantissa, exponent) = match unsigned.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
+        None => (unsigned, None),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = |part: &str| part.chars().all(|c| c.is_ascii_digit());
+    let mantissa_ok = digits(whole)
+        && digits(fraction)
+        && !(whole.is_empty() && fraction.is_empty())
+        && !(mantissa.ends_with('.'));
+    let exponent_ok = exponent.is_none_or(|exponent| {
+        let exponent = exponent
+            .strip_prefix(['+', '-'])
+            .unwrap_or(exponent);
+        !exponent.is_empty() && digits(exponent)
+    });
+    (mantissa_ok && exponent_ok).then(|| trimmed.to_owned())
 }
 
 fn shortest_time(time: &str) -> String {

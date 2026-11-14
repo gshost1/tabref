@@ -1,8 +1,9 @@
-use super::input_value_text::{color, date, date_time_local, month, number, time, week};
+use super::input_value_text::{color, date, date_time_local, decimal, month, number, time, week};
 
-/// An HTML input type whose value is assigned whole. Chromium draws these
-/// inputs with their own editing UI, so text typed or inserted into them
-/// never reaches their value; the value string has one format per type.
+/// An HTML input type whose value is assigned whole. Chromium draws most of
+/// these inputs with their own editing UI, so text typed into them never
+/// reaches their value, and a number input is set whole so a value such as
+/// `62.00` arrives as given; the value string has one format per type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InputValueKind {
     Date,
@@ -12,6 +13,7 @@ pub(crate) enum InputValueKind {
     Week,
     Color,
     Range,
+    Number,
 }
 
 impl InputValueKind {
@@ -24,6 +26,7 @@ impl InputValueKind {
             "week" => Self::Week,
             "color" => Self::Color,
             "range" => Self::Range,
+            "number" => Self::Number,
             _ => return None,
         })
     }
@@ -37,6 +40,7 @@ impl InputValueKind {
             Self::Week => "week",
             Self::Color => "color",
             Self::Range => "range",
+            Self::Number => "number",
         }
     }
 
@@ -50,6 +54,7 @@ impl InputValueKind {
             Self::Week => "YYYY-Www",
             Self::Color => "#rrggbb in lowercase hex",
             Self::Range => "a number between the input's min and max",
+            Self::Number => "a decimal number such as 62.00",
         }
     }
 
@@ -62,6 +67,7 @@ impl InputValueKind {
             Self::Week => "2026-W45",
             Self::Color => "#ff8800",
             Self::Range => "50",
+            Self::Number => "62.00",
         }
     }
 
@@ -80,6 +86,7 @@ impl InputValueKind {
             Self::Week => week(text),
             Self::Color => color(text),
             Self::Range => number(text),
+            Self::Number => decimal(text),
         }
     }
 }

@@ -1,65 +1,73 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
+use super::page_barrier::page_turn;
 use super::settle_outcome::SettleOutcome;
+use super::settle_tracker::SettleTracker;
+use super::settle_wait::SettleWait;
+use crate::act::change_watch::mutation_count;
 use crate::{CdpConnection, CdpEvent, PageSession};
-use tabref_cdp::is_timeout;
+use tabref_cdp::{is_timeout, list_frames, transport_failed};
 
-const START_WINDOW: Duration = Duration::from_millis(60);
-const QUIET: Duration = Duration::from_millis(100);
-const SETTLE_CAP: Duration = Duration::from_millis(3_000);
+const SETTLE_CAP: Duration = Duration::from_millis(5_000);
+const TURN_CAP: Duration = Duration::from_millis(1_000);
+const QUIET: Duration = Duration::from_millis(50);
+const NETWORK_CAP: Duration = Duration::from_millis(1_500);
+const DOM_QUIET: Duration = Duration::from_millis(30);
+const DOM_QUIET_CAP: Duration = Duration::from_millis(300);
 const DIALOG_OPENING: &str = "Page.javascriptDialogOpening";
 
-const NAVIGATION_STARTS: &[&str] = &[
-    "Page.frameScheduledNavigation",
-    "Page.frameRequestedNavigation",
-    "Page.frameStartedNavigating",
-    "Page.frameStartedLoading",
-];
-const NAVIGATION_ENDS: &[&str] = &[
-    "Page.frameStoppedLoading",
-    "Page.loadEventFired",
-    "Page.navigatedWithinDocument",
-];
-
-/// Turns on the page's navigation events before an action and drops any
-/// already buffered, so [`settle_action`] sees only what the action set off.
+/// Turns on the page and network events of `session` before an action and
+/// drops any already buffered, so [`settle_action`] sees only what the
+/// action set off. Returns the id of the tab's main frame.
 pub fn watch_navigation(
     connection: &mut CdpConnection,
     session: &PageSession,
     deadline: Deadline,
-) -> Result<(), AppError> {
-    connection.call(
-        "Page.enable",
-        json!({}),
-        Some(&session.session_id),
-        deadline,
-    )?;
-    connection.discard_events(|event| is_navigation(event) || event.method == DIALOG_OPENING);
-    Ok(())
+) -> Result<String, AppError> {
+    let session_id = Some(session.session_id.as_str());
+    connection.call("Page.enable", json!({}), session_id, deadline)?;
+    connection.call("Network.enable", json!({}), session_id, deadline)?;
+    let main = list_frames(connection, session, deadline)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| transport_failed("Page.getFrameTree", "the page has no main frame"))?;
+    let id = session.session_id.clone();
+    connection.discard_events(|event| is_page_event(event, &id) || event.method == DIALOG_OPENING);
+    Ok(main.frame_id)
 }
 
-/// Waits for what an action set off to settle, after Chrome DevTools MCP's
-/// pattern: up to 60 ms for a navigation to start, returning at once when
-/// none does; once one starts, until the page stops loading, then until
-/// 100 ms pass with no navigation event, all within 3 s. Dialogs that opened
-/// meanwhile are reported.
+/// Waits until what an action set off can be judged, from events alone:
+/// one turn of the page's event loop shows whether a navigation or request
+/// began, and nothing more is waited for when none did. A navigation is
+/// followed until it commits and reaches `DOMContentLoaded`; document, XHR
+/// and fetch requests until they finish and 50 ms pass without another
+/// (at most 1.5 s); and after requests or a route change within the
+/// document, until 30 ms pass without a DOM mutation (at most 300 ms). All
+/// of it within 5 s. Dialogs that opened meanwhile are reported.
 pub fn settle_action(
     connection: &mut CdpConnection,
+    session: &PageSession,
+    main_frame: &str,
     deadline: Deadline,
 ) -> Result<SettleOutcome, AppError> {
     let cap = deadline.capped(SETTLE_CAP);
-    let mut outcome = SettleOutcome::default();
-    if next(connection, is_start, cap.capped(START_WINDOW))?.is_some() {
-        outcome.navigated = true;
-        let ended = |event: &CdpEvent| NAVIGATION_ENDS.contains(&event.method.as_str());
-        if next(connection, ended, cap)?.is_some() {
-            while next(connection, is_navigation, cap.capped(QUIET))?.is_some() {}
-        }
+    let id = session.session_id.clone();
+    let mut tracker = SettleTracker::new(main_frame);
+    match page_turn(connection, session, cap.capped(TURN_CAP)) {
+        Err(error) if !is_timeout(&error) => tracker.expect_navigation(),
+        _ => {}
     }
-    outcome.dialogs = connection
+    for event in connection.drain_events(|event| is_page_event(event, &id)) {
+        tracker.absorb(&event, Instant::now());
+    }
+    follow(connection, &id, &mut tracker, cap)?;
+    if !tracker.committed() && (tracker.same_document() || tracker.saw_network()) {
+        dom_quiet(connection, session, &mut tracker, cap)?;
+    }
+    let dialogs = connection
         .drain_events(|event| event.method == DIALOG_OPENING)
         .into_iter()
         .map(|event| {
@@ -69,30 +77,84 @@ pub fn settle_action(
             })
         })
         .collect();
-    connection.discard_events(is_navigation);
-    Ok(outcome)
+    connection.discard_events(|event| is_page_event(event, &id));
+    let _ = connection.call("Network.disable", json!({}), Some(&id), cap);
+    Ok(SettleOutcome {
+        navigated: tracker.committed(),
+        same_document: tracker.same_document(),
+        network: tracker.saw_network(),
+        dialogs,
+    })
+}
+
+fn follow(
+    connection: &mut CdpConnection,
+    session_id: &str,
+    tracker: &mut SettleTracker,
+    cap: Deadline,
+) -> Result<(), AppError> {
+    let mut network_since: Option<Instant> = None;
+    loop {
+        let now = Instant::now();
+        let wait = match tracker.next_wait(now, QUIET) {
+            SettleWait::Done => return Ok(()),
+            SettleWait::Navigation => cap,
+            SettleWait::Network => {
+                let since = *network_since.get_or_insert(now);
+                let Some(left) = NETWORK_CAP.checked_sub(now - since) else {
+                    return Ok(());
+                };
+                cap.capped(left)
+            }
+            SettleWait::QuietUntil(until) => cap.capped(until - now),
+        };
+        if cap.is_expired() {
+            return Ok(());
+        }
+        if let Some(event) = next(connection, session_id, wait)? {
+            tracker.absorb(&event, Instant::now());
+        }
+    }
+}
+
+fn dom_quiet(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    tracker: &mut SettleTracker,
+    cap: Deadline,
+) -> Result<(), AppError> {
+    let limit = cap.capped(DOM_QUIET_CAP);
+    let mut seen = mutation_count(connection, session, limit)?;
+    while !limit.is_expired() {
+        let window = limit.capped(DOM_QUIET);
+        while let Some(event) = next(connection, &session.session_id, window)? {
+            tracker.absorb(&event, Instant::now());
+        }
+        let now = mutation_count(connection, session, limit)?;
+        if now == seen {
+            return Ok(());
+        }
+        seen = now;
+    }
+    Ok(())
 }
 
 fn next(
     connection: &mut CdpConnection,
-    matches: impl FnMut(&CdpEvent) -> bool,
+    session_id: &str,
     deadline: Deadline,
 ) -> Result<Option<CdpEvent>, AppError> {
-    match connection.wait_for_event(matches, deadline) {
+    match connection.wait_for_event(|event| is_page_event(event, session_id), deadline) {
         Ok(event) => Ok(Some(event)),
         Err(error) if is_timeout(&error) => Ok(None),
         Err(error) => Err(error),
     }
 }
 
-fn is_start(event: &CdpEvent) -> bool {
-    event.session_id.is_some() && NAVIGATION_STARTS.contains(&event.method.as_str())
-}
-
-fn is_navigation(event: &CdpEvent) -> bool {
-    event.session_id.is_some()
-        && (NAVIGATION_STARTS.contains(&event.method.as_str())
-            || NAVIGATION_ENDS.contains(&event.method.as_str()))
+fn is_page_event(event: &CdpEvent, session_id: &str) -> bool {
+    event.session_id.as_deref() == Some(session_id)
+        && event.method != DIALOG_OPENING
+        && (event.method.starts_with("Page.") || event.method.starts_with("Network."))
 }
 
 #[cfg(test)]

@@ -19,6 +19,8 @@ fn each_type_keeps_a_value_already_in_its_own_format() {
         ("color", "#ff8800"),
         ("range", "70"),
         ("range", "0.5"),
+        ("number", "62.00"),
+        ("number", "-1.5e3"),
     ] {
         assert_eq!(
             canonical(input_type, text).as_deref(),
@@ -32,6 +34,8 @@ fn each_type_keeps_a_value_already_in_its_own_format() {
 fn an_unambiguous_other_form_maps_to_the_format_the_browser_reports() {
     for (input_type, text, expected) in [
         ("date", "2026-1-5", "2026-01-05"),
+        ("date", "2026/11/08", "2026-11-08"),
+        ("number", "+7", "7"),
         ("time", "7:30 PM", "19:30"),
         ("time", "7:30pm", "19:30"),
         ("time", "12:05 AM", "00:05"),
@@ -92,6 +96,9 @@ fn ambiguous_or_malformed_text_has_no_value() {
         ("range", "loud"),
         ("range", "NaN"),
         ("range", "inf"),
+        ("number", "1."),
+        ("number", "12abc"),
+        ("number", "1,5"),
     ] {
         assert_eq!(canonical(input_type, text), None, "{input_type} {text}");
     }
@@ -109,7 +116,7 @@ fn empty_text_clears_a_date_or_time_input_but_not_a_color_or_range() {
 
 #[test]
 fn text_input_types_are_not_assigned_whole() {
-    for input_type in ["text", "number", "email", "checkbox", ""] {
+    for input_type in ["text", "email", "checkbox", ""] {
         assert_eq!(InputValueKind::from_input_type(input_type), None);
     }
 }

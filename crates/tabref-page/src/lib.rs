@@ -6,6 +6,7 @@
 //! press another element would intercept, and read back what they changed.
 
 mod act;
+mod locate;
 mod page;
 mod settle;
 mod tree;
@@ -14,6 +15,7 @@ pub(crate) use tabref_cdp::{CdpConnection, CdpEvent, PageSession};
 
 pub use act::append_text::append_text;
 pub use act::assigned_input::AssignedInput;
+pub use act::change_watch::{mark_page, page_changes};
 pub use act::checked::set_checked;
 pub use act::click::{click, click_times};
 pub use act::element_reading::ElementReading;
@@ -22,12 +24,21 @@ pub use act::fill_outcome::FillOutcome;
 pub use act::focus::focus;
 pub use act::hover::hover;
 pub use act::key_press::{press_key, supported_key_names};
+pub use act::page_changes::PageChanges;
+pub use act::page_mark::PageMark;
 pub use act::read::read_element;
 pub use act::scroll::{box_center, scroll_into_view};
 pub use act::scroll_by::scroll_by;
 pub use act::select_option::select_option;
+pub use act::select_outcome::SelectOutcome;
+pub use act::text_change::TextChange;
 pub use act::upload::upload_files;
 pub use act::upload_outcome::UploadOutcome;
+pub use locate::locate_intent::LocateIntent;
+pub use locate::locate_node::locate;
+pub use locate::located::Located;
+pub use locate::locator::Locator;
+pub use locate::word::Word;
 pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
 pub use page::page_scroll::scroll_page;
