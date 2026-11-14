@@ -1,0 +1,109 @@
+//! A line diff of a page's rendered text before and after an action. Lines
+//! the two sides share at the start and the end are trimmed first, since an
+//! action usually changes one spot; the middle is aligned by longest common
+//! subsequence when it is small enough, and otherwise reported whole.
+
+use super::text_change::TextChange;
+
+const MAX_TABLE_CELLS: usize = 1_000_000;
+
+/// The page's rendered text as diff lines: each line trimmed, runs of
+/// whitespace collapsed to one space, and blank lines dropped.
+pub(crate) fn text_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// The changes that turn `before` into `after`, in page order. A removed
+/// line followed by an added one that shares its first or last word is one
+/// line rewritten in place.
+pub(crate) fn diff_lines(before: &[String], after: &[String]) -> Vec<TextChange> {
+    let head = before
+        .iter()
+        .zip(after)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let room = before.len().min(after.len()) - head;
+    let tail = before
+        .iter()
+        .rev()
+        .zip(after.iter().rev())
+        .take(room)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let old = &before[head..before.len() - tail];
+    let new = &after[head..after.len() - tail];
+    let mut changes = Vec::new();
+    for (removed, added) in hunks(old, new) {
+        pair_up(removed, added, &mut changes);
+    }
+    changes
+}
+
+fn hunks<'a>(old: &'a [String], new: &'a [String]) -> Vec<(&'a [String], &'a [String])> {
+    if old.is_empty() || new.is_empty() || old.len().saturating_mul(new.len()) > MAX_TABLE_CELLS {
+        return vec![(old, new)];
+    }
+    let width = new.len() + 1;
+    let mut table = vec![0_u32; (old.len() + 1) * width];
+    for i in (0..old.len()).rev() {
+        for j in (0..new.len()).rev() {
+            table[i * width + j] = if old[i] == new[j] {
+                table[(i + 1) * width + j + 1] + 1
+            } else {
+                table[(i + 1) * width + j].max(table[i * width + j + 1])
+            };
+        }
+    }
+    let mut found = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    let (mut start_i, mut start_j) = (0, 0);
+    while i < old.len() && j < new.len() {
+        if old[i] == new[j] {
+            if start_i < i || start_j < j {
+                found.push((&old[start_i..i], &new[start_j..j]));
+            }
+            i += 1;
+            j += 1;
+            start_i = i;
+            start_j = j;
+        } else if table[(i + 1) * width + j] >= table[i * width + j + 1] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    if start_i < old.len() || start_j < new.len() {
+        found.push((&old[start_i..], &new[start_j..]));
+    }
+    found
+}
+
+fn pair_up(removed: &[String], added: &[String], changes: &mut Vec<TextChange>) {
+    let mut added_rest = added;
+    for line in removed {
+        match added_rest.first() {
+            Some(next) if similar(line, next) => {
+                changes.push(TextChange::Changed {
+                    before: line.clone(),
+                    after: next.clone(),
+                });
+                added_rest = &added_rest[1..];
+            }
+            _ => changes.push(TextChange::Removed(line.clone())),
+        }
+    }
+    changes.extend(added_rest.iter().cloned().map(TextChange::Added));
+}
+
+fn similar(left: &str, right: &str) -> bool {
+    let first = |text: &str| text.split(' ').next().map(str::to_owned);
+    let last = |text: &str| text.rsplit(' ').next().map(str::to_owned);
+    first(left) == first(right) || last(left) == last(right)
+}
+
+#[cfg(test)]
+#[path = "text_diff_tests.rs"]
+mod tests;

@@ -11,8 +11,8 @@ use super::value_target::ValueTarget;
 use crate::{CdpConnection, ElementToken, PageSession};
 
 const PREPARE_FILL: &str = r"function() {
-  const TEXT_TYPES = ['text', 'search', 'url', 'tel', 'email', 'password', 'number'];
-  const VALUE_TYPES = ['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range'];
+  const TEXT_TYPES = ['text', 'search', 'url', 'tel', 'email', 'password'];
+  const VALUE_TYPES = ['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range', 'number'];
   const tag = this.localName;
   if (tag === 'input' && VALUE_TYPES.includes(this.type)) {
     if (this.disabled || this.readOnly) return { editable: false, reason: this.disabled ? 'disabled' : 'read-only' };
@@ -28,15 +28,16 @@ const PREPARE_FILL: &str = r"function() {
   this.focus();
   if (control) {
     try { this.select(); } catch (error) { return { editable: false, reason: 'no text selection' }; }
-    return { editable: true };
+    return { editable: true, before: String(this.value) };
   }
+  const shown = this.innerText !== undefined ? this.innerText : this.textContent;
   const doc = this.ownerDocument;
   const range = doc.createRange();
   range.selectNodeContents(this);
   const selection = doc.getSelection();
   selection.removeAllRanges();
   selection.addRange(range);
-  return { editable: true };
+  return { editable: true, before: shown === null ? null : String(shown) };
 }";
 
 const READ_FILLED: &str = r"function() {
@@ -51,7 +52,8 @@ const READ_FILLED: &str = r"function() {
 /// button, a checkbox, a disabled or read-only field) is
 /// `ACTION_NOT_SUPPORTED` before anything is typed. An input that takes its
 /// value whole (date, time, datetime-local, month, week, color, range) is
-/// assigned `text` in its own format instead, and one part of such an input,
+/// assigned `text` in its own format instead (a number input too), and one
+/// part of such an input,
 /// such as its hours field, is `ACTION_NOT_SUPPORTED` naming the input.
 pub fn fill(
     connection: &mut CdpConnection,
@@ -101,12 +103,17 @@ pub fn fill(
                 call_function(connection, session, object, script(READ_FILLED), deadline)?
                     .as_str()
                     .map(str::to_owned);
+            let previous = prepared
+                .get("before")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             Ok(FillOutcome {
                 verified: observed
                     .as_deref()
                     .is_some_and(|observed| observed.trim_end_matches('\n') == text),
                 observed,
                 assigned: None,
+                previous,
             })
         },
     )

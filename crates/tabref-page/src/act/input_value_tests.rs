@@ -146,16 +146,14 @@ fn malformed_text_is_refused_with_the_format_before_the_page_is_touched() {
 }
 
 #[test]
-fn another_form_of_a_value_is_refused_with_the_exact_value_to_pass() {
-    let transport =
-        prepared(json!({ "valueType": "time" })).expect("Runtime.releaseObject", json!({}));
-    let (outcome, sent) = set(transport, "7:30 PM");
-    let error = outcome.unwrap_err();
+fn another_form_of_a_value_is_assigned_in_the_input_s_own_format() {
+    let reply = json!({ "status": "assigned", "observed": "19:30", "before": "08:00" });
+    let (outcome, sent) = set(assigned("time", reply), "7:30 PM");
+    let outcome = outcome.unwrap();
 
-    assert_eq!(error.code, ErrorCode::InvalidArgs);
-    assert!(error.suggestion.unwrap().starts_with("Pass '19:30'."));
-    assert_eq!(error.details.unwrap()["value"], "19:30");
-    assert!(assignments(&sent).is_empty());
+    assert_eq!(assignments(&sent), [json!("19:30")]);
+    assert_eq!(outcome.previous.as_deref(), Some("08:00"));
+    assert!(outcome.verified);
 }
 
 #[test]
@@ -167,7 +165,7 @@ fn one_part_of_a_time_input_is_refused_and_points_at_the_input() {
 
     assert_eq!(error.code, ErrorCode::ActionNotSupported);
     assert_eq!(error.disposition, DeliverySemantics::not_delivered());
-    assert!(error.suggestion.unwrap().contains("time input's own ref"));
+    assert!(error.suggestion.unwrap().contains("time input itself"));
     assert_eq!(error.details.unwrap()["kind"], "cdp_input_part");
     assert!(
         sent.lock()
