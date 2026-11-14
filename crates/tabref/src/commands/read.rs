@@ -1,55 +1,66 @@
 use serde_json::json;
 use tabref_core::AppError;
-use tabref_page::{PageInfo, page_text, read_element};
+use tabref_page::read_element;
 
 use crate::output::outcome::Outcome;
 use crate::session::Session;
-use crate::view::node_line::quote_text;
+use crate::session::ref_target::RefTarget;
+use crate::view::snapshot_view::reading_view;
+use crate::view::view_options::ViewOptions;
+use crate::view::view_scope::ViewScope;
 
-const PAGE_TEXT_LIMIT: usize = 20_000;
+const FIELD_ROLES: &[&str] = &[
+    "textfield", "combobox", "checkbox", "radiobutton", "switch", "slider", "incrementor", "listbox",
+];
 
-/// Prints the page's rendered text, or one element's text and value.
-pub(crate) fn run(session: &mut Session, target: Option<&str>) -> Result<Outcome, AppError> {
-    let deadline = session.deadline();
+/// Prints text in reading order: the page's main content (the `main`
+/// landmark with the most text, across same-origin frames), the section
+/// under a heading, or one element. A form field reads as its text, value
+/// and checked state.
+pub(crate) fn run(
+    session: &mut Session,
+    target: Option<&str>,
+    section: Option<&str>,
+) -> Result<Outcome, AppError> {
+    let options = ViewOptions::read("");
     if let Some(text) = target {
         let target = session.resolve_ref(text)?;
-        let reading = read_element(
-            session.connection(),
-            &target.session,
-            &target.token,
-            deadline,
-        )?;
-        let mut out = reading.text.clone().unwrap_or_default().trim().to_owned();
-        if let Some(value) = reading.value.as_deref().filter(|value| !value.is_empty()) {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&format!("value: {value}"));
+        if FIELD_ROLES.contains(&target.entry.role.as_str()) {
+            return read_field(session, &target);
         }
-        if let Some(checked) = reading.checked {
-            out.push_str(&format!("\nchecked: {checked}"));
-        }
-        return Ok(Outcome::new(
-            out,
-            json!({
-                "ref": target.ref_id.to_string(),
-                "text": reading.text,
-                "value": reading.value,
-                "checked": reading.checked,
-            }),
-        ));
+        let scope = ViewScope::Element {
+            target_id: target.token.target_id.clone(),
+            backend_id: target.token.backend_node_id,
+        };
+        return reading_view(session, &options, &scope);
     }
-    let page = session.page()?;
-    let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
-    let (text, cut) = page_text(session.connection(), &page, PAGE_TEXT_LIMIT, deadline)?;
-    let mut out = format!("page {} {}\n{text}", quote_text(&info.title), info.url);
-    if cut {
-        out.push_str(&format!(
-            "\n... cut at {PAGE_TEXT_LIMIT} characters; use 'tabref find' for the rest"
-        ));
+    let scope = match section {
+        Some(heading) => ViewScope::Section(heading.to_owned()),
+        None => ViewScope::Main,
+    };
+    reading_view(session, &options, &scope)
+}
+
+fn read_field(session: &mut Session, target: &RefTarget) -> Result<Outcome, AppError> {
+    let deadline = session.deadline();
+    let reading = read_element(session.connection(), &target.session, &target.token, deadline)?;
+    let mut out = format!("{}", target.label());
+    if let Some(value) = reading.value.as_deref() {
+        out.push_str(&format!(" = \"{value}\""));
+    }
+    if let Some(checked) = reading.checked {
+        out.push_str(if checked { " (checked)" } else { " (not checked)" });
+    }
+    if let Some(text) = reading.text.as_deref().map(str::trim).filter(|text| !text.is_empty()) {
+        out.push_str(&format!("\n{text}"));
     }
     Ok(Outcome::new(
         out,
-        json!({ "url": info.url, "title": info.title, "text": text, "truncated": cut }),
+        json!({
+            "ref": target.ref_id.to_string(),
+            "text": reading.text,
+            "value": reading.value,
+            "checked": reading.checked,
+        }),
     ))
 }

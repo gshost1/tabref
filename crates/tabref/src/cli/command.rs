@@ -14,14 +14,17 @@ pub(crate) enum Command {
         #[arg(long)]
         headed: bool,
     },
-    /// Print the page's controls and headings, one line per node, refs first
+    /// Print the page view: text in reading order, controls with refs
     Snap {
-        /// Include every node with text, not just controls and headings
+        /// Print navigation, header and footer whole, with a larger budget
         #[arg(short = 'a', long)]
         all: bool,
-        /// Print only the subtree of this ref
+        /// Print only the part of the page inside this ref
         #[arg(long, value_name = "REF")]
         root: Option<String>,
+        /// Rows of long tables and lists to print: 21-40, 21- or 5
+        #[arg(long, value_name = "FROM-TO")]
+        rows: Option<String>,
     },
     /// Click an element
     Click {
@@ -87,10 +90,16 @@ pub(crate) enum Command {
         #[arg(long)]
         role: Option<String>,
     },
-    /// Print the page's text, or one element's
+    /// Print the main content as text, a section, or one element
     Read {
         #[arg(value_name = "REF")]
         target: Option<String>,
+        /// The main content (the default when no REF is given)
+        #[arg(long, conflicts_with_all = ["target", "section"])]
+        main: bool,
+        /// The section under the first heading containing this text
+        #[arg(long, value_name = "HEADING", conflicts_with = "target")]
+        section: Option<String>,
     },
     /// Wait until a condition holds (bounded by --timeout)
     Wait {

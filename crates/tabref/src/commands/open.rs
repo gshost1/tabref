@@ -6,14 +6,16 @@ use tabref_core::AppError;
 
 use super::action_report::set;
 use crate::output::outcome::Outcome;
-use crate::output::page_report::page_report;
 use crate::session::Session;
-use crate::view::view_mode::ViewMode;
+use crate::view::row_window::RowWindow;
+use crate::view::snapshot_view::snapshot_view;
+use crate::view::view_options::ViewOptions;
+use crate::view::view_scope::ViewScope;
 
 const SCHEMES: &[&str] = &["about:", "data:", "file:", "chrome:", "javascript:"];
 
-/// Navigates the current tab to `url` and prints a snapshot of the loaded
-/// page. A page that has not fired `load` after three quarters of the
+/// Navigates the current tab to `url` and prints the loaded page's view,
+/// so reading it costs no second command. A page that has not fired `load` after three quarters of the
 /// deadline is snapshotted as it stands, with a note.
 pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError> {
     let url = normalize_url(url);
@@ -26,7 +28,8 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
         Err(error) => return Err(error),
     };
     let captured = session.capture()?;
-    let mut report = page_report(&captured, ViewMode::Interactive);
+    let options = ViewOptions::snap(&captured.info.url, false, RowWindow::default());
+    let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
     if unfinished {
         report
             .push_line("note: the page had not finished loading; snap again if parts are missing");

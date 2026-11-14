@@ -59,7 +59,7 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
 fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
         Command::Open { url, .. } => open::run(session, url),
-        Command::Snap { all, root } => snap::run(session, *all, root.as_deref()),
+        Command::Snap { all, root, rows } => snap::run(session, *all, root.as_deref(), rows.as_deref()),
         Command::Click { target } => click::run(session, target),
         Command::Fill { target, text } => fill::run(session, target, text),
         Command::Select { target, option } => select::run(session, target, option),
@@ -74,7 +74,9 @@ fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppErro
         } => scroll::run(session, direction, target.as_deref(), *px),
         Command::Upload { target, files } => upload::run(session, target, files),
         Command::Find { text, role } => find::run(session, text, role.as_deref()),
-        Command::Read { target } => read::run(session, target.as_deref()),
+        Command::Read {
+            target, section, ..
+        } => read::run(session, target.as_deref(), section.as_deref()),
         Command::Wait {
             text,
             gone,
