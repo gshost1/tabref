@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use tabref_cdp::{
@@ -10,13 +11,14 @@ use super::session_options::SessionOptions;
 
 const DEFAULT_PORT: u16 = 9222;
 const PROBE_BUDGET: Duration = Duration::from_millis(300);
-const RECORD_BUDGET: Duration = Duration::from_millis(1_500);
 
 /// Finds the browser and opens the one DevTools connection the command
 /// uses. In order: the endpoint `--cdp`/`TABREF_CDP` names; the browser a
 /// previous `open --launch` started; a browser on port 9222; and, when the
-/// command allows it, a browser started now. A launch record whose browser
-/// no longer answers is forgotten.
+/// command allows it, a browser started now. A launch record is forgotten
+/// only when its browser is gone: the connection is refused or its process
+/// has exited. A launched browser that is slow to answer is busy, not gone,
+/// so the error is returned rather than a second browser started.
 pub(crate) fn connect_browser(
     options: &SessionOptions,
     store: &RefStore,
@@ -27,7 +29,7 @@ pub(crate) fn connect_browser(
         let connection = connect(&endpoint, deadline)?;
         return Ok((endpoint, connection));
     }
-    if let Some(found) = launched_browser(store, deadline) {
+    if let Some(found) = launched_browser(store, deadline)? {
         return Ok(found);
     }
     if let Some(found) = default_port(deadline) {
@@ -42,16 +44,40 @@ pub(crate) fn connect_browser(
 fn launched_browser(
     store: &RefStore,
     deadline: Deadline,
-) -> Option<(BrowserEndpoint, CdpConnection)> {
-    let record = load_launched(store)?;
-    let endpoint = record.endpoint().ok()?;
-    match connect(&endpoint, deadline.capped(RECORD_BUDGET)) {
-        Ok(connection) => Some((endpoint, connection)),
-        Err(_) => {
+) -> Result<Option<(BrowserEndpoint, CdpConnection)>, AppError> {
+    let Some(record) = load_launched(store) else {
+        return Ok(None);
+    };
+    let Ok(endpoint) = record.endpoint() else {
+        forget_launched(store);
+        return Ok(None);
+    };
+    match connect(&endpoint, deadline) {
+        Ok(connection) => Ok(Some((endpoint, connection))),
+        Err(error) if browser_is_gone(&error, process_alive(record.pid)) => {
             forget_launched(store);
-            None
+            Ok(None)
         }
+        Err(error) if error.code == ErrorCode::Timeout => Err(error.with_suggestion(
+            "The browser 'open --launch' started is busy; retry with a longer --timeout",
+        )),
+        Err(error) => Err(error),
     }
+}
+
+/// Whether a failed connection to a launched browser means it is gone: the
+/// port refused the connection, or its process is known to have exited.
+pub(crate) fn browser_is_gone(error: &AppError, alive: Option<bool>) -> bool {
+    error.kind() == Some("cdp_endpoint_unavailable") || alive == Some(false)
+}
+
+/// Whether process `pid` exists, where `/proc` can say; `None` elsewhere.
+fn process_alive(pid: u32) -> Option<bool> {
+    let proc_root = Path::new("/proc");
+    proc_root
+        .join("self")
+        .exists()
+        .then(|| proc_root.join(pid.to_string()).exists())
 }
 
 fn default_port(deadline: Deadline) -> Option<(BrowserEndpoint, CdpConnection)> {
@@ -85,3 +111,7 @@ fn no_browser() -> AppError {
     .with_details(serde_json::json!({ "kind": "cdp_no_browser" }))
     .with_disposition(DeliverySemantics::not_delivered())
 }
+
+#[cfg(test)]
+#[path = "endpoint_choice_tests.rs"]
+mod tests;
