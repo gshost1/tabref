@@ -81,11 +81,11 @@ def kind(arm, cmd):
         return "guide" if re.search(r"browser-harness\s+skill", cmd) else "script"
     subs = []
     for seg in re.split(r"&&|\|\||[;|\n]", cmd):
-        m = re.search(rf"{re.escape(tool)}((?:\s+--?[\w-]+(?:[= ](?!-)\S+)?)*)\s+([a-z][\w-]*)", seg)
+        m = re.search(rf"(?<![./\w-]){re.escape(tool)}((?:\s+--?[\w-]+(?:[= ](?!-)\S+)?)*)\s+([a-z][\w-]*)", seg)
         if m:
             subs.append((m.group(2), re.search(r">\s*/dev/null", seg) is not None))
     if not subs:
-        return "other" if tool not in cmd else "tool"
+        return "snapshot file" if ".playwright-cli/" in cmd else "other"
     shown = [sub for sub, hidden in subs if not hidden]
     sub = shown[-1] if shown else subs[-1][0]
     return "guide" if sub in ("skills", "skill") else sub

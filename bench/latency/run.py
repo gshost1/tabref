@@ -146,7 +146,7 @@ class PW(Adapter):
 
     def parse_refs(self, out, work):
         refs = {}
-        for key, pat in (("count", r'button "Count" \[ref=([a-z0-9]+)\]'), ("name", r'textbox "Name"(?: \[[a-z]+\])* \[ref=([a-z0-9]+)\]')):
+        for key, pat in (("count", r'button "Count"(?: \[[a-z]+\])* \[ref=([a-z0-9]+)\]'), ("name", r'textbox "Name"(?: \[[a-z]+\])* \[ref=([a-z0-9]+)\]')):
             m = re.search(pat, out)
             if m:
                 refs[key] = m.group(1)
