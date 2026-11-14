@@ -11,6 +11,7 @@ use super::view_footer::{footer_line, frames_line};
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
 use super::view_scope::ViewScope;
+use super::node_line::quote_text;
 use super::view_subject::ViewSubject;
 use crate::output::outcome::Outcome;
 
@@ -62,7 +63,7 @@ pub(crate) fn page_view(
 }
 
 fn header(subject: &ViewSubject<'_>, options: &ViewOptions) -> String {
-    let mut text = format!("page \"{}\" {}", subject.info.title.trim(), subject.info.url);
+    let mut text = format!("page {} {}", quote_text(subject.info.title.trim()), subject.info.url);
     if let (RefStyle::Short, Some(snapshot)) = (options.refs, subject.snapshot_id) {
         if subject.ref_count > 0 {
             text.push_str(&format!(" · refs eN = @{snapshot}:eN"));
