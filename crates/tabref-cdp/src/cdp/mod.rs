@@ -1,5 +1,9 @@
 pub(crate) mod cdp_event;
 pub(crate) mod connection;
+pub(crate) mod event_buffer;
 pub(crate) mod frame_envelope;
 pub(crate) mod incoming;
 pub(crate) mod protocol_error;
+pub(crate) mod reply_stash;
+pub(crate) mod session_ledger;
+pub(crate) mod waiter;

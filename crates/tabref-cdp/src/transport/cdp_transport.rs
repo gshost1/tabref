@@ -7,4 +7,10 @@ pub trait CdpTransport: Send {
     fn send_text(&mut self, text: &str, deadline: Deadline) -> Result<(), AppError>;
 
     fn receive_text(&mut self, deadline: Deadline) -> Result<String, AppError>;
+
+    /// A frame that already arrived, without waiting for one: `None` when
+    /// nothing is ready, or when the transport cannot tell.
+    fn poll_text(&mut self) -> Result<Option<String>, AppError> {
+        Ok(None)
+    }
 }
