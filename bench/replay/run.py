@@ -74,19 +74,21 @@ def remap_refs(cmd, rec_label, new_ref):
 
 
 def kind(arm, cmd):
-    """What a call was for, by the tool's first subcommand (for the token breakdown)."""
+    """What a call's output was, for the token breakdown: the tool subcommand of the last tool segment whose stdout
+    is not thrown away (`agent-desktop click @r >/dev/null; agent-desktop snapshot ...` is a snapshot)."""
     tool = arms.WEB_TOOL[arm]
     if arm == "bh":
-        if re.search(r"browser-harness\s+skill", cmd):
-            return "guide"
-        return "script"
-    m = re.search(rf"{re.escape(tool)}((?:\s+--?[\w-]+(?:[= ](?!-)\S+)?)*)\s+([a-z][\w-]*)", cmd)
-    if not m:
+        return "guide" if re.search(r"browser-harness\s+skill", cmd) else "script"
+    subs = []
+    for seg in re.split(r"&&|\|\||[;|\n]", cmd):
+        m = re.search(rf"{re.escape(tool)}((?:\s+--?[\w-]+(?:[= ](?!-)\S+)?)*)\s+([a-z][\w-]*)", seg)
+        if m:
+            subs.append((m.group(2), re.search(r">\s*/dev/null", seg) is not None))
+    if not subs:
         return "other" if tool not in cmd else "tool"
-    sub = m.group(2)
-    if sub in ("skills", "skill"):
-        return "guide"
-    return sub
+    shown = [sub for sub, hidden in subs if not hidden]
+    sub = shown[-1] if shown else subs[-1][0]
+    return "guide" if sub in ("skills", "skill") else sub
 
 
 class Replay:

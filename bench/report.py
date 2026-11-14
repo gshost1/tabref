@@ -116,6 +116,30 @@ def load_replay(files):
     return rows, paths
 
 
+def replay_kind(arm, cmd):
+    import importlib.util
+    if "mod" not in _REPLAY:
+        spec = importlib.util.spec_from_file_location("replay_run", HERE / "replay" / "run.py")
+        _REPLAY["mod"] = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_REPLAY["mod"])
+    return _REPLAY["mod"].kind(arm, cmd)
+
+
+_REPLAY = {}
+
+
+def recorded_cmds():
+    """(arm, task, round) -> the replayed commands in order (refused ones dropped), from replay/recorded/."""
+    out = {}
+    for f in (HERE / "replay" / "recorded").glob("*.jsonl"):
+        for line in f.read_text().splitlines():
+            if line.strip():
+                rec = json.loads(line)
+                out[(rec["arm"], rec["task"], rec["round"])] = [s["cmd"] for s in rec["steps"]
+                                                                if not s.get("denied") and s.get("tool") == "Bash"]
+    return out
+
+
 def replay(a):
     rows, paths = load_replay(a.files)
     rows = [r for r in rows if r.get("valid")]
@@ -155,13 +179,16 @@ def replay(a):
             cells.append(f"{med([r['tool_s'] for r in g]):.2f} s / {med([r['out_tokens'] for r in g]):.0f} / "
                          f"{sum(r['success'] for r in g)}/{len(g)}")
         lines.append(f"| {task} | " + " | ".join(cells) + " |")
-    lines += ["", "### Where the output tokens go (share of all replayed output tokens, by call kind)", ""]
+    lines += ["", "### Where the output tokens go (share of all replayed output tokens, by what the call printed)", ""]
+    cmds = recorded_cmds()
     for arm in arms:
         kinds = defaultdict(int)
         for r in rows:
             if r["arm"] == arm:
-                for st in r.get("steps", []):
-                    kinds[st["kind"]] += st["chars"]
+                rec = cmds.get((arm, r["task"], r["round"]))
+                for i, st in enumerate(r.get("steps", [])):
+                    k = replay_kind(arm, rec[i]) if rec and r["mode"] == "recorded" and i < len(rec) else st["kind"]
+                    kinds[k] += st["chars"]
         total = sum(kinds.values()) or 1
         top = sorted(kinds.items(), key=lambda kv: -kv[1])[:6]
         lines.append(f"- {arm}: " + ", ".join(f"{k} {v / total:.0%}" for k, v in top))
