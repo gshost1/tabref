@@ -375,11 +375,17 @@ def ancestors():
 
 
 def kill_matching(pat):
-    """pkill -f, minus this process and its parents: the pattern may well be in the operator's own command line."""
+    """pkill -f for daemons: only processes whose program or script (argv[0] or argv[1]) lies under `pat`, and never
+    this process or its parents. A shell whose command line merely mentions the path (an operator's, another
+    bench run's) is left alone."""
     found = subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", "--", pat], capture_output=True, text=True).stdout
     mine = ancestors()
     for pid in (int(x) for x in found.split()):
-        if pid not in mine:
+        try:
+            argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[:2]
+        except OSError:
+            continue
+        if pid not in mine and any(a.decode(errors="replace").startswith(pat) for a in argv):
             try:
                 os.kill(pid, signal.SIGTERM)
             except ProcessLookupError:
