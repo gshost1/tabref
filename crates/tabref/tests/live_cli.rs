@@ -49,7 +49,7 @@ fn open_prints_a_snapshot_and_actions_read_back() {
     let email = opened.ref_for("textfield \"Email\"");
     let filled = tabref.ok(&["fill", &email, "ada@example.test"]);
     assert!(
-        filled.stdout.contains("= \"ada@example.test\""),
+        filled.stdout.contains("-> \"ada@example.test\""),
         "{}",
         filled.stdout
     );
@@ -68,7 +68,7 @@ fn open_prints_a_snapshot_and_actions_read_back() {
         tabref
             .ok(&["select", &size, "Large"])
             .stdout
-            .contains("selected \"Large\"")
+            .contains("-> \"Large\"")
     );
 
     let pressed = tabref.ok(&["press", "Enter", &email]);

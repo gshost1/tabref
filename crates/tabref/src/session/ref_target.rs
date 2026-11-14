@@ -46,7 +46,10 @@ pub(crate) fn is_short_ref(text: &str) -> bool {
 
 fn short_element(text: &str) -> Option<u32> {
     let trimmed = text.trim();
-    let digits = trimmed.strip_prefix('@').unwrap_or(trimmed).strip_prefix('e')?;
+    let digits = trimmed
+        .strip_prefix('@')
+        .unwrap_or(trimmed)
+        .strip_prefix('e')?;
     if digits.is_empty() || digits.len() > 9 || !digits.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
@@ -100,7 +103,9 @@ impl Session {
 
     fn expand_short_ref(&mut self, element: u32) -> Result<RefId, AppError> {
         let latest = self.store().latest_id().ok_or_else(|| {
-            AppError::invalid_args(format!("e{element} needs a snapshot; run 'tabref snap' first"))
+            AppError::invalid_args(format!(
+                "e{element} needs a snapshot; run 'tabref snap' first"
+            ))
         })?;
         let map = self.store().load(&latest)?;
         let tab = self.tab_id()?;
@@ -116,7 +121,9 @@ impl Session {
         for (id, other) in recent_maps(self, &latest) {
             let differs = other.tab_id == map.tab_id
                 && other.url == map.url
-                && other.get(element).is_some_and(|seen| seen.token != entry.token);
+                && other
+                    .get(element)
+                    .is_some_and(|seen| seen.token != entry.token);
             if differs {
                 return Err(AppError::new(
                     ErrorCode::AmbiguousTarget,
@@ -133,7 +140,12 @@ impl Session {
 
     /// `error` with the elements of a fresh snapshot that carry the stale
     /// ref's role and name, so one more step can use the fresh ref.
-    fn with_fresh_candidate(&mut self, mut error: AppError, ref_id: &RefId, entry: &RefEntry) -> AppError {
+    fn with_fresh_candidate(
+        &mut self,
+        mut error: AppError,
+        ref_id: &RefId,
+        entry: &RefEntry,
+    ) -> AppError {
         let Ok(captured) = self.capture() else {
             return error;
         };
@@ -150,7 +162,11 @@ impl Session {
             many => format!(
                 "{}; fresh candidates: {}",
                 error.message,
-                many.iter().take(FRESH_SHOWN).cloned().collect::<Vec<_>>().join("; ")
+                many.iter()
+                    .take(FRESH_SHOWN)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("; ")
             ),
         };
         error.suggestion = None;

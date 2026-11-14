@@ -9,7 +9,10 @@ fn a_same_origin_address_prints_as_its_path() {
         "/admin/catalog/products?saved=1"
     );
     assert_eq!(short_url(EDIT, "http://127.0.0.1:8792"), "/");
-    assert_eq!(short_url(EDIT, "https://example.com/a"), "https://example.com/a");
+    assert_eq!(
+        short_url(EDIT, "https://example.com/a"),
+        "https://example.com/a"
+    );
 }
 
 #[test]

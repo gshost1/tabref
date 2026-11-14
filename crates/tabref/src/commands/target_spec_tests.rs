@@ -8,7 +8,10 @@ fn refs_stay_refs_and_other_text_is_a_name() {
         TargetSpec::from_arg("@s8f3k2p9:e4").unwrap(),
         TargetSpec::Ref("@s8f3k2p9:e4".into())
     );
-    assert_eq!(TargetSpec::from_arg("e12").unwrap(), TargetSpec::Ref("e12".into()));
+    assert_eq!(
+        TargetSpec::from_arg("e12").unwrap(),
+        TargetSpec::Ref("e12".into())
+    );
     let TargetSpec::Find(locator) = TargetSpec::from_arg("Add to cart").unwrap() else {
         panic!("not a locator");
     };

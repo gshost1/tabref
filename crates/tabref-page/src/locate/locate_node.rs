@@ -50,7 +50,11 @@ pub fn locate(
             Some(found) => near_anchors(&nodes, &tier, found, locator.nth)
                 .ok_or_else(|| past_last(locator, tier.len()))?,
             None => match locator.nth {
-                Some(n) => vec![*tier.get(n - 1).ok_or_else(|| past_last(locator, tier.len()))?],
+                Some(n) => vec![
+                    *tier
+                        .get(n - 1)
+                        .ok_or_else(|| past_last(locator, tier.len()))?,
+                ],
                 None => tier,
             },
         };

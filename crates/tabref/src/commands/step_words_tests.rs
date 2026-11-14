@@ -21,10 +21,17 @@ fn lines_and_semicolons_end_steps_and_quotes_keep_spaces() {
     );
     assert_eq!(
         steps[1].words,
-        vec![Word::bare("fill"), Word::quoted("Price ($)"), Word::bare("62.00")]
+        vec![
+            Word::bare("fill"),
+            Word::quoted("Price ($)"),
+            Word::bare("62.00")
+        ]
     );
     assert_eq!(steps[2].words[1], Word::quoted("Save"));
-    assert_eq!(steps.iter().map(|step| step.line).collect::<Vec<_>>(), [1, 2, 2, 5]);
+    assert_eq!(
+        steps.iter().map(|step| step.line).collect::<Vec<_>>(),
+        [1, 2, 2, 5]
+    );
 }
 
 #[test]

@@ -122,9 +122,7 @@ pub(crate) fn decimal(text: &str) -> Option<String> {
         && !(whole.is_empty() && fraction.is_empty())
         && !(mantissa.ends_with('.'));
     let exponent_ok = exponent.is_none_or(|exponent| {
-        let exponent = exponent
-            .strip_prefix(['+', '-'])
-            .unwrap_or(exponent);
+        let exponent = exponent.strip_prefix(['+', '-']).unwrap_or(exponent);
         !exponent.is_empty() && digits(exponent)
     });
     (mantissa_ok && exponent_ok).then(|| trimmed.to_owned())

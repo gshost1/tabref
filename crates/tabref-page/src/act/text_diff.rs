@@ -82,6 +82,13 @@ fn hunks<'a>(old: &'a [String], new: &'a [String]) -> Vec<(&'a [String], &'a [St
 }
 
 fn pair_up(removed: &[String], added: &[String], changes: &mut Vec<TextChange>) {
+    if let ([before], [after]) = (removed, added) {
+        changes.push(TextChange::Changed {
+            before: before.clone(),
+            after: after.clone(),
+        });
+        return;
+    }
     let mut added_rest = added;
     for line in removed {
         match added_rest.first() {

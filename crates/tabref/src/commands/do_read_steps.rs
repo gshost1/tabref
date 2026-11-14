@@ -118,7 +118,11 @@ pub(crate) fn read_step(
     };
     let mut text = format!("ok read {} {shown}", target.label);
     if let Some(checked) = reading.checked {
-        text.push_str(if checked { " [checked]" } else { " [unchecked]" });
+        text.push_str(if checked {
+            " [checked]"
+        } else {
+            " [unchecked]"
+        });
     }
     Ok(StepDone {
         text,
@@ -140,7 +144,11 @@ pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone
     }
     let captured = session.capture()?;
     let matches = find_matches(&captured.tree, &needle, None);
-    let mut text = format!("ok find {} ({} matches)", quote_text(&needle), matches.len());
+    let mut text = format!(
+        "ok find {} ({} matches)",
+        quote_text(&needle),
+        matches.len()
+    );
     for line in matches.iter().take(FOUND_SHOWN) {
         text.push_str("\n  ");
         text.push_str(line);

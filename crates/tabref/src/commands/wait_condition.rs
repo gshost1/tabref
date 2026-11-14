@@ -51,11 +51,11 @@ impl Condition {
             rest => Self::Text(joined(rest)),
         };
         match &condition {
-            Self::Text(text) | Self::Gone(text) | Self::Url(text) if text.trim().is_empty() => Err(
-                AppError::invalid_args(
+            Self::Text(text) | Self::Gone(text) | Self::Url(text) if text.trim().is_empty() => {
+                Err(AppError::invalid_args(
                     "expect needs what to check: text \"Saved\", gone \"Loading\", url ~saved=1 or idle",
-                ),
-            ),
+                ))
+            }
             _ => Ok(condition),
         }
     }

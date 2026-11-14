@@ -6,8 +6,7 @@ use crate::{CdpConnection, PageSession};
 /// One turn of the page's event loop, posted through a message channel
 /// rather than a timer, since a background tab throttles timers to once a
 /// second. Tasks an action queued, such as a form submission, run first.
-const ONE_TASK: &str =
-    "new Promise(resolve => { const c = new MessageChannel(); c.port1.onmessage = () => resolve(0); c.port2.postMessage(0); })";
+const ONE_TASK: &str = "new Promise(resolve => { const c = new MessageChannel(); c.port1.onmessage = () => resolve(0); c.port2.postMessage(0); })";
 
 /// Waits for one turn of the page's event loop. Whether a navigation began
 /// shows in the events that arrive before the reply. An error says the

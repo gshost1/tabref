@@ -67,7 +67,11 @@ fn grid() -> AccessibilityNode {
     )
 }
 
-fn find(tree: &AccessibilityNode, words: &[Word], intent: LocateIntent) -> Result<String, ErrorCode> {
+fn find(
+    tree: &AccessibilityNode,
+    words: &[Word],
+    intent: LocateIntent,
+) -> Result<String, ErrorCode> {
     let locator = Locator::from_words(words).unwrap();
     locate(tree, &locator, intent)
         .map(|found| format!("{} {}", found.role, found.name.unwrap_or_default()))
@@ -103,23 +107,40 @@ fn several_matches_are_ambiguous_until_a_row_or_nth_picks_one() {
         find(&tree, &[Word::quoted("Edit")], LocateIntent::Click),
         Err(ErrorCode::AmbiguousTarget)
     );
-    let in_row = [Word::quoted("Edit"), Word::bare("in"), Word::quoted("Hoodie-S-Blue")];
+    let in_row = [
+        Word::quoted("Edit"),
+        Word::bare("in"),
+        Word::quoted("Hoodie-S-Blue"),
+    ];
     let locator = Locator::from_words(&in_row).unwrap();
     let found = locate(&tree, &locator, LocateIntent::Click).unwrap();
     let all = [Word::quoted("Edit"), Word::bare("nth"), Word::bare("2")];
-    let second = locate(&tree, &Locator::from_words(&all).unwrap(), LocateIntent::Click).unwrap();
+    let second = locate(
+        &tree,
+        &Locator::from_words(&all).unwrap(),
+        LocateIntent::Click,
+    )
+    .unwrap();
     assert_eq!(found.token, second.token);
 }
 
 #[test]
 fn a_row_without_the_control_finds_nothing_rather_than_a_neighbour() {
     let tree = grid();
-    let words = [Word::quoted("Search"), Word::bare("in"), Word::quoted("Hoodie-S-Blue")];
+    let words = [
+        Word::quoted("Search"),
+        Word::bare("in"),
+        Word::quoted("Hoodie-S-Blue"),
+    ];
     assert_eq!(
         find(&tree, &words, LocateIntent::Click),
         Err(ErrorCode::ElementNotFound)
     );
-    let missing = [Word::quoted("Edit"), Word::bare("in"), Word::quoted("No such row")];
+    let missing = [
+        Word::quoted("Edit"),
+        Word::bare("in"),
+        Word::quoted("No such row"),
+    ];
     assert_eq!(
         find(&tree, &missing, LocateIntent::Click),
         Err(ErrorCode::ElementNotFound)
@@ -132,7 +153,11 @@ fn a_miss_names_the_closest_controls() {
     let locator = Locator::from_words(&[Word::quoted("Serch")]).unwrap();
     let error = locate(&tree, &locator, LocateIntent::Click).unwrap_err();
     assert_eq!(error.code, ErrorCode::ElementNotFound);
-    assert!(error.message.contains(r#"button "Search""#), "{}", error.message);
+    assert!(
+        error.message.contains(r#"button "Search""#),
+        "{}",
+        error.message
+    );
 }
 
 #[test]
@@ -151,10 +176,21 @@ fn a_button_is_found_by_its_description_near_a_title() {
     let tree = node(
         "webarea",
         "",
-        vec![node("table", "", vec![post("Books set in winter"), post("Long series")])],
+        vec![node(
+            "table",
+            "",
+            vec![post("Books set in winter"), post("Long series")],
+        )],
     );
-    let words = [Word::quoted("Upvote"), Word::bare("in"), Word::quoted("Books set in winter")];
-    assert_eq!(find(&tree, &words, LocateIntent::Click), Ok("button ▲".into()));
+    let words = [
+        Word::quoted("Upvote"),
+        Word::bare("in"),
+        Word::quoted("Books set in winter"),
+    ];
+    assert_eq!(
+        find(&tree, &words, LocateIntent::Click),
+        Ok("button ▲".into())
+    );
 }
 
 #[test]
@@ -170,13 +206,33 @@ fn the_control_nearest_the_text_wins_inside_nested_comments() {
     let tree = node(
         "webarea",
         "",
-        vec![comment("I run this site", vec![comment("Great news", Vec::new())])],
+        vec![comment(
+            "I run this site",
+            vec![comment("Great news", Vec::new())],
+        )],
     );
-    let near_mod = [Word::quoted("Reply"), Word::bare("in"), Word::quoted("I run this site")];
-    let near_reply = [Word::quoted("Reply"), Word::bare("in"), Word::quoted("Great news")];
-    let first = locate(&tree, &Locator::from_words(&near_mod).unwrap(), LocateIntent::Click).unwrap();
-    let second =
-        locate(&tree, &Locator::from_words(&near_reply).unwrap(), LocateIntent::Click).unwrap();
+    let near_mod = [
+        Word::quoted("Reply"),
+        Word::bare("in"),
+        Word::quoted("I run this site"),
+    ];
+    let near_reply = [
+        Word::quoted("Reply"),
+        Word::bare("in"),
+        Word::quoted("Great news"),
+    ];
+    let first = locate(
+        &tree,
+        &Locator::from_words(&near_mod).unwrap(),
+        LocateIntent::Click,
+    )
+    .unwrap();
+    let second = locate(
+        &tree,
+        &Locator::from_words(&near_reply).unwrap(),
+        LocateIntent::Click,
+    )
+    .unwrap();
     assert_ne!(first.token, second.token);
 }
 
@@ -192,11 +248,19 @@ fn text_the_page_shows_stands_for_the_control_around_it() {
         }],
     );
     assert_eq!(
-        find(&tree, &[Word::quoted("Open the report")], LocateIntent::Click),
+        find(
+            &tree,
+            &[Word::quoted("Open the report")],
+            LocateIntent::Click
+        ),
         Ok("link ".into())
     );
     assert_eq!(
-        find(&tree, &[Word::quoted("Open the report")], LocateIntent::Fill),
+        find(
+            &tree,
+            &[Word::quoted("Open the report")],
+            LocateIntent::Fill
+        ),
         Err(ErrorCode::ElementNotFound)
     );
 }

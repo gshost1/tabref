@@ -37,7 +37,12 @@ fn loops_nest() {
 
 #[test]
 fn a_loop_without_an_end_or_with_odd_values_is_refused() {
-    for text in ["for id in 1 2\nopen /{id}", "for a b in 1 2 3\nend", "end", "for in 1\nend"] {
+    for text in [
+        "for id in 1 2\nopen /{id}",
+        "for a b in 1 2 3\nend",
+        "end",
+        "for in 1\nend",
+    ] {
         let error = expand(&split_steps(text).unwrap()).unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgs, "{text}");
     }

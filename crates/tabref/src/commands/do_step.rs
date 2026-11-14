@@ -55,9 +55,9 @@ pub(crate) fn run_step(
             select::act(session, found, value, deadline)?
         }
         "press" => {
-            let (key, aim) = args.split_first().ok_or_else(|| {
-                AppError::invalid_args("press needs a key, as in: press Enter")
-            })?;
+            let (key, aim) = args
+                .split_first()
+                .ok_or_else(|| AppError::invalid_args("press needs a key, as in: press Enter"))?;
             let aim = aim.strip_prefix(&[Word::bare("in")]).unwrap_or(aim);
             let found = match aim {
                 [] => None,
@@ -128,12 +128,7 @@ fn scroll_step(
         });
     }
     let found = target(session, args, LocateIntent::Click, deadline)?;
-    scroll_into_view(
-        session.connection(),
-        &found.session,
-        &found.token,
-        deadline,
-    )?;
+    scroll_into_view(session.connection(), &found.session, &found.token, deadline)?;
     Ok(StepDone {
         text: format!("ok scroll {} into view", found.label),
         data: json!({ "action": "scroll", "target": found.label }),

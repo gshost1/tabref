@@ -24,10 +24,7 @@ pub(crate) fn normalize(text: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
-    collapsed
-        .trim_end_matches([':', '*'])
-        .trim_end()
-        .to_owned()
+    collapsed.trim_end_matches([':', '*']).trim_end().to_owned()
 }
 
 /// The best rank at which `node` matches the normalized `query`.

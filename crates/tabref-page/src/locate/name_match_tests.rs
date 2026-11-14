@@ -25,7 +25,10 @@ fn an_exact_name_outranks_a_prefix_and_words_inside() {
     assert_eq!(rank(&named("Save", None), "save"), Some(EXACT_NAME));
     assert_eq!(rank(&named("Price ($)", None), "price"), Some(NAME_PREFIX));
     assert_eq!(rank(&named("Unit price", None), "price"), Some(NAME_WORDS));
-    assert_eq!(rank(&named("▲", Some("Upvote")), "upvote"), Some(EXACT_DESCRIPTION));
+    assert_eq!(
+        rank(&named("▲", Some("Upvote")), "upvote"),
+        Some(EXACT_DESCRIPTION)
+    );
     assert_eq!(
         rank(&named("▲", Some("Upvote this post")), "upvote"),
         Some(DESCRIPTION_WORDS)

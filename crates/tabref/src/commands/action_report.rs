@@ -21,7 +21,10 @@ const NEW_LINE_CHARS: usize = 80;
 /// changed lines, the controls that appeared with their refs, or, when it
 /// led to another page, a snapshot of that page.
 pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome, AppError> {
-    let mut outcome = Outcome::new(format!("{} {}", past(acted.verb), acted.summary), acted.data);
+    let mut outcome = Outcome::new(
+        format!("{} {}", past(acted.verb), acted.summary),
+        acted.data,
+    );
     if let Some(effects) = &acted.effects {
         let (lines, data) = effect_block(session, effects, &acted.known)?;
         for line in lines {
@@ -119,7 +122,12 @@ fn effect_block(
         let mut appeared = Vec::new();
         new_controls(&captured.tree, known, &mut appeared);
         let shown = appeared.len().min(NEW_SHOWN);
-        lines.extend(appeared.iter().take(shown).map(|line| format!("new {line}")));
+        lines.extend(
+            appeared
+                .iter()
+                .take(shown)
+                .map(|line| format!("new {line}")),
+        );
         if appeared.len() > shown {
             lines.push(format!("+{} more new: tabref snap", appeared.len() - shown));
         }
@@ -139,7 +147,10 @@ fn within_budget(changes: &[String]) -> Vec<String> {
         shown.push(change.clone());
     }
     if shown.len() < changes.len() {
-        shown.push(format!("+{} more: tabref snap", changes.len() - shown.len()));
+        shown.push(format!(
+            "+{} more: tabref snap",
+            changes.len() - shown.len()
+        ));
     }
     shown
 }

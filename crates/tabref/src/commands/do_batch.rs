@@ -57,10 +57,18 @@ pub(crate) fn run(
                     let _ = writeln!(stdout, "{}", finished.text);
                     let _ = stdout.flush();
                 }
-                done.push(json!({ "step": step.source, "text": finished.text, "data": finished.data }));
+                done.push(
+                    json!({ "step": step.source, "text": finished.text, "data": finished.data }),
+                );
             }
             Err(error) => {
-                return Err(failed(session, error, (index, steps.len()), &step.source, done));
+                return Err(failed(
+                    session,
+                    error,
+                    (index, steps.len()),
+                    &step.source,
+                    done,
+                ));
             }
         }
     }

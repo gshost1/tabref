@@ -14,7 +14,10 @@ fn a_rewritten_line_shows_the_changed_words_in_their_context() {
         changed("▲ 3 ▼ Books set in winter", "▲ 4 ▼ Books set in winter"),
         "▲ {3 -> 4} ▼ Books set in winter"
     );
-    assert_eq!(changed("Total: 42 EUR", "Total: 47 EUR"), "Total: {42 -> 47} EUR");
+    assert_eq!(
+        changed("Total: 42 EUR", "Total: 47 EUR"),
+        "Total: {42 -> 47} EUR"
+    );
     assert_eq!(changed("Waiting", "Sent ada"), "{Waiting -> Sent ada}");
 }
 

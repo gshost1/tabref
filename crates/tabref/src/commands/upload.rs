@@ -25,11 +25,7 @@ pub(crate) fn run(
         files,
         deadline,
     )?;
-    let mut text = format!(
-        "uploaded {} to {}",
-        uploaded.files.join(", "),
-        target.label
-    );
+    let mut text = format!("uploaded {} to {}", uploaded.files.join(", "), target.label);
     if !uploaded.verified {
         text.push_str(" (the input does not show them)");
     }

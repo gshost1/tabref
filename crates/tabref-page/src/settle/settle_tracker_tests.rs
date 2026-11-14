@@ -32,7 +32,10 @@ fn requests_hold_the_settle_until_they_finish_and_the_page_is_quiet() {
         &event("Network.loadingFinished", json!({ "requestId": "1" })),
         now,
     );
-    assert_eq!(tracker.next_wait(now, QUIET), SettleWait::QuietUntil(now + QUIET));
+    assert_eq!(
+        tracker.next_wait(now, QUIET),
+        SettleWait::QuietUntil(now + QUIET)
+    );
     assert_eq!(tracker.next_wait(now + QUIET, QUIET), SettleWait::Done);
     assert!(tracker.saw_network());
 }
