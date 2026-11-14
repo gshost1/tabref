@@ -7,6 +7,7 @@ pub(crate) mod ref_target;
 pub(crate) mod session_options;
 pub(crate) mod snapshot_capture;
 pub(crate) mod tab_choice;
+pub(crate) mod tab_order;
 
 use std::collections::HashMap;
 
@@ -20,6 +21,7 @@ use tabref_core::{AppError, Deadline, RefStore};
 use endpoint_choice::connect_browser;
 use session_options::SessionOptions;
 use tab_choice::choose_tab;
+use tab_order::{order_text, stable_order};
 
 /// Everything one command runs against: the DevTools connection, the page
 /// sessions attached through it, the tab in use and the ref store. Commands
@@ -63,8 +65,19 @@ impl Session {
         &self.store
     }
 
+    /// The open tabs in a stable order: the order of the last listing, new
+    /// tabs at the end. The order is saved, so `tab 1` and `close 1` name
+    /// the tab the agent saw at index 1.
     pub(crate) fn tabs(&mut self) -> Result<Vec<PageTarget>, AppError> {
-        list_page_targets(&mut self.connection, self.deadline)
+        let listed = list_page_targets(&mut self.connection, self.deadline)?;
+        let name = format!("tab-order-{}", self.endpoint.port());
+        let saved = self.store.read_state(&name).unwrap_or_default();
+        let tabs = stable_order(listed, &saved);
+        let order = order_text(&tabs);
+        if order != saved {
+            self.store.write_state(&name, &order)?;
+        }
+        Ok(tabs)
     }
 
     /// The target id of the tab this command works in, chosen once.

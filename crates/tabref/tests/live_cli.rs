@@ -24,8 +24,11 @@ const SHOP: &str = r#"<!doctype html><html><head><title>Shop</title></head><body
 
 const DONE: &str = "<!doctype html><html><head><title>Done</title></head><body><h1>Thank you</h1><a href=\"/\">Back</a></body></html>";
 
+const OTHER: &str =
+    "<!doctype html><html><head><title>Other</title></head><body><h1>Other</h1></body></html>";
+
 fn shop() -> (common::Harness, String) {
-    let port = serve(&[("/", SHOP), ("/done", DONE)]);
+    let port = serve(&[("/", SHOP), ("/done", DONE), ("/other", OTHER)]);
     (harness("shop"), format!("http://127.0.0.1:{port}/"))
 }
 
@@ -195,5 +198,51 @@ fn the_json_envelope_carries_snapshot_lines() {
             .as_str()
             .unwrap()
             .starts_with('s')
+    );
+}
+
+#[test]
+fn tab_indices_keep_naming_the_tabs_the_agent_listed() {
+    if !live() {
+        return;
+    }
+    let (tabref, url) = shop();
+    tabref.ok(&["open", &url]);
+    tabref.ok(&["js", "window.open('/done'); 1"]);
+    let listed = tabref.ok(&["tabs"]);
+    let second = listed
+        .stdout
+        .lines()
+        .find(|line| line.contains("[1]"))
+        .unwrap()
+        .split_whitespace()
+        .find(|word| word.starts_with("id="))
+        .unwrap()
+        .to_owned();
+    tabref.ok(&["js", "window.open('/other'); 1"]);
+    let reordered = tabref.ok(&["tabs"]);
+    assert!(
+        reordered
+            .stdout
+            .lines()
+            .any(|line| line.contains("[1]") && line.contains(&second)),
+        "{}",
+        reordered.stdout
+    );
+    let third = reordered
+        .stdout
+        .lines()
+        .find(|line| line.contains("[2]"))
+        .unwrap();
+    assert!(!third.contains(&second), "{}", reordered.stdout);
+    let closed = tabref.ok(&["close", "1"]);
+    assert!(!closed.stdout.contains(&second), "{}", closed.stdout);
+    assert_eq!(
+        closed
+            .stdout
+            .lines()
+            .filter(|line| line.contains("id="))
+            .count(),
+        2
     );
 }
