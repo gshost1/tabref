@@ -99,8 +99,12 @@ impl Run {
 
 impl Harness {
     pub fn run(&self, args: &[&str]) -> Run {
-        let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
-            .args(["--cdp", &self.browser.port.to_string()])
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tabref"));
+        command.args(["--cdp", &self.browser.port.to_string()]);
+        if !args.contains(&"--timeout") {
+            command.args(["--timeout", "30000"]);
+        }
+        let output = command
             .args(args)
             .env("TABREF_HOME", &self.home)
             .output()
