@@ -60,6 +60,14 @@ pub fn harness(name: &str) -> Harness {
         ..LaunchOptions::default()
     };
     let browser = launch_chrome(&options, Deadline::after(30_000).unwrap()).unwrap();
+    Harness {
+        browser,
+        home: harness_home(name),
+    }
+}
+
+/// A fresh private state directory for one test.
+pub fn harness_home(name: &str) -> PathBuf {
     let home = std::env::temp_dir().join(format!(
         "tabref-cli-{name}-{}-{}",
         std::process::id(),
@@ -67,7 +75,7 @@ pub fn harness(name: &str) -> Harness {
     ));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).unwrap();
-    Harness { browser, home }
+    home
 }
 
 /// What one `tabref` run printed and whether it succeeded.
