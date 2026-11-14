@@ -1,0 +1,6 @@
+target/
+/TASKS.md
+/.plan/
+/.fresh-sealed/
+*.swp
+.DS_Store
