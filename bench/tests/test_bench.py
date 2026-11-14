@@ -1,0 +1,123 @@
+"""Bench plumbing tests: frozen files, arm prompts, wrapper refusals, replay mapping and the scripted sequences' answer
+parsers. No Chrome, no network, no model.
+
+Run: python3 -I -m unittest discover -s bench/tests -p 'test_*.py'   (and bench/heldout/tests for the verifiers)
+"""
+import importlib.util
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+BENCH = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BENCH / "harness"))
+sys.path.insert(0, str(BENCH / "heldout"))
+sys.path.insert(0, str(BENCH))
+sys.path.insert(0, str(BENCH / "replay"))
+import arms  # noqa: E402
+import core  # noqa: E402
+import tasks_heldout as th  # noqa: E402
+
+spec = importlib.util.spec_from_file_location("replay_run", BENCH / "replay" / "run.py")
+replay = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(replay)
+
+
+def script(tid):
+    s = importlib.util.spec_from_file_location(f"s_{tid}", BENCH / "replay" / "tabref" / f"{tid}.py")
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m
+
+
+class Frozen(unittest.TestCase):
+    def test_hashes(self):
+        core.check_frozen()
+
+
+class Prompts(unittest.TestCase):
+    def test_old_arms_are_the_frozen_text(self):
+        import common_ab_linux
+        import common_linux
+        saved = common_linux.SKILLS
+        try:
+            common_linux.SKILLS = Path("/opt/bench/ho-tools/skills")
+            frozen = {a: common_ab_linux.web_system_prompt(a, 4242) for a in ("ad-14", "bh", "pw", "ab")}
+        finally:
+            common_linux.SKILLS = saved
+        for arm, text in frozen.items():
+            want = text.replace("/opt/bench/ho-tools/skills", str(arms.skills_dir()))
+            self.assertEqual(arms.web_system_prompt(arm, 4242), want, arm)
+            self.assertEqual(arms.web_allowed_tools(arm), common_ab_linux.web_allowed_tools(arm), arm)
+
+    def test_tabref_prompt(self):
+        text = arms.web_system_prompt("tabref", 4242)
+        self.assertIn("`tabref skill`", text)
+        self.assertIn("--cdp 4242", text)
+        self.assertTrue(text.endswith(arms.WEB_COMMON))
+        self.assertEqual(arms.web_allowed_tools("tabref")[-1], "Bash(tabref:*)")
+
+
+class Wrappers(unittest.TestCase):
+    def run_wrapper(self, arm, tool, *args, **env):
+        e = dict(os.environ, BENCH_TOOLS="/nonexistent", **env)
+        return subprocess.run([str(core.BIN / arm / tool), *args], capture_output=True, text=True, env=e, timeout=20)
+
+    def test_ab_refuses_like_the_linux_wrapper(self):
+        for args in (["chat", "hi"], ["--cdp", "1", "install"], ["-p", "x", "open"], ["--auto-connect", "open"],
+                     ["plugins"]):
+            self.assertEqual(self.run_wrapper("ab", "agent-browser", *args).returncode, 64, args)
+
+    def test_tabref_without_binary_fails_cleanly(self):
+        p = self.run_wrapper("tabref", "tabref", "skill", TABREF_BIN="/nonexistent/tabref", HO_CDP_PORT="1")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("not found", p.stderr)
+
+
+class Replay(unittest.TestCase):
+    def test_kind(self):
+        self.assertEqual(replay.kind("ab", "agent-browser --cdp 4 snapshot -i | head"), "snapshot")
+        self.assertEqual(replay.kind("ad-14", 'agent-desktop click @s1:e2 >/dev/null'), "click")
+        self.assertEqual(replay.kind("ad-14", "agent-desktop skills get web"), "guide")
+        self.assertEqual(replay.kind("bh", "browser-harness skill"), "guide")
+        self.assertEqual(replay.kind("bh", "browser-harness <<'PY'\nprint(1)\nPY"), "script")
+        self.assertEqual(replay.kind("pw", "playwright-cli attach --cdp=http://127.0.0.1:5"), "attach")
+
+    def test_ids(self):
+        out = '{"snapshot_id": "s2ga03tmrop6gr"} "@s1nx1gba1dag0w:e6 link"'
+        self.assertEqual(replay.ordered(replay.AD_SNAP, out), ["s2ga03tmrop6gr", "s1nx1gba1dag0w"])
+        out = "- [Snapshot](.playwright-cli/page-2026-11-11T09-00-51-071Z.yml)"
+        self.assertEqual(replay.ordered(replay.PW_FILE, out), ["page-2026-11-11T09-00-51-071Z.yml"])
+
+    def test_ref_helper(self):
+        t = replay.Tabref.__new__(replay.Tabref)
+        out = "@s8f3k2p9:e1 link \"Shop\"\n@s8f3k2p9:e2 textbox \"Search entire store\"\nAuthor MOD\n@s8f3k2p9:e9 button \"Reply\""
+        self.assertEqual(t.ref(out, "search entire store"), "@s8f3k2p9:e2")
+        self.assertEqual(t.ref(out, "reply", after=r"\bMOD\b"), "@s8f3k2p9:e9")
+        with self.assertRaises(LookupError):
+            t.ref(out, "nothing here")
+
+
+class Answers(unittest.TestCase):
+    def test_hw1_parser_on_seeded_reviews(self):
+        for rnd in range(5):
+            w = th.world(th.web_seed("hw1", rnd))
+            text = "\n".join(f"{'★' * r['rating']} Review by {r['author']}\n{r['body']}" for r in w["hw1"]["reviews"])
+            got = script("hw1").complainers(text)
+            ok, why = th.verify_hw1(w, ", ".join(got), {})
+            self.assertTrue(ok, why)
+
+    def test_hw2_parser_on_seeded_orders(self):
+        import datetime
+        m = script("hw2")
+        for rnd in range(5):
+            w = th.world(th.web_seed("hw2", rnd))
+            text = "\n".join(f"{o['number']} {datetime.date.fromisoformat(o['date']).strftime('%-m/%-d/%y')} "
+                             f"{o['ship_to']} {th.fmt_money(o['total'])} {o['status']}" for o in w["hw2"]["orders"])
+            found = m.ROW.findall(text)
+            self.assertEqual(len(found), len(w["hw2"]["orders"]))
+
+
+if __name__ == "__main__":
+    unittest.main()
