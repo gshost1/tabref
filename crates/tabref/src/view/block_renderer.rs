@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tabref_page::{Block, BlockKind, Item, cut_chars};
 
 use super::cut_stats::CutStats;
-use super::line_text::{LineText, is_prose};
+use super::line_text::{LineText, is_prose, label_echoes};
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
 
@@ -61,7 +61,7 @@ impl<'a> BlockRenderer<'a> {
             BlockKind::List => self.render_list(block, depth),
             BlockKind::Table => self.render_table(block, depth),
             BlockKind::Pre => self.render_pre(block, depth),
-            BlockKind::Landmark(_) | BlockKind::Dialog | BlockKind::Frame | BlockKind::Details => {
+            BlockKind::Landmark(_) | BlockKind::Dialog | BlockKind::Frame => {
                 self.render_labelled(block, depth);
             }
             _ => match self.pack(block) {
@@ -113,7 +113,9 @@ impl<'a> BlockRenderer<'a> {
     }
 
     /// Prints the content of `block` part by part: each run of inline
-    /// content as a line, each nested block in turn, repeats marked.
+    /// content as a line, each nested block in turn. A nested block of the
+    /// same shape as its parent (a reply inside a comment) is indented.
+    /// Repeats are marked once the whole group is printed.
     pub(crate) fn render_children(&mut self, block: &Block, depth: usize) {
         let mut totals: HashMap<&str, usize> = HashMap::new();
         for inner in block.blocks() {
@@ -121,51 +123,73 @@ impl<'a> BlockRenderer<'a> {
                 *totals.entry(key).or_default() += 1;
             }
         }
-        let mut seen: HashMap<&str, usize> = HashMap::new();
-        let mut run: Vec<&Item> = Vec::new();
-        for item in &block.items {
+        let echoes = label_echoes(&block.items);
+        let mut members: Vec<(&str, usize, usize)> = Vec::new();
+        let mut run: Vec<usize> = Vec::new();
+        for (position, item) in block.items.iter().enumerate() {
             let Item::Block(inner) = item else {
-                run.push(item);
+                run.push(position);
                 continue;
             };
-            self.flush_run(&mut run, depth);
-            let total = inner.key.as_deref().and_then(|key| totals.get(key)).copied().unwrap_or(0);
+            self.flush_run(block, &echoes, &mut run, depth);
+            let nested = inner.key.is_some() && inner.key == block.key;
             let before = self.lines.len();
-            self.render_block(inner, depth);
-            if total >= 2 {
-                let key = inner.key.as_deref().unwrap_or_default();
-                let place = seen.entry(key).or_default();
-                *place += 1;
-                self.mark_repeat(before, *place, total, depth);
+            self.render_block(inner, if nested { depth + 1 } else { depth });
+            let repeated = inner.key.as_deref().filter(|key| totals.get(key).copied().unwrap_or(0) >= 2);
+            if let Some(key) = repeated {
+                members.push((key, before, self.lines.len()));
             }
         }
-        self.flush_run(&mut run, depth);
-    }
-
-    fn mark_repeat(&mut self, before: usize, place: usize, total: usize, depth: usize) {
-        let produced = self.lines.len() - before;
-        let Some(first) = self.lines.get_mut(before) else {
-            return;
-        };
-        if produced == 1 {
-            if !first.text.starts_with("- ") && first.heading.is_none() {
-                first.text.insert_str(0, "- ");
-            }
-            return;
-        }
-        first.text.insert_str(0, &format!("({place}/{total}) "));
-        for line in self.lines.iter_mut().skip(before + 1) {
-            if line.depth >= depth {
-                line.depth += 1;
-            }
+        self.flush_run(block, &echoes, &mut run, depth);
+        let mut keys: Vec<&str> = members.iter().map(|member| member.0).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        for key in keys {
+            let ranges: Vec<(usize, usize)> = members
+                .iter()
+                .filter(|member| member.0 == key && member.2 > member.1)
+                .map(|member| (member.1, member.2))
+                .collect();
+            self.mark_group(&ranges, depth);
         }
     }
 
-    fn flush_run(&mut self, run: &mut Vec<&Item>, depth: usize) {
+    /// Marks the members of one repeated group: `- ` before each when every
+    /// member is one line, else `(k/N) ` before each member's first line
+    /// with its other lines indented. A group whose members open with a
+    /// heading is left alone: the headings already divide it.
+    fn mark_group(&mut self, ranges: &[(usize, usize)], depth: usize) {
+        let total = ranges.len();
+        if total < 2 || ranges.iter().any(|(start, _)| self.lines[*start].heading.is_some()) {
+            return;
+        }
+        let multi = ranges.iter().any(|(start, end)| end - start > 1);
+        for (place, (start, end)) in ranges.iter().enumerate() {
+            if !multi {
+                let first = &mut self.lines[*start];
+                if !first.text.starts_with("- ") {
+                    first.text.insert_str(0, "- ");
+                }
+                continue;
+            }
+            self.lines[*start].text.insert_str(0, &format!("({}/{total}) ", place + 1));
+            for line in self.lines.iter_mut().take(*end).skip(start + 1) {
+                if line.depth >= depth {
+                    line.depth += 1;
+                }
+            }
+        }
+    }
+
+    fn flush_run(&mut self, block: &Block, echoes: &[bool], run: &mut Vec<usize>, depth: usize) {
         if run.is_empty() {
             return;
         }
-        let items: Vec<Item> = run.drain(..).cloned().collect();
+        let items: Vec<Item> = run
+            .drain(..)
+            .filter(|position| !echoes.get(*position).copied().unwrap_or(false))
+            .filter_map(|position| block.items.get(position).cloned())
+            .collect();
         let mut line = LineText::new(self.options, is_prose(&items));
         for item in &items {
             line.push_item(item);
@@ -183,28 +207,33 @@ impl<'a> BlockRenderer<'a> {
     /// a landmark or too much to fit. Inline content alone always fits, cut
     /// to the prose limit.
     pub(crate) fn pack(&self, block: &Block) -> Option<String> {
-        self.pack_with(block, true)
+        self.pack_with(block, true, false)
     }
 
     /// The block on one line however long, for a heading or a table cell.
     pub(crate) fn pack_unbounded(&self, block: &Block) -> String {
-        self.pack_with(block, false).unwrap_or_default()
+        self.pack_with(block, false, false).unwrap_or_default()
     }
 
-    fn pack_with(&self, block: &Block, bounded: bool) -> Option<String> {
-        let mut line = LineText::new(self.options, is_prose(&block.items));
+    fn pack_with(&self, block: &Block, bounded: bool, prose_around: bool) -> Option<String> {
+        let prose = prose_around || is_prose(&block.items);
+        let mut line = LineText::new(self.options, prose);
         let mut parts = 0usize;
-        for item in &block.items {
+        let echoes = label_echoes(&block.items);
+        for (position, item) in block.items.iter().enumerate() {
             let Item::Block(inner) = item else {
-                line.push_item(item);
+                if !echoes.get(position).copied().unwrap_or(false) {
+                    line.push_item(item);
+                }
                 continue;
             };
-            if bounded && (folds_never(&inner.kind) || parts >= MAX_PARTS) {
+            let nested = inner.key.is_some() && inner.key == block.key;
+            if bounded && (folds_never(&inner.kind) || parts >= MAX_PARTS || nested) {
                 return None;
             }
             let text = match &inner.kind {
                 BlockKind::List if bounded => self.pack_list(inner)?,
-                _ => self.pack_with(inner, bounded)?,
+                _ => self.pack_with(inner, bounded, prose)?,
             };
             let separator = match inner.kind {
                 BlockKind::Cell | BlockKind::HeaderCell => " | ",
@@ -253,19 +282,17 @@ fn prefix_in_line(kind: &BlockKind) -> &'static str {
     }
 }
 
-/// How a landmark, dialog, frame or disclosure is titled: `nav`,
+/// How a landmark, dialog or frame is titled: `nav`,
 /// `nav "Primary"`, `dialog "Cookies"`, `frame example.com`.
 pub(crate) fn title_of(block: &Block) -> String {
     let base = match &block.kind {
         BlockKind::Landmark(name) => name.clone(),
         BlockKind::Dialog => "dialog".to_owned(),
         BlockKind::Frame => "frame".to_owned(),
-        BlockKind::Details => "details".to_owned(),
         _ => String::new(),
     };
     match (&block.kind, block.label.as_deref()) {
         (BlockKind::Frame, Some(origin)) => format!("{base} {origin}"),
-        (BlockKind::Details, Some(label)) => format!("{base} ({label})"),
         (_, Some(label)) => format!("{base} \"{label}\""),
         (_, None) => base,
     }

@@ -57,6 +57,7 @@ impl OutlineBuilder<'_> {
             depth: context.depth + 1,
             in_section: false,
             in_pre: false,
+            in_main: false,
             frame_depth: context.frame_depth + 1,
         };
         let mut block = Block::new(BlockKind::Frame);

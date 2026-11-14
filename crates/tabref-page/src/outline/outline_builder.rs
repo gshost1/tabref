@@ -70,6 +70,22 @@ impl<'a> OutlineBuilder<'a> {
         }
     }
 
+    /// A closed `<details>` shows only its `<summary>`: the rest is laid out
+    /// for find-in-page but not shown.
+    fn visit_summaries(&mut self, context: &WalkContext, index: usize, into: &mut Block) {
+        let Some(tree) = self.tree(context) else {
+            return;
+        };
+        let Some(node) = tree.node(index) else {
+            return;
+        };
+        for child in &node.children {
+            if tree.node(*child).is_some_and(|child| child.tag() == "SUMMARY") {
+                self.visit(context, *child, into);
+            }
+        }
+    }
+
     pub(crate) fn visit(&mut self, context: &WalkContext, index: usize, into: &mut Block) {
         if context.depth > MAX_DEPTH {
             return;
@@ -146,8 +162,23 @@ impl<'a> OutlineBuilder<'a> {
                 found.name.clear();
                 into.items.push(Item::Control(found));
             }
+            let boxed = node.display().starts_with("inline-");
+            if boxed {
+                push_text(into, " ");
+            }
             self.visit_children(&inner, index, into);
+            if boxed {
+                push_text(into, " ");
+            }
             return;
+        };
+        let kind = match kind {
+            BlockKind::Landmark(name) if name == "main" && context.in_main => BlockKind::Generic,
+            other => other,
+        };
+        let inner = WalkContext {
+            in_main: inner.in_main || kind == BlockKind::Landmark("main".to_owned()),
+            ..inner
         };
         let mut block = Block::new(kind);
         block.key = repeat_key(node);
@@ -158,9 +189,10 @@ impl<'a> OutlineBuilder<'a> {
             found.name.clear();
             block.items.push(Item::Control(found));
         }
-        self.visit_children(&inner, index, &mut block);
         if node.tag() == "DETAILS" && node.attr("open").is_none() {
-            block.label = Some("collapsed".to_owned());
+            self.visit_summaries(&inner, index, &mut block);
+        } else {
+            self.visit_children(&inner, index, &mut block);
         }
         push_block(into, block);
     }

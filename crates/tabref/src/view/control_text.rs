@@ -7,6 +7,7 @@ use super::view_options::ViewOptions;
 const NAME_LIMIT: usize = 100;
 const VALUE_LIMIT: usize = 80;
 const HREF_LIMIT: usize = 120;
+const CROSS_SITE_LIMIT: usize = 80;
 const OPTION_LIMIT: usize = 20;
 const OPTION_TEXT_LIMIT: usize = 40;
 
@@ -26,7 +27,7 @@ pub(crate) fn control_text(control: &Control, options: &ViewOptions, show_href: 
         .href
         .as_deref()
         .filter(|_| show_href)
-        .map(|href| cut_chars(&short_href(&options.page_url, href), HREF_LIMIT));
+        .map(|href| cut_chars(&trim_query(short_href(&options.page_url, href)), HREF_LIMIT));
     let role = role_word(control);
     if !(control.is_link() && control.href.is_some()) {
         out.push_str(role);
@@ -64,6 +65,18 @@ pub(crate) fn control_reading(control: &Control) -> String {
     }
 }
 
+/// A long address on another site loses its query: share and tracking
+/// links carry the page in their query, which costs tokens and says nothing.
+fn trim_query(href: String) -> String {
+    if href.starts_with('/') || href.starts_with('#') || href.chars().count() <= CROSS_SITE_LIMIT {
+        return href;
+    }
+    match href.split_once('?') {
+        Some((path, _)) => format!("{path}?…"),
+        None => href,
+    }
+}
+
 fn role_word(control: &Control) -> &str {
     match control.role.as_str() {
         "textfield" => "textbox",
@@ -88,7 +101,7 @@ fn option_list(control: &Control) -> String {
         .map(|option| {
             let label = cut_chars(&option.label, OPTION_TEXT_LIMIT);
             let value = option.value.trim();
-            if value.is_empty() || value.eq_ignore_ascii_case(option.label.trim()) {
+            if value.is_empty() || option.label.to_lowercase().contains(&value.to_lowercase()) {
                 label
             } else {
                 format!("{label} ({})", cut_chars(value, OPTION_TEXT_LIMIT))

@@ -33,7 +33,7 @@ pub(crate) fn page_view(
     let mut renderer = BlockRenderer::new(options);
     if *scope == ViewScope::Page {
         for dialog in &outline.dialogs {
-            renderer.render_block(dialog, 0);
+            renderer.render_dialog(dialog);
         }
     }
     let body: &Block = match scope {

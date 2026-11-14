@@ -14,9 +14,11 @@ const TYPED_INPUTS: &[&str] = &[
     "email", "color",
 ];
 
-const AX_CONTROL_ROLES: &[&str] = &[
-    "textfield", "radiobutton", "incrementor", "listbox", "menubutton", "treeitem", "colorwell",
-    "disclosure",
+const NOT_CONTROLS: &[&str] = &[
+    "cell", "row", "column", "heading", "list", "listitem", "table", "grid", "statictext",
+    "image", "paragraph", "region", "main", "navigation", "banner", "contentinfo",
+    "complementary", "article", "document", "webarea", "group", "generic", "form", "search",
+    "dialog", "alertdialog", "alert", "status", "note", "term", "definition", "separator",
 ];
 
 const CONTROL_ROLES: &[&str] = &[
@@ -31,7 +33,7 @@ const CONTROL_ROLES: &[&str] = &[
 pub(crate) fn control_of(tree: &DomTree, index: usize, label: Option<&RefLabel>) -> Option<Control> {
     let node = tree.node(index)?;
     let dom_role = dom_role(node);
-    let label = label.filter(|label| label.clickable || CONTROL_ROLES.contains(&label.role.as_str()) || AX_CONTROL_ROLES.contains(&label.role.as_str()));
+    let label = label.filter(|label| label.clickable || !NOT_CONTROLS.contains(&label.role.as_str()));
     if label.is_none() && dom_role.is_none() {
         return None;
     }

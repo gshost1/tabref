@@ -38,7 +38,7 @@ fn shown_in(tree: &DomTree) -> Vec<bool> {
             NodeKind::Text(ref text) => node.is_shown() && !text.trim().is_empty(),
             NodeKind::Element(ref tag) => {
                 node.is_shown()
-                    && (matches!(tag.as_str(), "INPUT" | "SELECT" | "TEXTAREA" | "BUTTON" | "IFRAME" | "FRAME")
+                    && (matches!(tag.as_str(), "INPUT" | "SELECT" | "TEXTAREA" | "BUTTON" | "IFRAME" | "FRAME" | "BR")
                         || node.attr("href").is_some()
                         || node.attr("aria-label").is_some())
             }
