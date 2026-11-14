@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Bench report, Markdown on stdout.
 
-  models   model runs: the old held-out table (heldout/report.py, unchanged: sum of per-task medians of CLI/tool s,
-           wall s, tokens, turns, and pass), then per-task min/median/max. Reads $BENCH_RUNS/results-web.jsonl and,
-           with --baseline, the Linux Sonnet 5.5 pass (results/linux-sonnet-5-5/, arms ad-14 bh pw ab) beside it.
+  models   model runs, scored by heldout/report.py (fork 7faca3235), which cannot reward failure: ranking by pass
+           rate, then per-success wall time (a run's cost over the passes, so a failure only adds cost); per-task
+           pass median / all median / p90 / max kept apart; losses against arms at least as reliable. The v1 sum of
+           all-run medians follows as a secondary view, to compare with past reports (heldout/report_v1.py is the
+           old script). Reads $BENCH_RUNS/results-web.jsonl and, with --baseline, the Linux Sonnet 5.5 pass
+           (results/linux-sonnet-5-5/, arms ad-14 bh pw ab) beside it; the host column says where each arm ran.
   latency  per-command latency (latency/run.py): cold open and first snapshot, warm min/median/max ms, output tokens
   replay   model-free replay (replay/run.py): per arm and task the median tool s, output tokens and passes, the
            recorded run's numbers beside them, and which kinds of call carry the output tokens
@@ -24,7 +27,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "harness"))
 sys.path.insert(0, str(HERE / "heldout"))
 import core  # noqa: E402
-import report as heldout_report  # noqa: E402  (heldout/report.py, unchanged)
+import report as heldout_report  # noqa: E402  (heldout/report.py = fork 7faca3235, unchanged)
 
 BASELINE = HERE / "results" / "linux-sonnet-5-5" / "results-web.jsonl"
 ARMS = ["ad-14", "bh", "pw", "ab", "tabref"]
@@ -38,19 +41,54 @@ def med(xs):
     return statistics.median(xs) if xs else None
 
 
+def rel(path):
+    try:
+        return str(Path(path).resolve().relative_to(HERE.parent))
+    except ValueError:
+        return Path(path).name
+
+
+def hosts_by_arm(paths, model):
+    out = defaultdict(set)
+    for path in paths:
+        if Path(path).exists():
+            for line in Path(path).read_text().splitlines():
+                if line.strip():
+                    r = json.loads(line)
+                    if r.get("valid") is not False and (not model or r.get("model") == model):
+                        out[r.get("arm")].add(r.get("host", "mac"))
+    return out
+
+
 def models(a):
     paths = a.results or [str(core.runs_dir() / "results-web.jsonl")]
     if a.baseline:
         paths.append(str(BASELINE))
-    rows, skipped = heldout_report.load(paths, a.model, None)
-    rows = [r for r in rows if r["arm"] in (a.arms.split(",") if a.arms else ARMS)]
+    want = set(a.arms.split(",")) if a.arms else set(ARMS)
+    rows, skipped = heldout_report.load(paths, a.model, None, want)
     if not rows:
         return ["## Model runs", "", f"No valid rows in {paths}.", ""]
+    hosts = hosts_by_arm(paths, a.model)
+    ranked, common, tasks = heldout_report.ranking(rows, "web")
     lines = ["## Model runs", "", f"{len(rows)} valid runs ({skipped} invalid skipped); models: "
-             f"{', '.join(sorted({r['model'] for r in rows}))}. Sources: {', '.join(paths)}.",
+             f"{', '.join(sorted({r['model'] for r in rows}))}. Sources: {', '.join(rel(x) for x in paths)}.",
              "CLI s is tool time (the arm wrapper's log); tokens are input (uncached + cache read + cache write) plus "
-             "output.", ""]
-    lines += heldout_report.summary_table(rows, "web") + [""]
+             "output. A run that hit the cap is a valid failure.", "",
+             "### web: ranking (cannot reward failing)", "",
+             f"Order: pass rate, then per-success wall time. Per-success sums cover the {len(common)}/{len(tasks)} tasks "
+             "where every arm passes at least once.", "",
+             "| rank | arm | host | pass | rate | tasks with 0 passes | CLI s / success | wall s / success | "
+             "tokens / success | turns / success |", "|---|---|---|---|---|---|---|---|---|---|"]
+    for i, x in enumerate(ranked, 1):
+        per = " | ".join(heldout_report.fmt(x["per"][m], m) for m, _ in heldout_report.METRICS)
+        lines.append(f"| {i} | {x['arm']} | {', '.join(sorted(hosts.get(x['arm'], {'?'})))} | {x['passes']}/{x['runs']} | "
+                     f"{x['passes'] / max(x['runs'], 1):.0%} | {x['zero_tasks']} | {per} |")
+    rest = heldout_report.summary_tables(rows, "web")
+    second = next(i for i, line in enumerate(rest) if i > 0 and line.startswith("### "))
+    lines += [""] + rest[second:] + [""]
+    focus = "tabref" if any(r["arm"] == "tabref" for r in rows) else "ad-14"
+    lines += [f"### Where {focus} loses (pass rate, then pass medians against arms at least as reliable)", ""]
+    lines += heldout_report.losses(rows, focus) + [""]
     lines += ["### web per task", ""] + heldout_report.task_tables(rows, "web")
     return lines
 
@@ -154,24 +192,43 @@ def replay(a):
              "Sonnet 5.5 calls (answer = the model's recorded answer, state = this replay's site); tabref runs its "
              "scripted sequence (replay/tabref/). Medians over rounds. tool s = arm wrapper log; out tok = chars/4 of "
              "what the Bash tool shows. rec = the recorded run on the boxd VM.", "",
-             "### Sum of per-task medians", "",
+             "### Recorded runs replayed: sum of per-task medians", "",
              "| arm | tool s | rec tool s | out tok | rec out tok | calls | pass | rec pass | tasks |",
              "|---|---|---|---|---|---|---|---|---|"]
+    sums = {}
     for arm in arms:
         t = [k[1] for k in by if k[0] == arm]
         rs = [by[(arm, x)] for x in t]
-        s = lambda key: sum(med([r.get(key) for r in g]) or 0 for g in rs)  # noqa: E731
-        passes = sum(r["success"] for g in rs for r in g)
-        rec_pass = sum(bool(r.get("rec_success")) for g in rs for r in g if "rec_success" in r)
+        sums[arm] = lambda key, rs=rs: sum(med([r.get(key) for r in g]) or 0 for g in rs)  # noqa: E731
         n = sum(len(g) for g in rs)
-        rec_cell = f"{rec_pass}/{n}" if arm != "tabref" else "–"
+        passes = sum(r["success"] for g in rs for r in g)
+        if arm == "tabref":
+            continue
+        s = sums[arm]
+        rec_pass = sum(bool(r.get("rec_success")) for g in rs for r in g)
         lines.append(f"| {arm} | {s('tool_s'):.1f} | {s('rec_tool_s'):.1f} | {s('out_tokens') / 1000:.1f}k | "
-                     f"{s('rec_out_tokens') / 1000:.1f}k | {s('tool_calls'):.0f} | {passes}/{n} | {rec_cell} | {len(t)}/10 |")
-    lines += ["", "### Per task: tool s / out tok / pass (median over rounds)", "",
-              "| task | " + " | ".join(arms) + " |", "|---|" + "---|" * len(arms)]
+                     f"{s('rec_out_tokens') / 1000:.1f}k | {s('tool_calls'):.0f} | {passes}/{n} | {rec_pass}/{n} | {len(t)}/10 |")
+    if "tabref" in arms:
+        t = [k[1] for k in by if k[0] == "tabref"]
+        rs = [by[("tabref", x)] for x in t]
+        s = sums["tabref"]
+        n = sum(len(g) for g in rs)
+        lines += ["", "### tabref, hand-written sequences (replay/tabref/; not a model's calls, so not comparable "
+                  "row for row with the recorded arms)", "",
+                  "| arm | tool s | out tok | calls | pass | tasks |", "|---|---|---|---|---|---|",
+                  f"| tabref | {s('tool_s'):.1f} | {s('out_tokens') / 1000:.1f}k | {s('tool_calls'):.0f} | "
+                  f"{sum(r['success'] for g in rs for r in g)}/{n} | {len(t)}/10 |", "",
+                  "Per task (tool s / out tok / pass): " + "; ".join(
+                      f"{task} {med([r['tool_s'] for r in by[('tabref', task)]]):.2f} s / "
+                      f"{med([r['out_tokens'] for r in by[('tabref', task)]]):.0f} / "
+                      f"{sum(r['success'] for r in by[('tabref', task)])}/{len(by[('tabref', task)])}"
+                      for task in TASKS if ("tabref", task) in by)]
+    recorded_arms = [x for x in arms if x != "tabref"]
+    lines += ["", "### Recorded runs per task: tool s / out tok / pass (median over rounds)", "",
+              "| task | " + " | ".join(recorded_arms) + " |", "|---|" + "---|" * len(recorded_arms)]
     for task in TASKS:
         cells = []
-        for arm in arms:
+        for arm in recorded_arms:
             g = by.get((arm, task))
             if not g:
                 cells.append("–")
