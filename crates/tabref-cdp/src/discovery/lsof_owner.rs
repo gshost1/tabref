@@ -1,20 +1,49 @@
 //! Who holds a TCP listener on macOS, where `/proc` does not exist: the pids
-//! `/usr/sbin/lsof -nP -iTCP:<port> -sTCP:LISTEN -Fp` reports (one `p<pid>`
-//! line per process, on any address). It costs a process spawn, so only the
-//! opt-in attach to the user's own browser uses it.
+//! `/usr/sbin/lsof -b -w -nP -iTCP:<port> -sTCP:LISTEN -Fp` reports (one
+//! `p<pid>` line per process, on any address; `-b` avoids calls that can
+//! block on a hung file system). It costs a process spawn, so only the opt-in
+//! attach to the user's own browser uses it, and it is killed after two
+//! seconds.
+
+#[cfg(target_os = "macos")]
+const LSOF_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The pids holding a listener on `port`: empty when none does, `None` when
-/// this platform cannot say (not macOS, or `lsof` did not run).
+/// this platform cannot say (not macOS, or `lsof` did not finish in time).
 pub fn listener_pids(port: u16) -> Option<Vec<u32>> {
     #[cfg(target_os = "macos")]
     {
-        let output = std::process::Command::new("/usr/sbin/lsof")
-            .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fp"])
+        use std::io::Read;
+        let mut child = std::process::Command::new("/usr/sbin/lsof")
+            .args([
+                "-b",
+                "-w",
+                "-nP",
+                &format!("-iTCP:{port}"),
+                "-sTCP:LISTEN",
+                "-Fp",
+            ])
             .env("LC_ALL", "C")
-            .output()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
             .ok()?;
-        let text = String::from_utf8_lossy(&output.stdout);
-        let ran = output.status.success() || (output.status.code() == Some(1) && text.is_empty());
+        let started = std::time::Instant::now();
+        let status = loop {
+            if let Ok(Some(status)) = child.try_wait() {
+                break status;
+            }
+            if started.elapsed() > LSOF_LIMIT {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let mut text = String::new();
+        child.stdout.take()?.read_to_string(&mut text).ok()?;
+        let ran = status.success() || (status.code() == Some(1) && text.is_empty());
         ran.then(|| parse_lsof_pids(&text))
     }
     #[cfg(not(target_os = "macos"))]

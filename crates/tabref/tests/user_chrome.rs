@@ -8,63 +8,16 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
+#[path = "common/user_home.rs"]
+mod user_home;
 
 use std::net::TcpListener;
-use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
-use common::{Run, harness_home, live};
-use tabref_cdp::{find_chrome, read_active_port};
-
-/// A throwaway config home whose `google-chrome` folder plays the user's
-/// default profile.
-struct UserHome {
-    config: PathBuf,
-    state: PathBuf,
-}
-
-impl UserHome {
-    fn new(name: &str) -> Self {
-        let config = harness_home(&format!("{name}-config"));
-        std::fs::create_dir_all(config.join("google-chrome")).unwrap();
-        Self {
-            config,
-            state: harness_home(&format!("{name}-state")),
-        }
-    }
-
-    fn profile(&self) -> PathBuf {
-        self.config.join("google-chrome")
-    }
-
-    fn tabref(&self, args: &[&str]) -> Run {
-        let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
-            .args(args)
-            .env("XDG_CONFIG_HOME", &self.config)
-            .env("TABREF_HOME", &self.state)
-            .env_remove("TABREF_CDP")
-            .env_remove("TABREF_NO_DAEMON")
-            .output()
-            .unwrap();
-        Run {
-            ok: output.status.success(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        }
-    }
-}
-
-impl Drop for UserHome {
-    fn drop(&mut self) {
-        let _ = self.tabref(&["daemon", "stop"]);
-        let _ = std::fs::remove_dir_all(&self.config);
-        let _ = std::fs::remove_dir_all(&self.state);
-    }
-}
+use common::live;
+use user_home::{UserHome, kill, list_pages, start_user_chrome};
 
 fn impostor() -> (u16, Arc<AtomicUsize>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -116,42 +69,6 @@ fn a_profile_pointing_at_another_program_is_never_contacted() {
         0,
         "the impostor was sent a connection"
     );
-}
-
-/// The "user's" Chrome: headless on the throwaway profile, with remote
-/// debugging on as chrome://inspect would turn it on.
-fn start_user_chrome(home: &UserHome) -> Option<Child> {
-    let browser = Command::new(find_chrome().unwrap())
-        .args([
-            format!("--user-data-dir={}", home.profile().display()),
-            "--headless=new".to_owned(),
-            "--no-first-run".to_owned(),
-            "--remote-debugging-port=0".to_owned(),
-            "about:blank".to_owned(),
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .unwrap();
-    let up = (0..100).any(|_| {
-        std::thread::sleep(Duration::from_millis(100));
-        read_active_port(&home.profile()).is_ok()
-            && std::fs::symlink_metadata(home.profile().join("SingletonLock")).is_ok()
-    });
-    if up {
-        return Some(browser);
-    }
-    kill(browser);
-    None
-}
-
-fn kill(mut browser: Child) {
-    let _ = Command::new("kill")
-        .args(["-KILL", &format!("-{}", browser.id())])
-        .status();
-    let _ = browser.wait();
-    std::thread::sleep(Duration::from_millis(300));
 }
 
 #[test]
@@ -278,20 +195,4 @@ fn a_restarted_users_browser_needs_a_new_opt_in() {
         "used the restarted browser later: {}",
         later.stdout
     );
-}
-
-/// The pages the browser of `profile` has open, as its DevTools lists them.
-fn list_pages(profile: &Path) -> String {
-    let port = read_active_port(profile).unwrap().port;
-    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-    use std::io::{Read, Write};
-    stream
-        .write_all(b"GET /json/list HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
-    let mut body = Vec::new();
-    let _ = stream.read_to_end(&mut body);
-    String::from_utf8_lossy(&body).into_owned()
 }

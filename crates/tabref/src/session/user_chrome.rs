@@ -12,9 +12,9 @@
 use std::path::{Path, PathBuf};
 
 use tabref_cdp::{
-    ListenerVerdict, ProcessView, check_listener, connect, connect_held, default_user_data_dirs,
-    endpoint_from_user_data_dir, is_chrome_family, listener_pids, process_start, profile_lock_pid,
-    read_active_port,
+    ListenerVerdict, ProcessView, check_listener, connect_held, connect_with,
+    default_user_data_dirs, endpoint_from_user_data_dir, is_chrome_family, listener_pids,
+    process_start, profile_lock_pid, read_active_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
@@ -24,6 +24,9 @@ use super::user_chrome_record::UserChromeRecord;
 const AGAIN: &str = "Turn remote debugging on at chrome://inspect/#remote-debugging and run \
                      'tabref connect --user-chrome' again";
 pub(crate) const GONE_KIND: &str = "cdp_user_chrome_gone";
+/// Whether this platform can say when a process started; where it can, an
+/// opt-in or record without a start time is refused.
+const START_TIMES: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
 /// The user's browser to attach to: the one in `dir`, or the one default
 /// profile whose browser has remote debugging on. Only these directories'
@@ -37,11 +40,15 @@ pub(crate) fn find_user_chrome(dir: Option<&Path>) -> Result<UserChromeRecord, A
         None => only_profile()?,
     };
     let pid = profile_lock_pid(&dir).ok_or_else(|| not_running(&dir))?;
+    let started = process_start(pid);
+    if START_TIMES && started.is_none() {
+        return Err(not_running(&dir));
+    }
     Ok(UserChromeRecord {
         name: name.to_owned(),
         user_data_dir: dir,
         pid,
-        started: process_start(pid),
+        started,
     })
 }
 
@@ -107,7 +114,7 @@ pub(crate) fn connect_user_chrome(
         ListenerVerdict::Trusted(held) => connect_held(&endpoint, &held, deadline)?,
         ListenerVerdict::Unknown => {
             listener_is(port, record)?;
-            connect(&endpoint, deadline)?
+            connect_with(&endpoint, deadline, &|| listener_is(port, record))?
         }
         ListenerVerdict::Nothing => return Err(gone(record)),
         refused => return Err(not_the_profile(record, port, &refused)),
@@ -122,11 +129,13 @@ pub(crate) fn connect_user_chrome(
 /// Whether the profile is still held by the process the user opted in to:
 /// same pid in the lock, and, where the platform says, same start time.
 pub(crate) fn same_process(record: &UserChromeRecord) -> bool {
-    profile_lock_pid(&record.user_data_dir) == Some(record.pid)
-        && record
-            .started
-            .as_ref()
-            .is_none_or(|started| process_start(record.pid).as_ref() == Some(started))
+    if profile_lock_pid(&record.user_data_dir) != Some(record.pid) {
+        return false;
+    }
+    match &record.started {
+        Some(started) => process_start(record.pid).as_ref() == Some(started),
+        None => !START_TIMES,
+    }
 }
 
 /// Where the socket tables cannot be read (macOS), the port's listeners as

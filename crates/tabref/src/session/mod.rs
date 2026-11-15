@@ -33,7 +33,7 @@ use session_options::SessionOptions;
 use tab_choice::choose_tab;
 use tab_claim::TabClaim;
 use tab_order::{order_text, stable_order};
-use user_chrome_record::choice_in_use;
+use user_chrome_record::{choice_in_use, opt_in_guard};
 
 /// Everything one command runs against: the DevTools connection, the page
 /// sessions attached through it, the ref store and what the current command
@@ -70,6 +70,7 @@ impl Session {
         let choice = in_use.map(|(text, _)| text);
         let mut connection = browser.connection;
         connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
+        connection.set_guard(choice.clone().map(|chosen| opt_in_guard(&store, chosen)));
         Ok(Self {
             connection,
             endpoint: browser.endpoint,

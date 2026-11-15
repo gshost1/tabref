@@ -146,7 +146,7 @@ pub(crate) fn launched_check(record: &LaunchedBrowser) -> Option<Option<HeldPort
 /// `profile_dir`, as its command line names that profile.
 pub(crate) fn launched_from(profile_dir: &Path) -> impl Fn(&ProcessView) -> bool + use<> {
     let flag = format!("--user-data-dir={}", profile_dir.display());
-    move |process: &ProcessView| process.cmdline.contains(&flag)
+    move |process: &ProcessView| process.args().contains(&flag)
 }
 
 /// Whether a failed connection to a launched browser means it is gone: the

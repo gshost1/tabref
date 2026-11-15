@@ -6,7 +6,7 @@ use tabref_core::RefStore;
 use super::{find_user_chrome, runs_profile, same_process, shown_dir};
 use crate::session::session_options::SessionOptions;
 use crate::session::user_chrome_record::{
-    UserChromeRecord, choice_in_use, forget_user_chrome, save_user_chrome,
+    UserChromeRecord, choice_in_use, forget_user_chrome, opt_in_guard, save_user_chrome,
 };
 
 fn process(pid: u32, exe: &str) -> ProcessView {
@@ -92,9 +92,10 @@ fn a_browser_that_exited_or_restarted_is_not_the_one_opted_in_to() {
         same_process(&record(me, process_start(me))),
         same_process(&record(me + 1, process_start(me))),
         same_process(&record(me, Some("an earlier start".to_owned()))),
+        same_process(&record(me, None)),
     );
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(results, (true, false, false));
+    assert_eq!(results, (true, false, false, false));
 }
 
 #[test]
@@ -150,6 +151,28 @@ fn an_opt_in_that_cannot_be_removed_is_an_error_not_a_quiet_success() {
     let _ = std::fs::remove_dir_all(&state);
     assert!(stuck.is_err());
     assert!(cleared.is_ok());
+}
+
+#[test]
+fn a_running_command_stops_once_the_opt_in_is_off() {
+    let state = temp("guard");
+    let store = RefStore::new(&state);
+    let record = UserChromeRecord {
+        name: "Google Chrome".to_owned(),
+        user_data_dir: PathBuf::from("/p"),
+        pid: 1,
+        started: Some("1".to_owned()),
+    };
+    save_user_chrome(&store, &record).unwrap();
+    let chosen = std::fs::read_to_string(state.join("user_chrome.json")).unwrap();
+    let guard = opt_in_guard(&store, chosen);
+
+    let while_on = guard();
+    forget_user_chrome(&store).unwrap();
+    let after_off = guard();
+    let _ = std::fs::remove_dir_all(&state);
+    assert!(while_on.is_ok());
+    assert_eq!(after_off.unwrap_err().kind(), Some("cdp_user_chrome_off"));
 }
 
 #[test]

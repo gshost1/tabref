@@ -5,9 +5,11 @@
 //! exits or restarts needs a new opt-in. `tabref connect --off` removes it.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tabref_core::{AppError, RefStore};
+use tabref_cdp::ConnectionGuard;
+use tabref_core::{AppError, DeliverySemantics, ErrorCode, RefStore};
 
 use super::session_options::SessionOptions;
 
@@ -52,6 +54,26 @@ pub(crate) fn save_user_chrome(
     record: &UserChromeRecord,
 ) -> Result<(), AppError> {
     store.write_state(USER_CHROME_FILE, &serde_json::to_string(record)?)
+}
+
+/// The guard of a connection to the user's browser: it holds while the
+/// opt-in is still `chosen`, so a command that is running (a `do` batch, a
+/// wait, in the daemon or in another shell) stops at its next request or
+/// within 50 ms of a wait once `tabref connect --off` or a new opt-in
+/// changes it.
+pub(crate) fn opt_in_guard(store: &RefStore, chosen: String) -> ConnectionGuard {
+    let dir = store.base_dir().to_path_buf();
+    Arc::new(move || {
+        if RefStore::new(&dir).read_state(USER_CHROME_FILE).as_deref() == Some(chosen.as_str()) {
+            return Ok(());
+        }
+        Err(AppError::new(
+            ErrorCode::ActionFailed,
+            "The opt-in to your browser was turned off or changed, so this command stopped there",
+        )
+        .with_details(serde_json::json!({ "kind": "cdp_user_chrome_off" }))
+        .with_disposition(DeliverySemantics::uncertain()))
+    })
 }
 
 /// Removes the record and confirms it is gone: a record left behind would

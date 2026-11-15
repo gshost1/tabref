@@ -9,7 +9,6 @@ use tabref_core::{AppError, Deadline, ErrorCode};
 
 use super::cdp_event::CdpEvent;
 use super::connection::CdpConnection;
-use super::connection_health::cancelled;
 use super::frame_envelope::FrameEnvelope;
 use super::incoming::Incoming;
 use super::protocol_error::{protocol_error, target_gone};
@@ -130,16 +129,14 @@ impl CdpConnection {
     }
 
     pub(super) fn receive_text(&mut self, deadline: Deadline) -> Result<String, AppError> {
-        if self.health.cancel.is_none() {
+        if !self.health.watched() {
             return self
                 .transport
                 .receive_text(deadline)
                 .map_err(|error| self.note_failure(error));
         }
         loop {
-            if self.health.is_cancelled() {
-                return Err(cancelled());
-            }
+            self.health.check()?;
             match self.transport.receive_text(deadline.capped(CANCEL_SLICE)) {
                 Err(error) if is_timeout(&error) && !deadline.is_expired() => {}
                 received => return received.map_err(|error| self.note_failure(error)),

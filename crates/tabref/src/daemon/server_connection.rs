@@ -45,6 +45,7 @@ pub(crate) fn serve_connection(mut stream: UnixStream, state: &ServerState) -> b
         }
     };
     let cancel = watch_client(&stream);
+    state.track(&cancel);
     let touch = request.op != "status";
     let (reply, retire) = answer(state, request, &cancel);
     let _ = write_line(&mut stream, &reply);
@@ -114,6 +115,7 @@ fn answer(
             false,
         ),
         "stop" => {
+            state.shut_down();
             let stopped = Outcome::new("daemon stopped", serde_json::json!({ "stopped": true }));
             (WireReply::from_result(&Ok(stopped)), true)
         }
