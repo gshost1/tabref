@@ -517,7 +517,8 @@ def tool_log_totals(path):
 
 class Site:
     """A task set's site, started by this run on 127.0.0.1:<port>; a port in use is an error. The default script is
-    heldout/web/server.py (frozen); the fresh set passes its sealed server. -B: no bytecode next to either."""
+    heldout/web/server.py (frozen); the fresh set passes its sealed server. -B: no bytecode next to either. `log` is a
+    file path, or a callable that receives the server's output line by line (the fresh set keeps it in memory)."""
 
     def __init__(self, base="http://127.0.0.1:8792", log=None, script=None):
         self.base, self.log, self.proc = base, log, None
@@ -531,11 +532,16 @@ class Site:
             except OSError:
                 raise SystemExit(f"port {port} is taken: another site (or another bench) is there; pass --base with "
                                  "a free port rather than sharing its state")
-        if self.log:
+        sink = self.log if callable(self.log) else None
+        if self.log and not sink:
             Path(self.log).parent.mkdir(parents=True, exist_ok=True)
-        fh = open(self.log, "a") if self.log else subprocess.DEVNULL
+        fh = subprocess.PIPE if sink else open(self.log, "a") if self.log else subprocess.DEVNULL
         self.proc = subprocess.Popen([sys.executable, "-I", "-B", str(self.script), self.base.rsplit(":", 1)[1]],
-                                     stdout=fh, stderr=fh, start_new_session=True)
+                                     stdout=fh, stderr=subprocess.STDOUT if sink else fh, start_new_session=True)
+        if sink:
+            import threading
+            threading.Thread(target=lambda: [sink(x.decode(errors="replace")) for x in self.proc.stdout],
+                             daemon=True).start()
         for _ in range(50):
             if self.proc.poll() is not None:
                 raise SystemExit(f"{self.script.name} exited at start")

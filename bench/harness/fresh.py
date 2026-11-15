@@ -8,11 +8,16 @@ __pycache__ or an edited file breaks it). The seal is checked before every use a
 Nothing here prints task content: callers report counts and file names only.
 
   python3 -I -B bench/harness/fresh.py verify <dir>     exit 0 when the seal holds, else 1 with the reason
+  python3 -I -B bench/harness/fresh.py commit|discard <runs> <pass id>
+                                                        staged rows of a pass into results-web.jsonl, or dropped
 """
 import hashlib
 import importlib.util
+import json
 import os
+import re
 import sys
+import threading
 from pathlib import Path
 
 SEAL = "1067387e3e7631ff2a1d28675cb2a2391c99324a57f2fc7f5e45dbdd2fd5468a"
@@ -97,15 +102,98 @@ def server_script(root):
     return Path(root) / "web" / "server.py"
 
 
+def check_pass_id(pass_id):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}", pass_id or ""):
+        raise SystemExit("bad pass id")
+    return pass_id
+
+
+class Vault:
+    """One fresh pass's output. Rows (numbers and flags only) are staged as they come, outside results-web.jsonl.
+    Everything with task text (answers, verifier reasons, transcripts, stderr, the server log, tracebacks) is held in
+    memory while models run and written to <stage>/sealed/ only by flush(), after the last run, so no run can read
+    an earlier one's. Staged rows reach results-web.jsonl only through commit(), once the seal has held after the
+    pass; discard() drops them."""
+
+    def __init__(self, runs, pass_id):
+        self.runs = Path(runs)
+        self.dir = stage_dir(runs, check_pass_id(pass_id))
+        self.held, self.lock = {}, threading.Lock()
+
+    def hold(self, rel, text):
+        with self.lock:
+            self.held[rel] = self.held.get(rel, "") + text
+
+    def stage_row(self, row):
+        self.dir.mkdir(parents=True, exist_ok=True)
+        with open(self.dir / "rows.jsonl", "a") as fh:
+            fh.write(json.dumps(row) + "\n")
+
+    def flush(self):
+        with self.lock:
+            held, self.held = self.held, {}
+        for rel, text in held.items():
+            p = self.dir / "sealed" / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "a") as fh:
+                fh.write(text)
+
+
+SEALED_FIELDS = ("verify", "answer", "strays", "invalid_reason")
+
+
+def seal_record(record, vault):
+    """A fresh row: free text (answer, verifier reason, stray names, invalid reason) goes to the vault's detail; the
+    row keeps numbers, flags, the stray count and the invalid reason's generic prefix."""
+    detail = {k: record[k] for k in SEALED_FIELDS if k in record}
+    detail.update({k: record.get(k) for k in ("pass_id", "task", "arm", "round", "seed", "success")})
+    vault.hold("detail.jsonl", json.dumps(detail) + "\n")
+    out = dict(record, verify="sealed")
+    out.pop("answer", None)
+    if "strays" in record:
+        out["strays"] = len(record["strays"])
+    if record.get("invalid_reason"):
+        out["invalid_reason"] = str(record["invalid_reason"]).split(":", 1)[0]
+    return out
+
+
+def stage_dir(runs, pass_id):
+    return Path(runs) / "fresh-staged" / pass_id
+
+
+def commit(runs, pass_id):
+    """Append a pass's staged rows to results-web.jsonl; returns how many."""
+    rows = stage_dir(runs, check_pass_id(pass_id)) / "rows.jsonl"
+    if not rows.exists():
+        return 0
+    lines = [x for x in rows.read_text().splitlines() if x.strip()]
+    with open(Path(runs) / "results-web.jsonl", "a") as fh:
+        fh.write("".join(x + "\n" for x in lines))
+    rows.unlink()
+    return len(lines)
+
+
+def discard(runs, pass_id):
+    rows = stage_dir(runs, check_pass_id(pass_id)) / "rows.jsonl"
+    n = len([x for x in rows.read_text().splitlines() if x.strip()]) if rows.exists() else 0
+    rows.unlink(missing_ok=True)
+    return n
+
+
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] != "verify":
-        raise SystemExit("usage: fresh.py verify <dir>")
-    try:
-        n = verify(Path(sys.argv[2]).resolve())
-    except (SealBroken, OSError) as e:
-        print(f"fresh seal BROKEN: {e}", file=sys.stderr)
-        raise SystemExit(1)
-    print(f"fresh seal ok: {n} files")
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "verify" and len(sys.argv) == 3:
+        try:
+            n = verify(Path(sys.argv[2]).resolve())
+        except (SealBroken, OSError) as e:
+            print(f"fresh seal BROKEN: {e}", file=sys.stderr)
+            raise SystemExit(1)
+        print(f"fresh seal ok: {n} files")
+    elif cmd in ("commit", "discard") and len(sys.argv) == 4:
+        n = (commit if cmd == "commit" else discard)(Path(sys.argv[2]), sys.argv[3])
+        print(f"fresh rows {'committed' if cmd == 'commit' else 'discarded'}: {n}")
+    else:
+        raise SystemExit("usage: fresh.py verify <dir> | commit <runs> <pass id> | discard <runs> <pass id>")
 
 
 if __name__ == "__main__":

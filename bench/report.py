@@ -7,8 +7,9 @@
            all-run medians follows as a secondary view, to compare with past reports (heldout/report_v1.py is the
            old script). Reads $BENCH_RUNS/results-web.jsonl and, with --baseline, the Linux Sonnet 5.5 pass
            (results/linux-sonnet-5-5/, arms ad-14 bh pw ab) beside it; the host column says where each arm ran.
-           One section per task set (rows carry `taskset`; rows without one are heldout); the fresh
-           section shows counts and timings only, never verifier text.
+           One task set at a time (rows carry `taskset`; rows without one are heldout): heldout by
+           default; --taskset fresh prints only the aggregate ranking (no per-task tables, no
+           verifier text). Ranking: pass rate, then USD per success (the control rule).
   latency  per-command latency (latency/run.py): cold open and first snapshot, warm min/median/max ms, output tokens
   replay   model-free replay (replay/run.py): per arm and task the median tool s, output tokens and passes, the
            recorded run's numbers beside them, and which kinds of call carry the output tokens
@@ -21,6 +22,7 @@ Usage: python3 -I bench/report.py models [--baseline] [--model claude-sonnet-5-5
 """
 import argparse
 import json
+import math
 import statistics
 import sys
 from collections import defaultdict
@@ -56,10 +58,16 @@ def taskset_of(r):
     return r.get("taskset") or "heldout"
 
 
+def row_cost(r):
+    """USD a run cost: Claude Code's total_cost_usd, else what the runner charged for a capped run."""
+    c = r.get("cost_usd_list")
+    return c if c is not None else r.get("cost_charged_estimate")
+
+
 def load_by_taskset(paths, model, want):
-    """Valid rows per task set (rows without one are heldout), normalized as heldout/report.py does, plus the hosts
-    per arm and the invalid counts. Fresh rows never carry verifier text (the runner seals it); `why` is blanked
-    here as well, so no report prints any."""
+    """Valid rows per task set (rows without one are heldout), normalized as heldout/report.py does plus the run's
+    cost, with the hosts per arm and the invalid counts. Fresh rows never carry verifier text (the runner seals it);
+    `why` is blanked here as well, so no report prints any."""
     rows, hosts, skipped = defaultdict(list), defaultdict(lambda: defaultdict(set)), defaultdict(int)
     for path in paths:
         if not Path(path).exists():
@@ -75,11 +83,37 @@ def load_by_taskset(paths, model, want):
                 skipped[ts] += 1
                 continue
             n = heldout_report.normalize(r)
+            n["cost"] = row_cost(r)
             if ts != "heldout":
                 n["why"] = "sealed"
             rows[ts].append(n)
             hosts[ts][r.get("arm")].add(r.get("host", "mac"))
     return rows, hosts, skipped
+
+
+def cost_per_success(rows, arm):
+    """USD per passed run: every valid run's cost over the arm's passes (inf without a pass, None without costs)."""
+    rs = [r for r in rows if r["arm"] == arm]
+    costs = [r["cost"] for r in rs if r.get("cost") is not None]
+    if not costs:
+        return None
+    passes = sum(r["ok"] for r in rs)
+    return sum(costs) / passes if passes else math.inf
+
+
+def ranked_by_cost(rows):
+    """heldout/report.py's ranking, re-ordered by the control rule: pass rate first, then cost per success (USD per
+    passed run); wall per success stays in the table."""
+    ranked, common, tasks = heldout_report.ranking(rows, "web")
+    for x in ranked:
+        x["usd"] = cost_per_success(rows, x["arm"])
+    ranked.sort(key=lambda x: (-x["passes"] / max(x["runs"], 1), math.inf if x["usd"] is None else x["usd"],
+                               x["per"]["wall"]))
+    return ranked, common, tasks
+
+
+def usd(x):
+    return "–" if x is None else "∞" if x == math.inf else f"{x:.3f}"
 
 
 def models(a):
@@ -88,41 +122,39 @@ def models(a):
         paths.append(str(BASELINE))
     want = set(a.arms.split(",")) if a.arms else set(ARMS)
     by_set, hosts, skipped = load_by_taskset(paths, a.model, want)
-    sets = [getattr(a, "taskset", None)] if getattr(a, "taskset", None) else TASKSETS
-    out = []
-    for ts in sets:
-        if by_set.get(ts):
-            out += models_section(ts, by_set[ts], hosts[ts], skipped[ts], paths)
-    return out or ["## Model runs", "", f"No valid rows in {paths}.", ""]
+    ts = getattr(a, "taskset", None) or "heldout"
+    if not by_set.get(ts):
+        return [f"## Model runs: {ts} tasks", "", f"No valid {ts} rows in {paths}.", ""]
+    return models_section(ts, by_set[ts], hosts[ts], skipped[ts], paths)
 
 
 def models_section(ts, rows, hosts, skipped, paths):
-    ranked, common, tasks = heldout_report.ranking(rows, "web")
+    ranked, common, tasks = ranked_by_cost(rows)
     lines = [f"## Model runs: {ts} tasks", "", f"{len(rows)} valid runs ({skipped} invalid skipped); models: "
              f"{', '.join(sorted({r['model'] for r in rows}))}. Sources: {', '.join(rel(x) for x in paths)}.",
              "CLI s is tool time (the arm wrapper's log); tokens are input (uncached + cache read + cache write) plus "
-             "output. A run that hit the cap is a valid failure.", ""]
+             "output. USD is Claude Code's total_cost_usd (a capped run: the runner's charge). A run that hit the cap "
+             "is a valid failure.", ""]
     if ts == "fresh":
-        lines += ["Sealed set: counts and timings only; no verifier text or answers are shown.", ""]
+        lines += ["Sealed set: the aggregate ranking only (no per-task tables, no verifier text or answers).", ""]
     lines += [f"### web ({ts}): ranking (cannot reward failing)", "",
-              f"Order: pass rate, then per-success wall time. Per-success sums cover the {len(common)}/{len(tasks)} tasks "
-              "where every arm passes at least once.", "",
-              "| rank | arm | host | pass | rate | tasks with 0 passes | CLI s / success | wall s / success | "
-              "tokens / success | turns / success |", "|---|---|---|---|---|---|---|---|---|---|"]
+              "Order: pass rate, then cost per success (USD over every valid run / passes). The other per-success "
+              f"sums cover the {len(common)}/{len(tasks)} tasks where every arm passes at least once.", "",
+              "| rank | arm | host | pass | rate | tasks with 0 passes | USD / success | CLI s / success | "
+              "wall s / success | tokens / success | turns / success |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for i, x in enumerate(ranked, 1):
         per = " | ".join(heldout_report.fmt(x["per"][m], m) for m, _ in heldout_report.METRICS)
         lines.append(f"| {i} | {x['arm']} | {', '.join(sorted(hosts.get(x['arm'], {'?'})))} | {x['passes']}/{x['runs']} | "
-                     f"{x['passes'] / max(x['runs'], 1):.0%} | {x['zero_tasks']} | {per} |")
+                     f"{x['passes'] / max(x['runs'], 1):.0%} | {x['zero_tasks']} | {usd(x['usd'])} | {per} |")
+    if ts != "heldout":
+        return lines + [""]
     rest = heldout_report.summary_tables(rows, "web")
     second = next(i for i, line in enumerate(rest) if i > 0 and line.startswith("### "))
     lines += [""] + [line.replace("### web:", f"### web ({ts}):", 1) for line in rest[second:]] + [""]
     focus = "tabref" if any(r["arm"] == "tabref" for r in rows) else "ad-14"
     lines += [f"### Where {focus} loses on {ts} (pass rate, then pass medians against arms at least as reliable)", ""]
     lines += heldout_report.losses(rows, focus) + [""]
-    per_task = heldout_report.task_tables(rows, "web")
-    if ts != "heldout":
-        per_task = [line for line in per_task if not line.startswith("Failures: ")]
-    lines += [f"### web ({ts}) per task", ""] + per_task
+    lines += [f"### web ({ts}) per task", ""] + heldout_report.task_tables(rows, "web")
     return lines
 
 
@@ -303,7 +335,7 @@ def main():
     ap.add_argument("--baseline", action="store_true")
     ap.add_argument("--model", default=None)
     ap.add_argument("--arms", default=None)
-    ap.add_argument("--taskset", default=None, choices=TASKSETS, help="models: one task set (default: each)")
+    ap.add_argument("--taskset", default=None, choices=TASKSETS, help="models: which task set (default heldout; fresh shows the aggregate ranking only)")
     a = ap.parse_args()
     out = []
     if a.what in ("models", "all"):

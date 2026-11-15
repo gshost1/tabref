@@ -12,16 +12,23 @@
 #                                                  earlier pass could have edited), then a pass as tabbench; the key goes over stdin into that process's
 #                                                  environment only (never a command line, file or log). With a
 #                                                  terminal and no pipe it asks for the key without echo.
-#   bench/tools/tabbench.sh results [--with-fresh] copy tabbench's runs/ to bench/runs/tabbench/ for report.py;
-#                                                  web-fresh/ (sealed transcripts and verifier text) stays behind
-#                                                  unless --with-fresh
 #   bench/tools/tabbench.sh smoke [--taskset fresh] [run_web.py args]
 #                                                  no model, no key: as tabbench, start the set's site, reset every
 #                                                  task for run 0 and count verifiers that reject an empty answer
+#   bench/tools/tabbench.sh results                copy tabbench's runs/ to bench/runs/tabbench/ for report.py
+#                                                  (never the fresh staging or sealed output)
+#
+# sync, run and smoke take a lock (flock on $TABBENCH_LOCK, default $XDG_RUNTIME_DIR/tabbench.lock, on the operator's
+# side so the cleanup below cannot drop it) and refuse while tabbench has any process. One EXIT trap (also on INT,
+# TERM, HUP) kills every tabbench process first, so no claude outlives the job holding the key, then removes the
+# fresh copy and any fresh staging. A clean start removes those leftovers too.
 #
 # --taskset fresh (run and smoke): the sealed folder (--fresh-dir <dir> or BENCH_FRESH_DIR) is seal-checked here,
-# copied into tabbench's home for that pass only ($HOME/fresh, a tar stream like sync), seal-checked again there,
-# handed to run_web.py as --fresh-dir, and removed when the pass ends (also on failure or interrupt).
+# copied into tabbench's home as a tar stream ($HOME/fresh), seal-checked again there, and handed to run_web.py as a
+# disposable copy (--fresh-remove-copy): run_web.py deletes it once its module is loaded and its server is up. After
+# the pass the operator's original is seal-checked again; only then are the pass's staged rows committed to
+# results-web.jsonl (else discarded). The sealed output (answers, verifier text, transcripts) is moved out of
+# tabbench's home into this checkout's bench/runs/fresh-out/<pass id>/ (mode 700), so no later model can read it.
 #
 # Only setup needs root. sync, run and results run as the operator and reach tabbench only through a root-owned
 # wrapper, /usr/local/bin/as-tabbench (`exec sudo -n -u tabbench "$@"`, with a sudoers drop-in
@@ -37,12 +44,38 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 cmd=${1:?setup, sync, run, smoke or results}; shift || true
 AS=${TABBENCH_AS:-/usr/local/bin/as-tabbench}
 [[ $AS == /* ]] || { echo "TABBENCH_AS must be an absolute path" >&2; exit 2; }
+LOCK=${TABBENCH_LOCK:-${XDG_RUNTIME_DIR:-$HOME/.cache}/tabbench.lock}
 as_raw() { ( cd / && "$AS" env -i HOME="$H" USER="$U" LOGNAME="$U" LANG=C.UTF-8 PATH=/usr/bin:/bin "$@" ) \
   > >(cat) 2> >(cat >&2); }
 as_user() { if [[ -t 0 ]]; then as_raw "$@" < /dev/null; else as_raw "$@"; fi; }
 need_user() {
   local err
   err=$(as_user true 2>&1) || { echo "cannot run as $U through $AS: $err (see the header)" >&2; exit 2; }
+}
+untar_to() {
+  python3 -I -B -c 'import sys, tarfile
+def keep(m, path):
+    return tarfile.data_filter(m, path) if m.isfile() or m.isdir() else None
+with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
+    t.extractall(sys.argv[1], filter=keep)' "$1"
+  find "$1" ! -type f ! -type d -delete
+}
+stop_all() { as_user bash -c 'kill -9 -1' 2>/dev/null || true; }
+fresh_out() {
+  as_user bash -c 'rm -rf "$HOME/fresh" "$HOME/fresh.new" "$HOME/runs/fresh-staged" "$HOME/runs-smoke"' 2>/dev/null || true
+}
+cleanup() { stop_all; fresh_out; }
+begin() {
+  need_user
+  mkdir -p "$(dirname "$LOCK")"
+  exec 9>>"$LOCK"
+  flock -n 9 || { echo "another tabbench job holds $LOCK; refusing" >&2; exit 75; }
+  if pgrep -u "$U" >/dev/null; then
+    echo "$U has running processes (a pass in progress, or left over); refusing. To clear leftovers: $AS bash -c 'kill -9 -1'" >&2
+    exit 75
+  fi
+  trap cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  fresh_out
 }
 sync_files() {
   local tb=$1
@@ -59,32 +92,47 @@ sync_files() {
 }
 FRESH=0
 FRESH_SRC=${BENCH_FRESH_DIR:-}
+PASS_ID=""
 ARGS=()
 parse_set() {
-  local want=""
+  local want="" flag=0
   while (($#)); do
     case $1 in
       --taskset) want=${2:-}; ARGS+=("$1" "${2:-}"); shift 2 || shift ;;
       --taskset=*) want=${1#*=}; ARGS+=("$1"); shift ;;
-      --fresh-dir) FRESH_SRC=${2:-}; shift 2 || shift ;;
-      --fresh-dir=*) FRESH_SRC=${1#*=}; shift ;;
+      --fresh-dir) FRESH_SRC=${2:-}; flag=1; shift 2 || shift ;;
+      --fresh-dir=*) FRESH_SRC=${1#*=}; flag=1; shift ;;
+      --fresh-remove-copy|--fresh-pass-id|--fresh-pass-id=*) echo "$1 is set by tabbench.sh itself" >&2; exit 2 ;;
       *) ARGS+=("$1"); shift ;;
     esac
   done
   if [[ $want == fresh ]]; then
     FRESH=1
     [[ -n $FRESH_SRC ]] || { echo "--taskset fresh needs --fresh-dir <dir> or BENCH_FRESH_DIR" >&2; exit 2; }
-    ARGS+=(--fresh-dir "$H/fresh")
+    ARGS+=(--fresh-dir "$H/fresh" --fresh-remove-copy)
+  elif ((flag)); then
+    echo "warning: --fresh-dir is ignored without --taskset fresh" >&2
   fi
 }
-fresh_out() { as_user bash -c 'rm -rf "$HOME/fresh" "$HOME/fresh.new"' || true; }
 fresh_in() {
   python3 -I -B "$here/harness/fresh.py" verify "$FRESH_SRC"
-  trap fresh_out EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
   tar -C "$FRESH_SRC" -cf - . \
     | as_user bash -c 'set -e; rm -rf "$HOME/fresh.new" "$HOME/fresh"; mkdir -m 700 "$HOME/fresh.new"
         tar -C "$HOME/fresh.new" --no-same-owner -xf -; mv "$HOME/fresh.new" "$HOME/fresh"'
   as_user python3 -I -B "$H/tabref/bench/harness/fresh.py" verify "$H/fresh"
+}
+fresh_finish() {
+  local verdict=discard out="$here/runs/fresh-out"
+  if python3 -I -B "$here/harness/fresh.py" verify "$FRESH_SRC"; then verdict=commit
+  else echo "fresh seal BROKEN after the pass (original folder): this pass's rows are discarded" >&2; fi
+  as_user python3 -I -B "$H/tabref/bench/harness/fresh.py" "$verdict" "$H/runs" "$PASS_ID" || verdict=failed
+  mkdir -p "$out"; chmod 700 "$out"; rm -rf "$out/$PASS_ID.part"; mkdir "$out/$PASS_ID.part"
+  if as_user bash -c 'd="$HOME/runs/fresh-staged/$1/sealed"; [[ ! -d $d ]] || tar -C "$d" -cf - .' _ "$PASS_ID" \
+      | untar_to "$out/$PASS_ID.part"; then
+    mv "$out/$PASS_ID.part" "$out/$PASS_ID"; echo "fresh sealed output: $out/$PASS_ID (not for tuners)"
+  else echo "could not move the sealed output out of $H; it is removed with the staging" >&2; fi
+  as_user bash -c 'rm -rf "$HOME/runs/fresh-staged/$1"' _ "$PASS_ID" || true
+  [[ $verdict == commit ]]
 }
 default_bin() {
   local common
@@ -123,7 +171,7 @@ case $cmd in
       [[ -n $op && $op != root ]] || { echo "run sync as the operator, not root" >&2; exit 2; }
       exec runuser -u "$op" -- "$0" sync "$@"
     fi
-    need_user
+    begin
     sync_files "${1:-$(default_bin)}"
     as_user BENCH_TOOLS="$H/bench-tools" bash "$H/tabref/bench/tools/install.sh"
     ;;
@@ -136,28 +184,35 @@ case $cmd in
       exec env -u TABBENCH_INNER BENCH_TOOLS="$H/bench-tools" BENCH_RUNS="$H/runs" TABREF_BIN="$H/bin/tabref" \
         python3 -I -B bench/harness/run_web.py "$@" < /dev/null
     fi
+    [[ $(id -u) != 0 ]] || { echo "run passes as the operator, not root" >&2; exit 2; }
     parse_set "$@"
     if [[ -t 0 ]]; then IFS= read -rs -p "Anthropic API key for the bench: " key; echo; else IFS= read -r key; fi
     [[ -n $key ]] || { echo "no key" >&2; exit 2; }
-    need_user
+    begin
     sync_files "${TABREF_BIN:-$(default_bin)}"
-    ((FRESH)) && fresh_in
+    if ((FRESH)); then
+      PASS_ID=fresh-$(date -u +%Y%m%dT%H%M%SZ)
+      ARGS+=(--fresh-pass-id "$PASS_ID")
+      fresh_in
+    fi
     rc=0
     printf '%s\n' "$key" | as_raw TABBENCH_INNER=1 bash "$H/tabref/bench/tools/tabbench.sh" run "${ARGS[@]}" || rc=$?
     unset key
-    as_user bash -c 'kill -9 -1' 2>/dev/null || true
+    stop_all
+    if ((FRESH)); then fresh_finish || rc=3; fi
     exit "$rc"
     ;;
   smoke)
     [[ $(id -u) != 0 ]] || { echo "run smoke as the operator, not root" >&2; exit 2; }
     parse_set "$@"
-    need_user
+    begin
     sync_files "${TABREF_BIN:-$(default_bin)}"
     ((FRESH)) && fresh_in
     rc=0
     as_user bash -c 'cd "$HOME/tabref" && exec env BENCH_TOOLS="$HOME/bench-tools" BENCH_RUNS="$HOME/runs-smoke" \
         python3 -I -B bench/harness/run_web.py --smoke "$@"' _ "${ARGS[@]}" || rc=$?
-    as_user bash -c 'kill -9 -1' 2>/dev/null || true
+    stop_all
+    if ((FRESH)); then python3 -I -B "$here/harness/fresh.py" verify "$FRESH_SRC" || rc=3; fi
     exit "$rc"
     ;;
   results)
@@ -165,18 +220,11 @@ case $cmd in
     need_user
     mkdir -p "$here/runs"
     tmp=$(mktemp -d "$here/runs/.tabbench.XXXXXX")
-    with=0; [[ ${1:-} == --with-fresh ]] && with=1
     as_user bash -c '[[ -d "$HOME/runs" ]] || exit 0
-        if [[ $1 == 1 ]]; then tar -C "$HOME/runs" -cf - .; else tar -C "$HOME/runs" --exclude=./web-fresh -cf - .; fi' \
-      _ "$with" \
-      | python3 -I -c 'import sys, tarfile
-def keep(m, path):
-    return tarfile.data_filter(m, path) if m.isfile() or m.isdir() else None
-with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
-    t.extractall(sys.argv[1], filter=keep)' "$tmp" || { rm -rf "$tmp"; exit 1; }
-    find "$tmp" ! -type f ! -type d -delete
+        tar -C "$HOME/runs" --exclude=./fresh-staged --exclude=./fresh-out --exclude=./web-fresh -cf - .' \
+      | untar_to "$tmp" || { rm -rf "$tmp"; exit 1; }
     rm -rf "$here/runs/tabbench"; mv "$tmp" "$here/runs/tabbench"
-    echo "report: BENCH_RUNS=$here/runs/tabbench python3 -I bench/report.py models --baseline"
+    echo "report: BENCH_RUNS=$here/runs/tabbench python3 -I bench/report.py models --baseline [--taskset fresh]"
     ;;
   *) echo "unknown command $cmd" >&2; exit 2 ;;
 esac
