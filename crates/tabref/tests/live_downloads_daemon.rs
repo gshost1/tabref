@@ -170,3 +170,38 @@ fn the_state_directory_is_refused_as_a_download_folder() {
     }
     assert!(!inside.exists());
 }
+
+#[test]
+fn a_browsers_own_profile_directory_is_refused_as_a_download_folder() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site("downloads-profile");
+    let outside = scratch("downloads-profile");
+    let config = outside.0.join("config");
+    let profile = config.join("google-chrome").join("Default");
+    let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
+        .args([
+            "--cdp",
+            &tabref.browser.port.to_string(),
+            "--timeout",
+            "30000",
+        ])
+        .args([
+            "open",
+            "--download-dir",
+            profile.to_str().unwrap(),
+            &format!("{base}/"),
+        ])
+        .env("TABREF_HOME", &tabref.home)
+        .env("XDG_CONFIG_HOME", &config)
+        .env("TABREF_NO_DAEMON", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("error INVALID_ARGS: ") && stderr.contains("profile directory"),
+        "{stderr}"
+    );
+    assert!(!config.exists());
+}

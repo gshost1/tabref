@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use tabref_cdp::default_user_data_dirs;
 use tabref_core::{AppError, create_private_dir};
 
 use crate::session::Session;
@@ -14,15 +15,19 @@ const DEFAULT_CAP_MB: u64 = 500;
 const MB: u64 = 1024 * 1024;
 
 /// Saves `dir` (absolute, created private when new) as this browser's
-/// download folder. tabref's state directory, or a folder inside it, is
-/// refused before anything is created, with symbolic links resolved: a page
-/// could otherwise save a file named like tabref's own state there. A
+/// download folder. tabref's state directory and the user's own browsers'
+/// default profile directories, or a folder inside one, are refused before
+/// anything is created, with symbolic links resolved: a page could
+/// otherwise save a file named like tabref's state or a profile's there. A
 /// dangling link is refused too.
 pub(crate) fn choose_folder(session: &mut Session, dir: &Path) -> Result<PathBuf, AppError> {
     let absolute = std::path::absolute(dir)?;
     let root = session.store().base_dir().to_path_buf();
     if within(&absolute, &root)? {
         return Err(state_folder(&absolute));
+    }
+    if in_a_profile(&absolute)? {
+        return Err(profile_folder(&absolute));
     }
     create_private_dir(&absolute)?;
     let name = state_name(session, "download-dir");
@@ -71,7 +76,8 @@ pub(crate) fn download_folder(session: &mut Session) -> Option<PathBuf> {
     let root = session.store().base_dir().to_path_buf();
     if let Some(chosen) = session.store().read_state(&name) {
         let chosen = PathBuf::from(chosen.trim());
-        let safe = within(&chosen, &root).is_ok_and(|inside| !inside);
+        let safe = within(&chosen, &root).is_ok_and(|inside| !inside)
+            && in_a_profile(&chosen).is_ok_and(|inside| !inside);
         return safe.then_some(chosen);
     }
     if !launched_here(session) {
@@ -125,6 +131,24 @@ fn resolved(dir: &Path) -> Result<PathBuf, AppError> {
             _ => return Ok(dir.to_path_buf()),
         }
     }
+}
+
+/// Whether `dir` is one of the user's own browsers' default profile
+/// directories or inside one.
+pub(crate) fn in_a_profile(dir: &Path) -> Result<bool, AppError> {
+    for browser in default_user_data_dirs() {
+        if within(dir, &browser.user_data_dir)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn profile_folder(dir: &Path) -> AppError {
+    AppError::invalid_args(format!(
+        "{} is a browser's own profile directory or inside it; choose another download folder",
+        dir.display()
+    ))
 }
 
 fn state_folder(dir: &Path) -> AppError {
