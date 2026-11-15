@@ -67,10 +67,7 @@ fn probe_live_views() {
         "{consent}"
     );
     let read = tabref.ok(&["read"]).stdout;
-    assert!(
-        read.contains("We and our 812 partners store"),
-        "{read}"
-    );
+    assert!(read.contains("We and our 812 partners store"), "{read}");
     assert!(
         read.contains("The council approved the new bridge"),
         "{read}"

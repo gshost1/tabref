@@ -4,9 +4,9 @@ header:
 main:
   # Meaning of gleam in English
   gleam noun
-  (1/2) [e4 button Save] A gleam of light is a small, bright light that shines briefly: · the gleam of a lighthouse across the bay · a faint gleam in the dark
+  (1/2) [e4 button Save] A gleam of light is a small, bright light that shines briefly: · the [e5 gleam] of a lighthouse across the bay · a faint [e6 gleam] in the dark
   Synonyms [e7 glint -> /w/glint] [e8 flash -> /w/flash]
-  (2/2) [e9 button Save] a brief sign of a quality or emotion, seen in someone's eyes: · There was a hint of mischief in her eyes.
+  (2/2) [e9 button Save] a brief sign of a quality or [e10 emotion], seen in someone's eyes: · There was a hint of mischief in her eyes.
   [e11 disclosure More examples (collapsed)]
 footer: [e12 Terms -> /terms]
--- 10 lines, 644 chars, all shown
+-- 10 lines, 690 chars, all shown
