@@ -20,15 +20,35 @@ pub fn navigate(
     url: &str,
     deadline: Deadline,
 ) -> Result<(), AppError> {
-    enable_load_events(connection, session, deadline)?;
+    navigate_by(connection, session, url, deadline, deadline)
+}
+
+/// [`navigate`] with its two waits bounded apart. `commit` bounds the wait
+/// for the browser to start the new document: `Page.navigate` answers only
+/// once the response arrives, which a slow server, or a browser that has
+/// just started and still loads its profile, holds back for seconds. `load`
+/// bounds the wait for the load after that, which always gets at least
+/// 500 ms past the commit, within `commit` (see [`load_bound`]). A commit
+/// that misses `commit` is `TIMEOUT` with kind `cdp_navigation_pending`.
+pub fn navigate_by(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    url: &str,
+    commit: Deadline,
+    load: Deadline,
+) -> Result<(), AppError> {
+    enable_load_events(connection, session, commit)?;
     let session_id = session.session_id.as_str();
     connection.discard_events(|event| is_any_load(event, session_id));
-    let result = connection.call(
-        "Page.navigate",
-        json!({ "url": url }),
-        Some(session_id),
-        deadline,
-    )?;
+    let result = connection
+        .call(
+            "Page.navigate",
+            json!({ "url": url }),
+            Some(session_id),
+            commit,
+        )
+        .map_err(|error| commit_timeout(error, url))?;
+    let deadline = load_bound(commit, load);
     if let Some(error_text) = result
         .get("errorText")
         .and_then(Value::as_str)
@@ -45,6 +65,18 @@ pub fn navigate(
         .unwrap_or_default();
     wait_for_document_load(connection, session_id, (frame_id, loader_id), deadline)
         .map_err(|error| load_timeout(error, url))
+}
+
+/// The bound of the load wait once the document committed: `load`, or, when
+/// less than 500 ms of it is left, 500 ms from now, never past `commit`.
+/// A commit just before the load bound still gets time to load.
+pub(crate) fn load_bound(commit: Deadline, load: Deadline) -> Deadline {
+    let floor = commit.capped(LOAD_GRACE);
+    if load.remaining() >= floor.remaining() {
+        load
+    } else {
+        floor
+    }
 }
 
 /// Waits, bounded by `deadline`, until the page's current document has
@@ -149,6 +181,19 @@ fn navigation_failed(url: &str, error_text: &str) -> AppError {
     .with_platform_detail(error_text)
     .with_details(json!({ "kind": "cdp_navigation_failed", "url": url }))
     .with_disposition(DeliverySemantics::delivered_unverified())
+}
+
+fn commit_timeout(error: AppError, url: &str) -> AppError {
+    if !is_timeout(&error) {
+        return error;
+    }
+    AppError::timeout(format!("{url} did not respond before the deadline"))
+        .with_suggestion(
+            "A slow server, or a browser that has just started and is still loading its \
+             profile, holds a navigation back; a longer --timeout gives it more time",
+        )
+        .with_details(json!({ "kind": "cdp_navigation_pending", "url": url }))
+        .with_disposition(DeliverySemantics::delivered_unverified())
 }
 
 fn load_timeout(error: AppError, what: &str) -> AppError {

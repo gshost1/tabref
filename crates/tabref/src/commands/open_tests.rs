@@ -1,4 +1,21 @@
-use super::normalize_url;
+use tabref_core::AppError;
+
+use super::{normalize_url, open_again};
+
+#[test]
+fn a_pending_navigation_in_open_may_be_opened_again() {
+    let pending = AppError::timeout("http://a.test/ did not respond before the deadline")
+        .with_details(
+            serde_json::json!({ "kind": "cdp_navigation_pending", "url": "http://a.test/" }),
+        );
+
+    let error = open_again(pending);
+
+    let details = error.details.unwrap();
+    assert_eq!(details["kind"], "cdp_navigation_pending");
+    assert_eq!(details["retryable"], true);
+    assert!(error.suggestion.unwrap().contains("same open again"));
+}
 
 #[test]
 fn a_bare_host_gets_https_and_schemes_are_kept() {

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use serde_json::json;
 use tabref_cdp::{
-    BrowserEndpoint, CdpConnection, PageSession, PageTarget, attach_to_target,
+    BrowserEndpoint, CdpConnection, PageSession, PageTarget, attach_to_target_with,
     create_background_tab, is_protocol_error, list_page_targets, target_gone,
 };
 use tabref_core::{AppError, Deadline, RefStore};
@@ -137,8 +137,9 @@ impl Session {
     }
 
     /// The flattened session for `target_id`, attached once per connection,
-    /// with page events on so navigations and dialogs are seen. A target the
-    /// browser no longer has is `WINDOW_NOT_FOUND` with kind
+    /// with page and lifecycle events on so navigations, loads and dialogs
+    /// are seen. Turning them on rides in the attach's own round trip. A
+    /// target the browser no longer has is `WINDOW_NOT_FOUND` with kind
     /// `cdp_target_gone`.
     pub(crate) fn attach(&mut self, target_id: &str) -> Result<PageSession, AppError> {
         self.scope.claim(target_id)?;
@@ -146,21 +147,19 @@ impl Session {
             return Ok(session.clone());
         }
         let deadline = self.scope.deadline;
-        let session =
-            attach_to_target(&mut self.connection, target_id, deadline).map_err(|error| {
+        let events = [
+            ("Page.enable", json!({})),
+            ("Page.setLifecycleEventsEnabled", json!({ "enabled": true })),
+        ];
+        let session = attach_to_target_with(&mut self.connection, target_id, &events, deadline)
+            .map_err(|error| {
                 if is_protocol_error(&error) {
                     let detail = error.platform_detail.clone().unwrap_or_default();
-                    target_gone("Target.attachToTarget", detail)
+                    target_gone(failed_method(&error), detail)
                 } else {
                     error
                 }
             })?;
-        self.connection.call(
-            "Page.enable",
-            json!({}),
-            Some(&session.session_id),
-            deadline,
-        )?;
         self.attached.insert(target_id.to_owned(), session.clone());
         Ok(session)
     }
@@ -170,6 +169,21 @@ impl Session {
     }
 }
 
+/// The method a protocol error names: attaching sends several, and the
+/// error should say which one the browser refused.
+fn failed_method(error: &AppError) -> &str {
+    error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("method"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Target.attachToTarget")
+}
+
 fn remembered_is(store: &RefStore, name: &str, target_id: &str) -> bool {
     store.read_state(name).as_deref() == Some(target_id)
 }
+
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;

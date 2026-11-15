@@ -30,6 +30,18 @@ pub fn attach_to_target(
     target_id: &str,
     deadline: Deadline,
 ) -> Result<PageSession, AppError> {
+    attach_to_target_with(connection, target_id, &[], deadline)
+}
+
+/// [`attach_to_target`], also sending `follow_ups` on the new session in the
+/// same round trip as the release, so a browser that is slow to answer (one
+/// that has just started) is waited on once instead of once per call.
+pub fn attach_to_target_with(
+    connection: &mut CdpConnection,
+    target_id: &str,
+    follow_ups: &[(&str, Value)],
+    deadline: Deadline,
+) -> Result<PageSession, AppError> {
     let result = connection.call(
         "Target.attachToTarget",
         json!({ "targetId": target_id, "flatten": true }),
@@ -37,12 +49,9 @@ pub fn attach_to_target(
         deadline,
     )?;
     let session_id = string_field(&result, "sessionId", "Target.attachToTarget")?;
-    connection.call(
-        "Runtime.runIfWaitingForDebugger",
-        json!({}),
-        Some(&session_id),
-        deadline,
-    )?;
+    let mut calls = vec![("Runtime.runIfWaitingForDebugger", json!({}))];
+    calls.extend(follow_ups.iter().cloned());
+    connection.call_all(&calls, Some(&session_id), deadline)?;
     Ok(PageSession {
         target_id: target_id.to_owned(),
         session_id,

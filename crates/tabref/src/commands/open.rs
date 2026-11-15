@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use tabref_cdp::navigate;
+use tabref_cdp::navigate_by;
 use tabref_core::AppError;
 use tabref_page::PageInfo;
 
@@ -14,10 +14,13 @@ use crate::view::view_request::ViewRequest;
 use crate::view::view_scope::ViewScope;
 
 const SCHEMES: &[&str] = &["about:", "data:", "file:", "chrome:", "javascript:"];
+const SNAPSHOT_RESERVE_MS: u64 = 1_000;
 
 /// Navigates the current tab to `url` and prints the loaded page's view,
 /// so reading it costs no second command. A page that has not fired `load` after three quarters of the
-/// deadline is snapshotted as it stands, with a note.
+/// deadline is snapshotted as it stands, with a note. The browser may take
+/// until one second before the deadline to start the new document, as a
+/// browser that has just started can hold its first page load for seconds.
 pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError> {
     let page = session.page()?;
     let deadline = session.deadline();
@@ -28,10 +31,21 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
     } else {
         url
     };
-    let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
-    let unfinished = match navigate(session.connection(), &page, &url, navigation) {
+    let remaining = deadline.remaining_ms();
+    let load = remaining * 3 / 4;
+    let commit = remaining.saturating_sub(SNAPSHOT_RESERVE_MS).max(load);
+    let unfinished = match navigate_by(
+        session.connection(),
+        &page,
+        &url,
+        deadline.capped(Duration::from_millis(commit)),
+        deadline.capped(Duration::from_millis(load)),
+    ) {
         Ok(()) => false,
         Err(error) if error.kind() == Some("cdp_load_timeout") => true,
+        Err(error) if error.kind() == Some("cdp_navigation_pending") => {
+            return Err(open_again(error));
+        }
         Err(error) => return Err(error),
     };
     let captured = session.capture()?;
@@ -47,6 +61,24 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
         serde_json::json!(!unfinished),
     );
     Ok(report)
+}
+
+/// A navigation the browser did not start in time, for `open` alone:
+/// opening the same address again only asks for it again, so it may be
+/// repeated. Other callers keep the neutral error, as repeating them could
+/// repeat the actions before the navigation.
+fn open_again(error: AppError) -> AppError {
+    let mut details = error
+        .details
+        .clone()
+        .unwrap_or_else(|| serde_json::json!({}));
+    details["retryable"] = serde_json::json!(true);
+    error
+        .with_suggestion(
+            "A slow server, or a browser that has just started and is still loading its \
+             profile, holds the page back; run the same open again, or pass a longer --timeout",
+        )
+        .with_details(details)
 }
 
 /// `example.com` becomes `https://example.com`, a loopback host such as

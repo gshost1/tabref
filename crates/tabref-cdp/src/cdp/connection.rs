@@ -79,6 +79,40 @@ impl CdpConnection {
         self.reply(id, deadline)
     }
 
+    /// Sends every `(method, params)` on `session_id` before waiting for any
+    /// reply, then returns the replies in order, so the calls cost one round
+    /// trip instead of one each. The browser handles them in the order sent.
+    /// The first error is returned and the other replies are abandoned.
+    pub fn call_all(
+        &mut self,
+        calls: &[(&str, Value)],
+        session_id: Option<&str>,
+        deadline: Deadline,
+    ) -> Result<Vec<Value>, AppError> {
+        let mut ids = Vec::with_capacity(calls.len());
+        for (method, params) in calls {
+            match self.send(method, params.clone(), session_id, deadline) {
+                Ok(id) => ids.push(id),
+                Err(error) => {
+                    ids.into_iter().for_each(|id| self.abandon(id));
+                    return Err(error);
+                }
+            }
+        }
+        let mut replies = Vec::with_capacity(ids.len());
+        let mut pending = ids.into_iter();
+        while let Some(id) = pending.next() {
+            match self.reply(id, deadline) {
+                Ok(reply) => replies.push(reply),
+                Err(error) => {
+                    pending.for_each(|id| self.abandon(id));
+                    return Err(error);
+                }
+            }
+        }
+        Ok(replies)
+    }
+
     /// Sends `method` without waiting and returns the id its reply will
     /// carry. Every id sent must be collected or abandoned.
     pub fn send(
