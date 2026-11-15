@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use tabref_cdp::{
     BrowserEndpoint, EndpointSpec, HeldPort, LaunchOptions, LaunchedBrowser, ListenerVerdict,
-    ProcessView, check_listener, connect, connect_held, endpoint_from_held, is_chrome_family,
-    launch_chrome, launched_alive,
+    ProcessView, abandon_launch, check_listener, connect, connect_held, endpoint_from_held,
+    is_chrome_family, launch_chrome, launched_alive,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 
@@ -14,7 +14,9 @@ use super::endpoint_refusal::{named_warning, unverified_port};
 use super::launch_profile::{
     normalize, prepare_profile, requested_profile, running_on_profile, same_dir,
 };
-use super::launch_record::{LAUNCH_FILE, forget_launched, parse_launched, save_launched};
+use super::launch_record::{
+    LAUNCH_FILE, forget_launched, load_launched, parse_launched, save_launched,
+};
 use super::session_options::SessionOptions;
 use super::user_chrome::{GONE_KIND, connect_user_chrome};
 use super::user_chrome_record::{UserChromeRecord, forget_user_chrome};
@@ -259,19 +261,40 @@ fn start_browser(
         .profile_dir
         .as_deref()
         .and_then(|profile| running_on_profile(profile, !launch.headed));
-    let browser = match running {
-        Some(running) => running,
-        None => launch_chrome(&launch, deadline)?,
+    let (endpoint, connection, text) = match running {
+        Some(adopted) => {
+            let endpoint = adopted.endpoint()?;
+            let connection = connect(&endpoint, deadline)?;
+            (endpoint, connection, save_launched(store, &adopted)?)
+        }
+        None => {
+            let started = launch_chrome(&launch, deadline)?;
+            let text = save_launched(store, &started);
+            match (text, started.endpoint()) {
+                (Ok(text), Ok(endpoint)) => match connect(&endpoint, deadline) {
+                    Ok(connection) => (endpoint, connection, text),
+                    Err(error) => return Err(abandon(store, &started, error)),
+                },
+                (Err(error), _) | (_, Err(error)) => return Err(abandon(store, &started, error)),
+            }
+        }
     };
-    let endpoint = browser.endpoint()?;
-    let connection = connect(&endpoint, deadline)?;
-    let text = save_launched(store, &browser)?;
     Ok(ConnectedBrowser {
         endpoint,
         connection,
         warning: None,
         choice: Some(format!("launched:{text}")),
     })
+}
+
+/// Ends a browser this launch started that could not be used, and forgets
+/// its record once it is gone; while it still runs, the record (saved before
+/// connecting) keeps it reachable for `close --browser`.
+fn abandon(store: &RefStore, started: &LaunchedBrowser, error: AppError) -> AppError {
+    if abandon_launch(started) && load_launched(store).as_ref() == Some(started) {
+        forget_launched(store);
+    }
+    error
 }
 
 fn no_browser() -> AppError {

@@ -48,6 +48,13 @@ pub(crate) fn normalize(dir: &Path) -> Result<PathBuf, AppError> {
                     resolved = next;
                     continue;
                 }
+                Err(_) if std::fs::symlink_metadata(resolved.join(component)).is_ok() => {
+                    return Err(refused(
+                        dir,
+                        "is, or goes through, a symbolic link to nothing",
+                        "Pass a directory, or a link to one that exists",
+                    ));
+                }
                 Err(_) => missing = true,
             }
         }
@@ -170,11 +177,14 @@ fn mark(dir: &Path) -> Result<(), AppError> {
 }
 
 fn lock(dir: &Path, deadline: Deadline) -> Result<File, AppError> {
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(dir.join(LAUNCH_LOCK))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(dir.join(LAUNCH_LOCK))?;
     while file.try_lock().is_err() {
         if deadline.is_expired() {
             return Err(AppError::timeout(

@@ -156,3 +156,28 @@ fn a_profile_another_launch_just_marked_is_marked_again_without_error() {
     let _ = std::fs::remove_dir_all(&base);
     assert!(first.is_ok() && second.is_ok(), "{second:?}");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symbolic_link_to_nothing_is_refused_as_an_argument() {
+    let base = temp("dangling");
+    std::os::unix::fs::symlink(base.join("gone"), base.join("link")).unwrap();
+    let error = normalize(&base.join("link")).map(|_| ());
+    let _ = std::fs::remove_dir_all(&base);
+    let error = error.unwrap_err();
+    assert_eq!(error.code, tabref_core::ErrorCode::InvalidArgs, "{error:?}");
+    assert_eq!(error.kind(), Some("launch_profile_refused"));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_launch_lock_file_is_private_to_the_user() {
+    use std::os::unix::fs::PermissionsExt;
+    let base = temp("lockmode");
+    let held = super::lock(&base, tabref_core::Deadline::after(1000).unwrap());
+    let mode =
+        std::fs::metadata(base.join(super::LAUNCH_LOCK)).map(|m| m.permissions().mode() & 0o777);
+    drop(held);
+    let _ = std::fs::remove_dir_all(&base);
+    assert_eq!(mode.unwrap(), 0o600);
+}

@@ -7,6 +7,7 @@ use tabref_core::{
     new_snapshot_id,
 };
 
+use super::abandon::{kill_group, remove_profile_soon};
 use super::chrome_binary::find_chrome;
 use super::launch_options::LaunchOptions;
 use super::launched_browser::LaunchedBrowser;
@@ -31,7 +32,8 @@ const WINDOW_SIZE: &str = "--window-size=1280,900";
 /// persistent `options.profile_dir` (created private to the user when new),
 /// whose `DevToolsActivePort` from an earlier run is not taken for this
 /// one's. The browser runs in its own process group, so it outlives this
-/// process and the shell that ran it.
+/// process and the shell that ran it. A launch that fails ends that group
+/// when the deadline passes and removes a throwaway profile.
 pub fn launch_chrome(
     options: &LaunchOptions,
     deadline: Deadline,
@@ -61,7 +63,16 @@ pub fn launch_chrome(
         .with_details(serde_json::json!({ "kind": "chrome_spawn_failed" }))
         .with_disposition(DeliverySemantics::not_delivered())
     })?;
-    let active = wait_for_port(&mut child, &profile_dir, before.as_deref(), deadline)?;
+    let active = match wait_for_port(&mut child, &profile_dir, before.as_deref(), deadline) {
+        Ok(active) => active,
+        Err(error) => {
+            let _ = child.wait();
+            if options.profile_dir.is_none() {
+                remove_profile_soon(&profile_dir);
+            }
+            return Err(error);
+        }
+    };
     let pid = child.id();
     let started = process_start(pid);
     std::thread::spawn(move || child.wait());
@@ -105,10 +116,13 @@ pub(crate) fn changed_port_file(profile_dir: &Path, before: Option<&str>) -> Opt
     read_active_port(profile_dir).ok()
 }
 
-/// Whether the browser just started holds `port`: the child itself, or (a
-/// binary that hands off to another process) a Chrome-family process running
-/// this profile. Where the owner cannot be checked, the changed port file is
-/// taken as it is.
+/// Whether the browser just started holds `port`, asked only while the child
+/// still runs (`wait_for_port`): every listener on it is the child, or a
+/// Chrome-family process of this user with this profile's
+/// `--user-data-dir`. On a platform that cannot tell who holds a port
+/// (`Unknown`, off Linux) the changed port file is taken as it is; where the
+/// socket tables cannot be read (`CantCheck`), or anything else holds the
+/// port, it is not.
 fn launched_holds(port: u16, child: u32, profile_dir: &Path) -> bool {
     let flag = format!("--user-data-dir={}", profile_dir.display());
     let ours = |process: &ProcessView| {
@@ -176,6 +190,7 @@ fn wait_for_port(
             .with_details(serde_json::json!({ "kind": "chrome_exited" })));
         }
         if deadline.is_expired() {
+            kill_group(child.id());
             let _ = child.kill();
             return Err(
                 AppError::timeout("The browser did not open DevTools before the deadline")
