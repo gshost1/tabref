@@ -54,12 +54,17 @@ fn kill_group(pid: u32) {
         .status();
 }
 
-pub fn harness(name: &str) -> Harness {
-    let extra_args = std::env::var("TABREF_CHROME_ARGS")
+/// The extra Chrome arguments `TABREF_CHROME_ARGS` names (CI passes
+/// `--no-sandbox`), split on whitespace.
+pub fn chrome_args() -> Vec<String> {
+    std::env::var("TABREF_CHROME_ARGS")
         .map(|args| args.split_whitespace().map(str::to_owned).collect())
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+pub fn harness(name: &str) -> Harness {
     let options = LaunchOptions {
-        extra_args,
+        extra_args: chrome_args(),
         ..LaunchOptions::default()
     };
     let browser = launch_chrome(&options, Deadline::after(30_000).unwrap()).unwrap();

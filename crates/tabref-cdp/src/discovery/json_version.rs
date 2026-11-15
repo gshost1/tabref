@@ -52,6 +52,10 @@ pub(crate) fn parse_version_body(port: u16, body: &str) -> Result<BrowserEndpoin
             .get("Browser")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned),
+        user_agent: parsed
+            .get("User-Agent")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
     })
 }
 
