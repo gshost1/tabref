@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Model passes on a laptop run as a dedicated unprivileged user, `tabbench`, so the model can read nothing of the
 # operator's: no ~/.config/gh, no ~/.claude, no other process's /proc/<pid>/environ, no operator display or D-Bus.
-# Root is needed once, for setup; afterwards the operator only needs `sudo -n -u tabbench` (see below).
+# Root is needed once, for setup; afterwards the operator only needs the as-tabbench wrapper (see below).
 #
 #   sudo bench/tools/tabbench.sh setup             once: create the user (no groups, home 700), then `sync`
 #   bench/tools/tabbench.sh sync [TABREF_BIN]      copy this bench (and a tabref binary, default
@@ -13,9 +13,10 @@
 #                                                  terminal and no pipe it asks for the key without echo.
 #   bench/tools/tabbench.sh results                copy tabbench's runs/ to bench/runs/tabbench/ for report.py
 #
-# Only setup needs root. sync, run and results need nothing but `sudo -n -u tabbench` for the operator, e.g. a
-# sudoers drop-in `<operator> ALL=(tabbench) NOPASSWD: ALL`; every copy crosses the user boundary as a tar stream
-# on a pipe, written by tabbench into its own home or by the operator into this checkout.
+# Only setup needs root. sync, run and results run as the operator and reach tabbench only through a root-owned
+# wrapper, /usr/local/bin/as-tabbench (`exec sudo -n -u tabbench "$@"`, with a sudoers drop-in
+# `<operator> ALL=(tabbench) NOPASSWD: ALL`); TABBENCH_AS names another wrapper. Every copy crosses the user
+# boundary as a tar stream on a pipe, written by tabbench into its own home or by the operator into this checkout.
 #
 # run_web.py refuses to start unless it runs as tabbench (or on a VM), tabbench is in no admin group, and no other
 # home under /home is readable by it. If yours is 755, make it private first: chmod 750 "$HOME" (your call).
@@ -24,9 +25,10 @@ U=tabbench
 H=/home/$U
 here=$(cd "$(dirname "$0")/.." && pwd)
 cmd=${1:?setup, sync, run or results}; shift || true
-as_user() { sudo -n -u "$U" env -i HOME="$H" USER="$U" LOGNAME="$U" LANG=C.UTF-8 PATH=/usr/bin:/bin "$@"; }
+AS=${TABBENCH_AS:-as-tabbench}
+as_user() { "$AS" env -i HOME="$H" USER="$U" LOGNAME="$U" LANG=C.UTF-8 PATH=/usr/bin:/bin "$@"; }
 need_user() {
-  as_user true 2>/dev/null || { echo "cannot run as $U without a password (sudo -n -u $U); see the header" >&2; exit 2; }
+  as_user true 2>/dev/null || { echo "cannot run as $U through $AS; see the header" >&2; exit 2; }
 }
 case $cmd in
   setup)
