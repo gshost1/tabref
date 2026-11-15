@@ -104,26 +104,58 @@ fn target(
     resolve_target(session, &TargetSpec::from_words(words)?, intent, deadline)
 }
 
-/// Splits a fill or select step into its target and its value: the target
-/// is the longest run of leading words that reads as one, and every word
-/// after it is the value, so `fill "Title" 401 bad gateway` needs no quotes
-/// around the value.
+/// Splits a fill or select step into its target and its value. When the
+/// target ends in a quoted name or is a ref (`fill "Title" 401 bad gateway`,
+/// `fill e4 Ada Lovelace`), every word after it is the value, so the value
+/// needs no quotes. Otherwise the last word is the value, and a target of
+/// several bare words is refused with the advice to quote it. A value that
+/// would start with a bare `in`, `after`, `before` or `nth` is refused too:
+/// that is a scope the step left without a value.
 pub(crate) fn split_value(step: &BatchStep) -> Result<(&[Word], String), AppError> {
     let args = step.args();
     let split = (1..args.len())
         .rev()
-        .find(|&end| TargetSpec::from_words(&args[..end]).is_ok());
-    match split {
-        Some(end) => {
-            let value: Vec<&str> = args[end..].iter().map(|word| word.text.as_str()).collect();
-            Ok((&args[..end], value.join(" ")))
-        }
-        None => Err(AppError::invalid_args(format!(
+        .find(|&end| ends_target(&args[..end]) && TargetSpec::from_words(&args[..end]).is_ok())
+        .unwrap_or(args.len().saturating_sub(1));
+    let (aim, value) = args.split_at(split);
+    if aim.is_empty() || value.is_empty() {
+        return Err(AppError::invalid_args(format!(
             "{} needs a target and a value, as in: {} \"Price\" 62.00",
             step.verb(),
             step.verb()
-        ))),
+        )));
     }
+    if let Some(first) = value.first().filter(|word| !word.quoted)
+        && SCOPES.contains(&first.text.to_ascii_lowercase().as_str())
+    {
+        return Err(AppError::invalid_args(format!(
+            "{} has no value after its target; quote the value if it starts with '{}'",
+            step.verb(),
+            first.text
+        )));
+    }
+    let words: Vec<&str> = value.iter().map(|word| word.text.as_str()).collect();
+    Ok((aim, words.join(" ")))
+}
+
+const SCOPES: &[&str] = &["in", "after", "before", "nth"];
+
+fn ends_target(aim: &[Word]) -> bool {
+    let Some(last) = aim.last() else {
+        return false;
+    };
+    let after_nth = aim.len() >= 2
+        && aim[aim.len() - 2].text.eq_ignore_ascii_case("nth")
+        && last.text.chars().all(|c| c.is_ascii_digit());
+    last.quoted || after_nth || (aim.len() == 1 && is_ref(&last.text))
+}
+
+fn is_ref(text: &str) -> bool {
+    let short = text.strip_prefix('@').unwrap_or(text);
+    text.starts_with("@s")
+        || short
+            .strip_prefix('e')
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
 fn scroll_step(

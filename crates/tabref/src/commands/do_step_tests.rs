@@ -39,3 +39,32 @@ fn a_step_with_no_value_is_refused() {
     let steps = split_steps(r#"fill "Title""#).unwrap();
     assert!(split_value(&steps[0]).is_err());
 }
+
+#[test]
+fn bare_words_and_scopes_without_a_value_are_never_taken_as_values() {
+    let refused = |line: &str| {
+        let steps = split_steps(line).unwrap();
+        split_value(&steps[0]).err().map(|error| error.message)
+    };
+    assert_eq!(
+        split("fill Email address ada@x.com"),
+        (
+            vec!["Email".to_owned(), "address".to_owned()],
+            "ada@x.com".to_owned()
+        )
+    );
+    assert!(refused(r#"fill "Price" in "Hoodie-S""#).is_some());
+    assert!(refused(r#"fill "Qty" nth 2"#).is_some());
+    assert!(refused(r#"fill "Notes" in review since Monday"#).is_some());
+    assert_eq!(
+        split(r#"fill "Edit" nth 2 Ada Lovelace"#),
+        (
+            vec!["Edit".to_owned(), "nth".to_owned(), "2".to_owned()],
+            "Ada Lovelace".to_owned()
+        )
+    );
+    assert_eq!(
+        split("fill e4 Ada Lovelace"),
+        (vec!["e4".to_owned()], "Ada Lovelace".to_owned())
+    );
+}

@@ -85,7 +85,7 @@ pub(crate) fn normalize_url(url: &str) -> String {
 }
 
 pub(crate) fn is_relative(url: &str) -> bool {
-    ["/", "?", "#", "./", "../"]
+    ["/", "?", "#", "./"]
         .iter()
         .any(|prefix| url.starts_with(prefix))
 }

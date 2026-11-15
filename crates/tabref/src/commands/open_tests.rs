@@ -43,7 +43,6 @@ fn a_path_of_the_current_page_stays_relative() {
         "?page=2",
         "#top",
         "./a.html",
-        "../b",
         "//cdn.example.com/x",
     ] {
         assert_eq!(normalize_url(url), url);

@@ -56,7 +56,7 @@ pub(crate) fn footer_line(
     }
     if frames_unread > 0 {
         cut.push(format!("{frames_unread} frames not read in time"));
-        more.push(format!("{} again", route.command));
+        more.push(route.command.clone());
     }
     more.push("tabref find <text>".to_owned());
     let shown = if report.lines_shown < report.lines_total {

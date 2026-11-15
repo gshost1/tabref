@@ -10,10 +10,13 @@ const TRACKED_REQUESTS: &[&str] = &["Document", "XHR", "Fetch"];
 
 /// The page events seen since an action, folded into what is still
 /// outstanding: a main-frame navigation that has not committed or reached
-/// `DOMContentLoaded`, and document, XHR and fetch requests the main frame
-/// sent to its own site that are still in flight. Requests to other sites
-/// (ads, analytics) and from iframes never hold the settle: they can run
-/// for seconds and say nothing about what the action changed.
+/// `DOMContentLoaded`, and document, XHR and fetch requests that a document
+/// of this page sent to its own site and that are still in flight (a
+/// same-site iframe's save counts). Requests to other sites (ads,
+/// analytics), and those from documents with no site of their own such as
+/// `about:blank` ad slots, never hold the settle: they can run for seconds
+/// and say nothing about what the action changed. A navigation's document
+/// request always counts.
 #[derive(Debug)]
 pub(crate) struct SettleTracker {
     main_frame: String,
@@ -85,7 +88,7 @@ impl SettleTracker {
                     self.navigating = false;
                 }
             }
-            "Network.requestWillBeSent" if main => {
+            "Network.requestWillBeSent" => {
                 let kind = params.get("type").and_then(Value::as_str);
                 if kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params) {
                     self.pending.insert(request_id(params));
@@ -146,15 +149,17 @@ fn request_id(params: &Value) -> String {
 mod tests;
 
 fn same_site(params: &Value) -> bool {
+    if params.get("type").and_then(Value::as_str) == Some("Document") {
+        return true;
+    }
     let request = params
         .get("request")
         .and_then(|request| request.get("url"))
         .and_then(Value::as_str);
-    let document = params.get("documentURL").and_then(Value::as_str);
-    match (request.and_then(site), document.and_then(site)) {
-        (Some(request), Some(document)) => request == document,
-        _ => true,
-    }
+    let Some(document) = params.get("documentURL").and_then(Value::as_str) else {
+        return true;
+    };
+    matches!((request.and_then(site), site(document)), (Some(request), Some(document)) if request == document)
 }
 
 fn site(url: &str) -> Option<String> {

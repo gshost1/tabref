@@ -102,24 +102,33 @@ fn a_route_change_within_the_document_is_noted() {
 }
 
 #[test]
-fn requests_to_other_sites_or_from_iframes_do_not_hold_the_settle() {
+fn requests_to_other_sites_or_from_blank_frames_do_not_hold_the_settle() {
     let now = Instant::now();
     let mut tracker = SettleTracker::new("F");
     let page = "https://dictionary.example.org/word";
-    for (id, frame, url) in [
-        ("1", "F", "https://ads.adnet.example.com/bid"),
-        ("2", "AD", "https://www.example.org/api"),
+    for (id, frame, document, url) in [
+        ("1", "F", page, "https://ads.adnet.example.com/bid"),
+        ("2", "AD", "about:blank", "https://www.example.org/api"),
     ] {
         tracker.absorb(
             &event(
                 "Network.requestWillBeSent",
                 json!({ "requestId": id, "type": "XHR", "frameId": frame,
-                        "documentURL": page, "request": { "url": url } }),
+                        "documentURL": document, "request": { "url": url } }),
             ),
             now,
         );
     }
     assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Done);
+    tracker.absorb(
+        &event(
+            "Network.requestWillBeSent",
+            json!({ "requestId": "4", "type": "Fetch", "frameId": "EDITOR",
+                    "documentURL": "https://www.example.org/editor", "request": { "url": "https://www.example.org/save" } }),
+        ),
+        now,
+    );
+    assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Network);
     tracker.absorb(
         &event(
             "Network.requestWillBeSent",
