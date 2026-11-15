@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use serde_json::Value;
 use tabref_core::AccessibilityNode;
 
 use super::skipped_frame::SkippedFrame;
@@ -16,6 +19,9 @@ pub struct WebSnapshot {
     pub origins: Vec<Option<NodeOrigin>>,
     pub unreadable_frames: Vec<String>,
     pub skipped_frames: Vec<SkippedFrame>,
+    /// The raw `DOMSnapshot.captureSnapshot` of each target whose frames
+    /// are in the tree, by target id, for a DOM view to reuse.
+    pub dom_captures: HashMap<String, Value>,
 }
 
 impl WebSnapshot {

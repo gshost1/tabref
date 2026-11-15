@@ -166,6 +166,7 @@ impl FrameReader {
                 frame_id: frame_id.to_owned(),
                 url,
                 reason,
+                out_of_process: false,
             });
         }
     }
@@ -295,6 +296,7 @@ impl FrameReader {
             frame_id: state.session.target_id.clone(),
             url: state.url.clone(),
             reason: FrameSkipReason::TimedOut,
+            out_of_process: true,
         });
     }
 

@@ -51,6 +51,7 @@ fn snapshot_with(
     for frame_id in dropped {
         reader.leave_out(&frame_id, String::new(), FrameSkipReason::Unreadable);
     }
+    let dom_captures = reader.finish();
     let mut roots = roots.into_iter();
     let (Some(root), None) = (roots.next(), roots.next()) else {
         return Err(no_tree(&session.target_id));
@@ -67,6 +68,7 @@ fn snapshot_with(
             .map(|frame| frame.frame_id.clone())
             .collect(),
         skipped_frames,
+        dom_captures,
     })
 }
 

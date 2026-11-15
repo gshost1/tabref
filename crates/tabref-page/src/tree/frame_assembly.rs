@@ -4,7 +4,7 @@
 //! no frame of its own, is left out as empty; frames inside a frame that was
 //! left out go with it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use tabref_core::AccessibilityNode;
 
@@ -45,6 +45,31 @@ impl FrameReader {
             kept.push(frame);
         }
         kept
+    }
+
+    /// The DOM capture of every target whose frames are kept, by target id,
+    /// and the left-out frames marked out-of-process when they are targets.
+    pub(crate) fn finish(&mut self) -> HashMap<String, serde_json::Value> {
+        let targets: HashSet<String> = self
+            .targets
+            .iter()
+            .skip(1)
+            .map(|state| state.session.target_id.clone())
+            .collect();
+        for frame in &mut self.left_out {
+            frame.out_of_process = frame.out_of_process || targets.contains(&frame.frame_id);
+        }
+        let mut captures = HashMap::new();
+        for index in 0..self.targets.len() {
+            if index > 0 && self.is_closed_target(index) {
+                continue;
+            }
+            let state = &mut self.targets[index];
+            if let Some(dom) = state.dom.as_mut() {
+                captures.insert(state.session.target_id.clone(), dom.capture.take());
+            }
+        }
+        captures
     }
 
     fn build_target(&mut self, target: usize, built: &mut Vec<FrameNodes>) {

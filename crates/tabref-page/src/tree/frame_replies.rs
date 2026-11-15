@@ -68,11 +68,6 @@ impl FrameReader {
                     connection.abandon(id);
                 }
             }
-            if self.budget.is_spent(self.page_done) {
-                let id = child.session.target_id.clone();
-                self.leave_out(&id, child.url, FrameSkipReason::TimedOut);
-                continue;
-            }
             let frame_id = child.session.target_id.clone();
             let state = TargetState::new(
                 child.session,
@@ -81,6 +76,10 @@ impl FrameReader {
             );
             self.targets.push(state);
             let index = self.targets.len() - 1;
+            if self.budget.is_spent(self.page_done) {
+                self.fail_target(connection, index, FrameSkipReason::TimedOut);
+                continue;
+            }
             self.start_target(connection, index)?;
             let owner = PendingRead::Owner {
                 target,
@@ -146,7 +145,7 @@ impl FrameReader {
         outcome: Outcome,
     ) -> Result<(), AppError> {
         let dom = match outcome {
-            Ok(capture) => FrameDom::from_capture(&capture),
+            Ok(capture) => FrameDom::from_capture(capture),
             Err(error) if is_protocol_error(&error) => FrameDom::default(),
             Err(error) if target == 0 || !loses_only_the_frame(&error) => return Err(error),
             Err(_) => {

@@ -134,7 +134,7 @@ fn render(dom: Dom, refs: HashMap<(String, i64), RefLabel>, options: &ViewOption
         info: &info,
         snapshot_id: Some("s1"),
         ref_count: 3,
-        unreadable_frames: 0,
+        skipped_frames: &[],
     };
     page_view(&subject, &input(dom, refs), options, &ViewScope::Page)
         .unwrap()

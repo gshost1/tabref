@@ -67,7 +67,7 @@ fn frames_are_grafted_under_their_owner_and_origins_follow_preorder() {
     assert_eq!(sent[0]["params"]["autoAttach"], true);
     assert_eq!(
         sent[2]["params"],
-        json!({ "computedStyles": ["display", "visibility"] })
+        json!({ "computedStyles": ["display", "visibility", "position"] })
     );
     assert_eq!(sent[3]["params"], json!({}));
     assert_eq!(sent[4]["params"]["frameId"], "CHILD");
