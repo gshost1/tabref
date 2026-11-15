@@ -48,14 +48,16 @@ class Prompts(unittest.TestCase):
             common_linux.SKILLS = saved
         for arm, text in frozen.items():
             want = text.replace("/opt/bench/ho-tools/skills", str(arms.skills_dir()))
-            self.assertEqual(arms.web_system_prompt(arm, 4242), want, arm)
+            self.assertEqual(arms.frozen_system_prompt(arm, 4242), want, arm)
+            self.assertEqual(arms.web_system_prompt(arm, 4242), want + arms.start_line(arm, 4242), arm)
             self.assertEqual(arms.web_allowed_tools(arm), common_ab_linux.web_allowed_tools(arm), arm)
 
     def test_tabref_prompt(self):
         text = arms.web_system_prompt("tabref", 4242)
         self.assertIn("`tabref skill`", text)
         self.assertIn("--cdp 4242", text)
-        self.assertTrue(text.endswith(arms.WEB_COMMON))
+        self.assertTrue(text.endswith(arms.WEB_COMMON + arms.start_line("tabref", 4242)))
+        self.assertIn("`tabref skill && tabref open <url>`", text)
         self.assertEqual(arms.web_allowed_tools("tabref")[-1], "Bash(tabref:*)")
 
 
@@ -125,6 +127,19 @@ class PwGuideReadable(unittest.TestCase):
         self.assertEqual(arms.web_extra_args("pw"), ["--add-dir", str(arms.skills_dir())])
         for arm in ("tabref", "ab", "bh", "ad-14"):
             self.assertEqual(arms.web_extra_args(arm), [])
+
+
+class ArmsNotesMatchTheCode(unittest.TestCase):
+    def test_recorded_paragraphs_are_the_prompts_the_runner_sends(self):
+        import re
+        from harness import arms
+        notes = (Path(__file__).resolve().parents[1] / "ARMS.md").read_text()
+        section = notes[notes.index("## Tool paragraphs from 2026-11-15"):]
+        blocks = dict(re.findall(r"### (\S+)\n\n```\n(.*?)\n```", section, re.S))
+        self.assertEqual(sorted(blocks), sorted(arms.START_COMMANDS))
+        for arm, text in blocks.items():
+            want = arms.web_system_prompt(arm, "PORT").replace(str(arms.skills_dir()), "SKILLS")
+            self.assertEqual(text, want, arm)
 
 
 if __name__ == "__main__":

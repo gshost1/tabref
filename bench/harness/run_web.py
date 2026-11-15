@@ -315,7 +315,8 @@ class Runner:
                     "arm_version": arms.arm_version(arm, self.versions["tabref"]), "task": tid,
                     "round": rnd, "model": a.model, "channel": channel, "seed": seed, "host": a.host,
                     "vm": core.host_label(), "display": self.display.mode, "claude_version": self.versions["claude"],
-                    "chrome_version": self.versions["chrome"]}
+                    "chrome_version": self.versions["chrome"],
+                    "prompt": arms.PROMPT_VERSION}
         if ts.sealed:
             base_row["pass_id"] = a.fresh_pass_id
         exp = self.site.reset(seed)

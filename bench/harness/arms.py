@@ -31,13 +31,37 @@ def arm_version(arm, tabref_version=None):
     return ARM_VERSIONS[arm]
 
 
-def web_system_prompt(arm, cdp_port):
+PROMPT_VERSION = "chained-2026-11-15"
+FROZEN_PROMPT_VERSION = "frozen-2026-11-10"
+START_LINE = " Read the guide and open the first page in one call, for example: "
+START_COMMANDS = {
+    "tabref": "`tabref skill && tabref open <url>`",
+    "ab": "`agent-browser skills get core && agent-browser --cdp {port} open <url>`",
+    "bh": "`browser-harness skill && browser-harness <<'PY'\nnew_tab(\"<url>\"); wait_for_load(); print(page_info())\nPY`",
+    "pw": ("`cat {skills}/playwright-cli/SKILL.md && playwright-cli attach --cdp=http://127.0.0.1:{port} "
+           "&& playwright-cli goto <url>`"),
+    "ad-14": "`agent-desktop skills get web && agent-desktop open-url <url> --app \"Google Chrome\"`",
+}
+
+
+def start_line(arm, cdp_port):
+    """The same kind of line for every arm (decided 2026-11-15): the tool's own guide read chained with its first
+    open, so no arm pays a separate turn for its guide because only some prompts showed a command shape."""
+    command = START_COMMANDS[arm].replace("{port}", str(cdp_port)).replace("{skills}", str(skills_dir()))
+    return START_LINE + command + "."
+
+
+def frozen_system_prompt(arm, cdp_port):
     if arm == "tabref":
         return ("You operate Google Chrome only through the `tabref` CLI (on PATH), which drives Chrome over CDP. "
                 f"Chrome is already running with a DevTools endpoint on port {cdp_port}, and tabref is already pointed "
                 f"at it (TABREF_CDP={cdp_port} is set; `--cdp {cdp_port}` does the same). Learn it with `tabref skill` "
                 "before you start." + WEB_COMMON)
     return _ab.web_system_prompt(arm, cdp_port)
+
+
+def web_system_prompt(arm, cdp_port):
+    return frozen_system_prompt(arm, cdp_port) + start_line(arm, cdp_port)
 
 
 def web_allowed_tools(arm):

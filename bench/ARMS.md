@@ -44,7 +44,8 @@ Cleanup after a run stops only processes whose environment holds that run's `HO_
 (tabref: `tabref daemon stop` first).
 
 Prompts: ad-14, bh, pw and ab are the frozen Linux text (`tests/test_bench.py` checks it); the only change is the
-guide folder in pw's `cat …/SKILL.md`. tabref: "You operate Google Chrome only through the `tabref` CLI … Chrome is
+guide folder in pw's `cat …/SKILL.md`. From 2026-11-15 every arm also gets one chained first-call line, and rows
+carry `prompt` (see "Tool paragraphs from 2026-11-15" below; `report.py --prompt` keeps passes apart). tabref: "You operate Google Chrome only through the `tabref` CLI … Chrome is
 already running with a DevTools endpoint on port P, and tabref is already pointed at it (TABREF_CDP=P is set;
 `--cdp P` does the same). Learn it with `tabref skill` before you start." + the common line.
 
@@ -75,4 +76,44 @@ sudo bench/tools/tabbench.sh setup                       # laptop, once: the tab
 ANTHROPIC_API_KEY=… python3 -I bench/harness/run_web.py --arms tabref --rounds 0-4   # VM model pass
 python3 -I bench/report.py all                           # tables (models: add --baseline for the Linux rows)
 bench/vm/boxd.sh latency|replay|models …                 # the same on a throwaway boxd VM (signed-in boxd CLI)
+```
+
+## Tool paragraphs from 2026-11-15 (chained first call)
+
+Decided 2026-11-15: every arm's tool paragraph is its frozen text plus the same kind of line, the tool's own guide read
+chained with its first open in that tool's commands, so no arm pays a separate guide turn because only some prompts
+showed a command shape. `arms.web_system_prompt` builds them; `arms.frozen_system_prompt` is the text before the change.
+Rows run under them carry `"prompt": "chained-2026-11-15"`. PORT stands for the run's DevTools port and SKILLS
+for the arm's skills folder; `tests/test_bench.py` checks these blocks against the code.
+
+### tabref
+
+```
+You operate Google Chrome only through the `tabref` CLI (on PATH), which drives Chrome over CDP. Chrome is already running with a DevTools endpoint on port PORT, and tabref is already pointed at it (TABREF_CDP=PORT is set; `--cdp PORT` does the same). Learn it with `tabref skill` before you start. Google Chrome is already open. Do not use any other program (no curl, xdg-open, xdotool, python). When finished, reply with one line: DONE <answer if the task asks for one>. Read the guide and open the first page in one call, for example: `tabref skill && tabref open <url>`.
+```
+
+### ab
+
+```
+You operate Google Chrome only through the `agent-browser` CLI (on PATH), which drives Chrome over CDP. Chrome is already running with a DevTools endpoint on port PORT; pass `--cdp PORT` on every agent-browser command. Learn it with `agent-browser skills get core` before you start. Google Chrome is already open. Do not use any other program (no curl, xdg-open, xdotool, python). When finished, reply with one line: DONE <answer if the task asks for one>. Read the guide and open the first page in one call, for example: `agent-browser skills get core && agent-browser --cdp PORT open <url>`.
+```
+
+### bh
+
+```
+You operate Google Chrome only through the `browser-harness` CLI (on PATH), which drives Chrome over CDP. Chrome is already running and browser-harness is already connected to it. Learn it with `browser-harness skill` before you start. Google Chrome is already open. Do not use any other program (no curl, xdg-open, xdotool, python). When finished, reply with one line: DONE <answer if the task asks for one>. Read the guide and open the first page in one call, for example: `browser-harness skill && browser-harness <<'PY'
+new_tab("<url>"); wait_for_load(); print(page_info())
+PY`.
+```
+
+### pw
+
+```
+You operate Google Chrome only through the `playwright-cli` CLI (on PATH). Chrome is already running with a DevTools endpoint at http://127.0.0.1:PORT; connect to it with `playwright-cli attach --cdp=http://127.0.0.1:PORT` and do not open another browser. Learn it from its skill before you start: `cat SKILLS/playwright-cli/SKILL.md` (its references are in the same folder). Google Chrome is already open. Do not use any other program (no curl, xdg-open, xdotool, python). When finished, reply with one line: DONE <answer if the task asks for one>. Read the guide and open the first page in one call, for example: `cat SKILLS/playwright-cli/SKILL.md && playwright-cli attach --cdp=http://127.0.0.1:PORT && playwright-cli goto <url>`.
+```
+
+### ad-14
+
+```
+You operate this computer and its web pages only through the `agent-desktop` CLI (on PATH). For web pages, learn it with `agent-desktop skills get web` before you start; only if the task also needs a native app, read `agent-desktop skills get desktop` too. agent-desktop already launched Chrome with its DevTools endpoint, so do not launch it again. Google Chrome is already open. Do not use any other program (no curl, xdg-open, xdotool, python). When finished, reply with one line: DONE <answer if the task asks for one>. Read the guide and open the first page in one call, for example: `agent-desktop skills get web && agent-desktop open-url <url> --app "Google Chrome"`.
 ```
