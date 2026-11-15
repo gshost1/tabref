@@ -9,16 +9,18 @@ use super::view_route::quoted_argument;
 /// The view's last line: its size, and when anything was left out, every
 /// kind of cut with the command that shows it: lines past the budget,
 /// sections left as headings, rows past the window, chrome, and lines cut
-/// short (each of those also carries its own marker).
+/// short (each of those also carries its own marker), and frames the
+/// snapshot could not read in time, whose controls have no refs.
 pub(crate) fn footer_line(
     report: &CutReport,
     stats: &CutStats,
     kept: &[ViewLine],
     options: &ViewOptions,
+    frames_unread: usize,
 ) -> String {
     let size = format!("{} lines, {}", report.lines_total, kilo(report.chars_total));
     let shortened: Vec<&ViewLine> = kept.iter().filter(|line| line.cut.is_some()).collect();
-    if report.is_complete() && stats.rows_cut == 0 && shortened.is_empty() {
+    if report.is_complete() && stats.rows_cut == 0 && shortened.is_empty() && frames_unread == 0 {
         return format!("-- {size} chars, all shown");
     }
     let route = &options.route;
@@ -52,6 +54,10 @@ pub(crate) fn footer_line(
         cut.push(format!("{} lines cut short", shortened.len()));
         more.push(route.starting_at(first.number, true));
     }
+    if frames_unread > 0 {
+        cut.push(format!("{frames_unread} frames not read in time"));
+        more.push(route.command.clone());
+    }
     more.push("tabref find <text>".to_owned());
     let shown = if report.lines_shown < report.lines_total {
         format!(
@@ -69,6 +75,22 @@ pub(crate) fn footer_line(
         cut.join(", "),
         more.join(" | ")
     )
+}
+
+/// Frames of the page the snapshot left out because they did not answer in
+/// time or could not be read, in or out of process: their controls carry
+/// no refs, so a view with any of them is not complete.
+pub(crate) fn unread_frames(skipped: &[SkippedFrame]) -> usize {
+    skipped
+        .iter()
+        .filter(|frame| frame.reason.is_unread())
+        .count()
+}
+
+/// Whether the view shows the whole page: nothing cut by the budget or the
+/// chrome limit, and no frame left unread.
+pub(crate) fn is_view_complete(report: &CutReport, skipped: &[SkippedFrame]) -> bool {
+    report.is_complete() && unread_frames(skipped) == 0
 }
 
 /// One line for the frames the view left out, or `None` when it left none.

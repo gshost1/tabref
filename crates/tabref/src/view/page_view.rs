@@ -9,7 +9,7 @@ use super::main_content::{has_main, main_block, text_size};
 use super::node_line::quote_text;
 use super::ref_style::RefStyle;
 use super::section::section_lines;
-use super::view_footer::{footer_line, frames_line};
+use super::view_footer::{footer_line, frames_line, is_view_complete, unread_frames};
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
 use super::view_scope::ViewScope;
@@ -81,7 +81,13 @@ pub(crate) fn page_view(
         text.push_str(&frames);
     }
     text.push('\n');
-    text.push_str(&footer_line(&report, &stats, &kept, options));
+    text.push_str(&footer_line(
+        &report,
+        &stats,
+        &kept,
+        options,
+        unread_frames(subject.skipped_frames),
+    ));
     Ok(Outcome::new(text, data(subject, &kept, &report, &outline)))
 }
 
@@ -110,14 +116,10 @@ fn data(
         "url": subject.info.url,
         "title": subject.info.title,
         "ref_count": subject.ref_count,
-        "unreadable_frames": subject
-            .skipped_frames
-            .iter()
-            .filter(|frame| frame.reason.is_unread())
-            .count(),
+        "unreadable_frames": unread_frames(subject.skipped_frames),
         "skipped_frames": subject.skipped_frames,
         "lines": kept.iter().map(ViewLine::printed).collect::<Vec<_>>(),
-        "complete": report.is_complete(),
+        "complete": is_view_complete(report, subject.skipped_frames),
         "lines_total": report.lines_total,
         "lines_shown": report.lines_shown,
         "chars_total": report.chars_total,

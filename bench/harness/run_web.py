@@ -220,9 +220,10 @@ def reads_sealed(commands, results, sealed_dir, allowed=()):
     the run's own folder and the installed tools (`allowed` is stripped first); a tool result fails it when it shows
     any of the sealed names. The copy is gone by then (tabbench.sh); this catches the attempt."""
     sealed = SEALED_MARKS + (str(sealed_dir),)
+    allowed = sorted((str(a) for a in allowed), key=len, reverse=True)
     for cmd in commands:
-        for ok in sorted(allowed, key=len, reverse=True):
-            cmd = cmd.replace(str(ok), "")
+        for ok in allowed:
+            cmd = cmd.replace(ok, "")
         hit = next((m for m in sealed + PATH_MARKS if m in cmd), None)
         if hit:
             return f"a tool call names {hit!r}"
@@ -365,6 +366,7 @@ class Runner:
             env["AGENT_BROWSER_SOCKET_DIR"] = ab_sock
         cmd = [str(core.claude_bin()), "-p", prompt, "--safe-mode", "--tools", "Bash", "--allowedTools",
                *arms.web_allowed_tools(arm), "--append-system-prompt", arms.web_system_prompt(arm, cdp_port),
+               *arms.web_extra_args(arm),
                "--model", a.model, "--output-format", "stream-json", "--verbose", "--no-session-persistence"]
         t0 = time.time()
         since = t0 - 1

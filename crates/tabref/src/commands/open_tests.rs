@@ -35,3 +35,19 @@ fn a_loopback_host_defaults_to_plain_http() {
         "https://localhost.example.com"
     );
 }
+
+#[test]
+fn a_path_of_the_current_page_stays_relative() {
+    for url in [
+        "/shop/account/",
+        "?page=2",
+        "#top",
+        "./a.html",
+        "//cdn.example.com/x",
+    ] {
+        assert_eq!(normalize_url(url), url);
+        assert!(super::is_relative(url), "{url}");
+    }
+    assert!(!super::is_relative("example.com/a"));
+    assert!(!super::is_relative("http://127.0.0.1:8000/"));
+}

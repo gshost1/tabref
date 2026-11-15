@@ -178,6 +178,14 @@ class Peeking(unittest.TestCase):
                                         result="ok")
         self.assertIsNone(run_web.reads_sealed(commands, results, "/home/tabbench/fresh", allowed=(work, tools)))
 
+    def test_paths_are_accepted_as_well_as_strings(self):
+        from pathlib import Path
+        work, tools = Path("/home/tabbench/runs/web-fresh/x/work/r"), Path("/home/tabbench/bench-tools")
+        commands, results = self.stream(f"cat {work}/a.csv", result="ok")
+        self.assertIsNone(run_web.reads_sealed(commands, results, Path("/home/tabbench/fresh"), allowed=(work, tools)))
+        commands, results = self.stream("cat /home/tabbench/fresh/x", result="ok")
+        self.assertTrue(run_web.reads_sealed(commands, results, Path("/home/tabbench/fresh"), allowed=(work, tools)))
+
     def test_a_result_showing_a_sealed_name_is_caught(self):
         commands, results = self.stream("tabref open http://127.0.0.1:8793/", result="link /__reset?seed=1")
         self.assertTrue(run_web.reads_sealed(commands, results, "/home/tabbench/fresh"))

@@ -5,9 +5,13 @@ use super::frame_tree::list_frames;
 use crate::transport::transport_error::{is_timeout, transport_failed};
 use crate::{CdpConnection, CdpEvent, PageSession};
 
+const LOAD_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Navigates the page and waits, bounded by `deadline`, for the new
 /// document's load: the `load` lifecycle event carrying the frame and
-/// loader `Page.navigate` returned. A load event of any earlier document,
+/// loader `Page.navigate` returned, or 500 ms after its `DOMContentLoaded`
+/// when `load` is later than that (ads and trackers hold `load` back for
+/// seconds while the document itself is ready). A load event of any earlier document,
 /// buffered or late, never satisfies the wait. A same-document navigation
 /// returns at once.
 pub fn navigate(
@@ -69,7 +73,7 @@ pub fn wait_for_load(
         .ok_or_else(|| transport_failed("Page.getFrameTree", "the page has no main frame"))?;
     let document = (main.frame_id.as_str(), main.loader_id.as_str());
     connection.discard_events(|event| {
-        is_any_load(event, session_id) && !is_document_load(event, session_id, document)
+        is_any_load(event, session_id) && !is_document_event(event, session_id, document, "load")
     });
     wait_for_document_load(connection, session_id, document, deadline)
         .map_err(|error| load_timeout(error, "the current document"))
@@ -81,12 +85,23 @@ fn wait_for_document_load(
     document: (&str, &str),
     deadline: Deadline,
 ) -> Result<(), AppError> {
-    connection
-        .wait_for_event(
-            |event| is_document_load(event, session_id, document),
-            deadline,
-        )
-        .map(|_| ())
+    let first = connection.wait_for_event(
+        |event| {
+            is_document_event(event, session_id, document, "load")
+                || is_document_event(event, session_id, document, "DOMContentLoaded")
+        },
+        deadline,
+    )?;
+    if is_document_event(&first, session_id, document, "load") {
+        return Ok(());
+    }
+    match connection.wait_for_event(
+        |event| is_document_event(event, session_id, document, "load"),
+        deadline.capped(LOAD_GRACE),
+    ) {
+        Err(error) if is_timeout(&error) && !deadline.is_expired() => Ok(()),
+        other => other.map(|_| ()),
+    }
 }
 
 fn enable_load_events(
@@ -112,15 +127,16 @@ fn is_any_load(event: &CdpEvent, session_id: &str) -> bool {
                 && event.params.get("name").and_then(Value::as_str) == Some("load")))
 }
 
-fn is_document_load(
+fn is_document_event(
     event: &CdpEvent,
     session_id: &str,
     (frame_id, loader_id): (&str, &str),
+    name: &str,
 ) -> bool {
     let field = |key: &str| event.params.get(key).and_then(Value::as_str);
     event.session_id.as_deref() == Some(session_id)
         && event.method == "Page.lifecycleEvent"
-        && field("name") == Some("load")
+        && field("name") == Some(name)
         && field("frameId") == Some(frame_id)
         && field("loaderId") == Some(loader_id)
 }

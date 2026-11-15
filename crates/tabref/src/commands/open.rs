@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use tabref_cdp::navigate;
 use tabref_core::AppError;
+use tabref_page::PageInfo;
 
 use super::action_report::set;
+use super::page_url::resolve_url;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::view::snapshot_view::snapshot_view;
@@ -17,9 +19,15 @@ const SCHEMES: &[&str] = &["about:", "data:", "file:", "chrome:", "javascript:"]
 /// so reading it costs no second command. A page that has not fired `load` after three quarters of the
 /// deadline is snapshotted as it stands, with a note.
 pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError> {
-    let url = normalize_url(url);
     let page = session.page()?;
     let deadline = session.deadline();
+    let url = normalize_url(url);
+    let url = if is_relative(&url) {
+        let current = PageInfo::read(session.connection(), &page.target_id, deadline)?.url;
+        resolve_url(&current, &url)
+    } else {
+        url
+    };
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
     let unfinished = match navigate(session.connection(), &page, &url, navigation) {
         Ok(()) => false,
@@ -43,7 +51,9 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
 
 /// `example.com` becomes `https://example.com`, a loopback host such as
 /// `localhost:8000` gets `http://`, an existing local file becomes a
-/// `file://` URL, and anything with a scheme stays as it is.
+/// `file://` URL, and anything with a scheme stays as it is. A path, query
+/// or fragment of the current page (`/admin/`, `?page=2`, `#top`, `./a`)
+/// stays relative for the caller to resolve against that page.
 pub(crate) fn normalize_url(url: &str) -> String {
     let url = url.trim();
     if url.contains("://") || SCHEMES.iter().any(|scheme| url.starts_with(scheme)) {
@@ -57,6 +67,9 @@ pub(crate) fn normalize_url(url: &str) -> String {
         let separator = if text.starts_with('/') { "" } else { "/" };
         return format!("file://{separator}{text}");
     }
+    if is_relative(url) {
+        return url.to_owned();
+    }
     let host = url.split(['/', '?', '#']).next().unwrap_or_default();
     let bare_host = host.rsplit_once(':').map_or(host, |(name, port)| {
         if port.chars().all(|c| c.is_ascii_digit()) {
@@ -69,6 +82,12 @@ pub(crate) fn normalize_url(url: &str) -> String {
         return format!("http://{url}");
     }
     format!("https://{url}")
+}
+
+pub(crate) fn is_relative(url: &str) -> bool {
+    ["/", "?", "#", "./"]
+        .iter()
+        .any(|prefix| url.starts_with(prefix))
 }
 
 #[cfg(test)]
