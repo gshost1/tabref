@@ -117,7 +117,7 @@ fn preceding_collapsed(
             let Some(node) = tree.node(current) else {
                 continue;
             };
-            if node.attr("aria-expanded") == Some("false") || node.tag() == "BUTTON" {
+            if node.attr("aria-expanded") == Some("false") {
                 if let Some(control) = control_at(current) {
                     return Some(control);
                 }

@@ -41,7 +41,7 @@ impl<'a> OutlineBuilder<'a> {
             frame_captures.insert(owner.clone(), captures.len());
             captures.push(trees.as_slice());
         }
-        let shown = ShownMap::new(&captures);
+        let shown = ShownMap::new(&captures, &input.refs);
         Self {
             input,
             captures,

@@ -3,14 +3,14 @@ use std::collections::HashSet;
 use super::block_kind::BlockKind;
 use super::control_build::control_of;
 use super::dom_tree::DomTree;
-use super::element_kind::{is_block_display, is_skipped, semantic_kind};
+use super::element_kind::{is_skipped, semantic_kind};
+use super::search_blocks::{block_of, find_folded, fold, own_text, window};
 use super::expander::{expander_for, is_hidden_at};
 use super::node_kind::NodeKind;
 use super::outline_input::OutlineInput;
 use super::text_match::TextMatch;
 use super::text_runs::{squash, subtree_text};
 
-const LINE_WINDOW: usize = 160;
 const CONTROL_SCAN: usize = 400;
 const ATTRIBUTES: &[&str] = &["aria-label", "title", "alt", "placeholder", "value"];
 
@@ -20,7 +20,7 @@ const ATTRIBUTES: &[&str] = &["aria-label", "title", "alt", "placeholder", "valu
 /// past `keep` are counted but not described; the count comes back beside
 /// them.
 pub fn search_text(input: &OutlineInput, needle: &str, keep: usize) -> (Vec<TextMatch>, usize) {
-    let needle = squash(needle).to_lowercase();
+    let needle = fold(&squash(needle));
     if needle.is_empty() {
         return (Vec::new(), 0);
     }
@@ -36,17 +36,19 @@ pub fn search_text(input: &OutlineInput, needle: &str, keep: usize) -> (Vec<Text
 }
 
 /// The matches in one document, at most `room` of them described, and how
-/// many there are in all.
+/// many there are in all. Each block's own text is matched whole, so a
+/// match may span inline elements (`Alan <b>Turing</b>`).
 fn search_tree(
     input: &OutlineInput,
     tree: &DomTree,
-    needle: &str,
+    needle: &[char],
     room: usize,
 ) -> (Vec<TextMatch>, usize) {
     let mut found = Vec::new();
     let mut total = 0usize;
     let mut headings: Vec<(u8, String)> = Vec::new();
-    let mut matched_blocks: HashSet<usize> = HashSet::new();
+    let mut evaluated: HashSet<usize> = HashSet::new();
+    let mut matched: HashSet<usize> = HashSet::new();
     let skipped = skipped_nodes(tree);
     for (index, node) in tree.nodes.iter().enumerate() {
         if skipped.contains(&index) {
@@ -56,21 +58,23 @@ fn search_tree(
             headings.retain(|(known, _)| *known < level);
             headings.push((level, subtree_text(tree, index)));
         }
+        let block = block_of(tree, index);
         let text = match &node.kind {
-            NodeKind::Text(text) => squash(text),
+            NodeKind::Text(text) if !text.trim().is_empty() => {
+                if !evaluated.insert(block) {
+                    continue;
+                }
+                own_text(tree, block)
+            }
             NodeKind::Element(_) => ATTRIBUTES
                 .iter()
                 .filter_map(|name| node.attr(name))
                 .map(squash)
-                .find(|value| value.to_lowercase().contains(needle))
+                .find(|value| find_folded(&fold(value), needle).is_some())
                 .unwrap_or_default(),
             _ => continue,
         };
-        if !text.to_lowercase().contains(needle) {
-            continue;
-        }
-        let block = block_of(tree, index);
-        if !matched_blocks.insert(block) {
+        if find_folded(&fold(&text), needle).is_none() || !matched.insert(block) {
             continue;
         }
         total += 1;
@@ -79,7 +83,7 @@ fn search_tree(
         }
         let in_heading = headings
             .last()
-            .is_some_and(|(_, heading)| heading.to_lowercase().contains(needle))
+            .is_some_and(|(_, heading)| find_folded(&fold(heading), needle).is_some())
             && is_heading_text(tree, index);
         let section = headings
             .iter()
@@ -89,7 +93,7 @@ fn search_tree(
         let hidden = is_hidden_at(tree, index);
         found.push(TextMatch {
             section,
-            line: window(&subtree_text(tree, block), needle, &text),
+            line: window(&text, needle),
             control: control_near(input, tree, index, block),
             hidden,
             expander: if hidden {
@@ -122,59 +126,6 @@ fn is_heading_text(tree: &DomTree, index: usize) -> bool {
         .iter()
         .filter_map(|ancestor| tree.node(*ancestor))
         .any(|node| matches!(semantic_kind(node, false), Some(BlockKind::Heading(_))))
-}
-
-/// The nearest ancestor that is a block of its own: by meaning, by layout,
-/// or, for content that has no layout, by tag. A table cell gives way to
-/// its row, so a match in a cell reads with the rest of the row.
-fn block_of(tree: &DomTree, index: usize) -> usize {
-    for ancestor in tree.ancestors(index) {
-        let Some(node) = tree.node(ancestor) else {
-            continue;
-        };
-        if !matches!(node.kind, NodeKind::Element(_)) {
-            continue;
-        }
-        let laid_out_block = node.layout.is_some() && is_block_display(node.display());
-        let tag_block = node.layout.is_none()
-            && matches!(
-                node.tag(),
-                "DIV" | "P" | "LI" | "DD" | "DT" | "SECTION" | "ARTICLE" | "TR"
-            );
-        let laid_out_block = laid_out_block && !matches!(node.tag(), "TD" | "TH");
-        let kind = semantic_kind(node, false);
-        if matches!(kind, Some(BlockKind::Cell | BlockKind::HeaderCell)) {
-            continue;
-        }
-        if kind.is_some() || laid_out_block || tag_block {
-            return ancestor;
-        }
-    }
-    0
-}
-
-/// The block's text, cut to a window around the first match.
-fn window(line: &str, needle: &str, fallback: &str) -> String {
-    let line = if line.is_empty() { fallback } else { line };
-    let chars: Vec<char> = line.chars().collect();
-    if chars.len() <= LINE_WINDOW {
-        return line.to_owned();
-    }
-    let lowered: Vec<char> = line.to_lowercase().chars().collect();
-    let needle: Vec<char> = needle.chars().collect();
-    let at = (0..=lowered.len().saturating_sub(needle.len()))
-        .find(|start| lowered[*start..].starts_with(&needle))
-        .unwrap_or(0);
-    let start = at.saturating_sub(LINE_WINDOW / 3);
-    let end = (start + LINE_WINDOW).min(chars.len());
-    let mut out: String = chars[start..end].iter().collect();
-    if start > 0 {
-        out.insert(0, '…');
-    }
-    if end < chars.len() {
-        out.push('…');
-    }
-    out
 }
 
 /// The control the match sits in, or else the first control of its block.

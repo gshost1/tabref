@@ -39,6 +39,11 @@ const BOX_TAGS: &[&str] = &[
 /// block, a line break) is set off by spaces. Script and style text is left
 /// out.
 pub(crate) fn subtree_text(tree: &DomTree, index: usize) -> String {
+    block_text(tree, index, &|_| false)
+}
+
+/// [`subtree_text`] that does not enter the descendants `stop` names.
+pub(crate) fn block_text(tree: &DomTree, index: usize, stop: &dyn Fn(usize) -> bool) -> String {
     let mut out = String::new();
     let mut pending: Vec<Option<usize>> = vec![Some(index)];
     let mut seen = 0usize;
@@ -65,7 +70,13 @@ pub(crate) fn subtree_text(tree: &DomTree, index: usize) -> String {
                 if boxed {
                     pending.push(None);
                 }
-                pending.extend(node.children.iter().rev().map(|child| Some(*child)));
+                pending.extend(
+                    node.children
+                        .iter()
+                        .rev()
+                        .filter(|child| !stop(**child))
+                        .map(|child| Some(*child)),
+                );
                 if boxed {
                     pending.push(None);
                 }

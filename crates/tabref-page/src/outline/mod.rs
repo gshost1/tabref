@@ -31,6 +31,7 @@ pub(crate) mod page_outline;
 pub(crate) mod rare_data;
 pub(crate) mod ref_label;
 pub(crate) mod repeat_key;
+pub(crate) mod search_blocks;
 pub(crate) mod select_option;
 pub(crate) mod shown_map;
 #[cfg(test)]

@@ -2,6 +2,7 @@ use super::block::Block;
 use super::block_kind::BlockKind;
 use super::item::Item;
 use super::outline_builder::{OutlineBuilder, push_block};
+use super::overlay::{is_dialog_candidate, keeps_as_dialog};
 use super::url_resolve::origin_of;
 use super::walk_context::WalkContext;
 
@@ -19,8 +20,9 @@ impl OutlineBuilder<'_> {
     /// Reads the document an `<iframe>` shows into a frame block, or counts
     /// why it is left out. A frame of one pixel or less never shows. An
     /// in-process frame shows when it holds anything. A cross-origin frame
-    /// shows only when it has a field to fill in or covers a quarter of the
-    /// viewport, so ad slots and widgets cost one summary line.
+    /// shows only when it has a field or a button or covers a quarter of the
+    /// viewport, so ad slots cost one summary line. A frame laid over the
+    /// page like a dialog (a consent wall) is lifted to the top.
     pub(crate) fn frame(&mut self, context: &WalkContext, index: usize, into: &mut Block) {
         let Some(tree) = self.tree(context) else {
             return;
@@ -104,19 +106,26 @@ impl OutlineBuilder<'_> {
             .and_then(|tree| origin_of(&tree.url));
         let frame_origin = origin_of(&frame_url);
         let cross_origin = cross_target || (frame_origin.is_some() && frame_origin != page_origin);
-        if cross_origin && area_share < LARGE_FRAME_SHARE && !has_field(&block) {
+        if cross_origin && area_share < LARGE_FRAME_SHARE && !holds_input(&block) {
             self.frames.cross_origin += 1;
             return;
         }
         self.frames.shown += 1;
+        if self.lift_dialogs && is_dialog_candidate(node, self.input.viewport) && keeps_as_dialog(node, &block) {
+            block.kind = BlockKind::Dialog;
+            self.dialogs.push(block);
+            return;
+        }
         push_block(into, block);
     }
 }
 
-fn has_field(block: &Block) -> bool {
+/// Whether a frame asks for something: a field to fill in or a button to
+/// press (a consent wall, a payment form).
+fn holds_input(block: &Block) -> bool {
     block.items.iter().any(|item| match item {
         Item::Control(control) => FORM_ROLES.contains(&control.role.as_str()),
-        Item::Block(inner) => has_field(inner),
+        Item::Block(inner) => holds_input(inner),
         _ => false,
     })
 }

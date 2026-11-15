@@ -9,9 +9,9 @@ const MIN_OVERLAY_TEXT: usize = 40;
 const LABEL_LIMIT: usize = 80;
 
 /// Whether an element may be a dialog the view lifts to its top: a dialog
-/// by markup, or a fixed-position box at least 40% of the viewport wide
-/// and 8% of its area that is not navigation (a consent bar, a modal
-/// sheet). Whether it stays a dialog is decided once its content is read.
+/// by markup, or a fixed-position box covering at least half the viewport
+/// that is not navigation (a modal sheet, a consent wall). A sticky bar is
+/// not one. Whether it stays a dialog is decided once its content is read.
 pub(crate) fn is_dialog_candidate(node: &DomNode, viewport: [f64; 2]) -> bool {
     if is_dialog_markup(node) {
         return node.is_shown();
@@ -25,7 +25,7 @@ pub(crate) fn is_dialog_candidate(node: &DomNode, viewport: [f64; 2]) -> bool {
     }
     let navigation = matches!(node.tag(), "NAV" | "HEADER")
         || matches!(role_of(node).as_deref(), Some("navigation" | "banner"));
-    !navigation && layout.bounds[2] >= 0.4 * width && layout.area() >= 0.08 * width * height
+    !navigation && layout.bounds[2] >= 0.4 * width && layout.area() >= 0.5 * width * height
 }
 
 /// Whether a candidate read into `block` is kept as a dialog: markup says

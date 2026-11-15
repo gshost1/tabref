@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use super::dom_tree::DomTree;
+use super::ref_label::RefLabel;
 use super::node_kind::NodeKind;
 use super::walk_context::WalkContext;
 
@@ -6,16 +9,17 @@ use super::walk_context::WalkContext;
 /// inside it is rendered and visible. An element with no box of its own
 /// (`display: contents`, or `visibility: hidden` around a visible child) is
 /// still walked when something inside it shows; an element nothing inside
-/// of shows is skipped whole.
+/// of shows is skipped whole. A rendered element the snapshot gave a ref
+/// counts as shown even with no text (an icon button, a switch).
 pub(crate) struct ShownMap {
     shown: Vec<Vec<Vec<bool>>>,
 }
 
 impl ShownMap {
-    pub(crate) fn new(captures: &[&[DomTree]]) -> Self {
+    pub(crate) fn new(captures: &[&[DomTree]], refs: &HashMap<(String, i64), RefLabel>) -> Self {
         let shown = captures
             .iter()
-            .map(|documents| documents.iter().map(shown_in).collect())
+            .map(|documents| documents.iter().map(|tree| shown_in(tree, refs)).collect())
             .collect();
         Self { shown }
     }
@@ -30,7 +34,7 @@ impl ShownMap {
     }
 }
 
-fn shown_in(tree: &DomTree) -> Vec<bool> {
+fn shown_in(tree: &DomTree, refs: &HashMap<(String, i64), RefLabel>) -> Vec<bool> {
     let mut shown: Vec<bool> = tree
         .nodes
         .iter()
@@ -42,7 +46,8 @@ fn shown_in(tree: &DomTree) -> Vec<bool> {
                         tag.as_str(),
                         "INPUT" | "SELECT" | "TEXTAREA" | "BUTTON" | "IFRAME" | "FRAME" | "BR"
                     ) || node.attr("href").is_some()
-                        || node.attr("aria-label").is_some())
+                        || node.attr("aria-label").is_some()
+                        || refs.contains_key(&(tree.target_id.clone(), node.backend_id)))
             }
             _ => false,
         })
