@@ -4,10 +4,11 @@ use clap::Parser;
 
 use command::Command;
 
-/// Read and drive Chrome from the command line over the DevTools protocol.
-/// Every element in a snapshot gets a ref (@s8f3k2p9:e4) that the action
-/// commands take; they also take a name the page shows ("Save"), resolved
-/// when the action runs.
+/// Read and drive Chrome from the shell. Start in one call: `tabref skill && tabref open <url>`.
+///
+/// `tabref skill` prints the short guide; `tabref open` prints the page with
+/// a ref per control (e4) that the actions take, as do names the page shows
+/// ("Save"). Commands talk to Chrome over the DevTools protocol.
 #[derive(Debug, Parser)]
 #[command(name = "tabref", version, max_term_width = 100)]
 pub(crate) struct Cli {

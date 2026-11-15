@@ -1,9 +1,8 @@
 # tabref: read and drive Chrome from the shell
 
-Chrome is already connected (TABREF_CDP). Output is plain text sized to read whole: do not pipe it through
+Start in one call: `tabref skill && tabref open <url>` (this guide, then the page). Chrome is already
+connected (TABREF_CDP). Output is plain text sized to read whole: do not pipe it through
 grep, head or sed, and do not sleep; every command waits for the page itself.
-
-Start: `tabref open <url>` loads the page and prints it.
 
 ## Reading
 One line per block in reading order; `#` lines are headings. Controls sit in brackets with their ref:

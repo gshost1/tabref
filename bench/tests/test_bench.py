@@ -48,14 +48,16 @@ class Prompts(unittest.TestCase):
             common_linux.SKILLS = saved
         for arm, text in frozen.items():
             want = text.replace("/opt/bench/ho-tools/skills", str(arms.skills_dir()))
-            self.assertEqual(arms.web_system_prompt(arm, 4242), want, arm)
+            self.assertEqual(arms.frozen_system_prompt(arm, 4242), want, arm)
+            self.assertEqual(arms.web_system_prompt(arm, 4242), want + arms.start_line(arm, 4242), arm)
             self.assertEqual(arms.web_allowed_tools(arm), common_ab_linux.web_allowed_tools(arm), arm)
 
     def test_tabref_prompt(self):
         text = arms.web_system_prompt("tabref", 4242)
         self.assertIn("`tabref skill`", text)
         self.assertIn("--cdp 4242", text)
-        self.assertTrue(text.endswith(arms.WEB_COMMON))
+        self.assertTrue(text.endswith(arms.WEB_COMMON + arms.start_line("tabref", 4242)))
+        self.assertIn("`tabref skill && tabref open <url>`", text)
         self.assertEqual(arms.web_allowed_tools("tabref")[-1], "Bash(tabref:*)")
 
 
