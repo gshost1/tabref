@@ -64,3 +64,15 @@ fn an_element_with_no_size_says_what_to_click_instead() {
         r#"link "Floaty" has no size on screen; click the text or label that draws it"#
     );
 }
+
+#[test]
+fn an_image_map_area_says_it_cannot_be_pressed() {
+    let error = blocked(Blocker::Unpressable, "image-map area").error(r#"link "Area go""#);
+    assert_eq!(error.kind(), Some("element_not_pressable"));
+    assert!(
+        error.message.contains("image-map area"),
+        "{}",
+        error.message
+    );
+    assert!(Blocker::Unpressable.is_settled());
+}

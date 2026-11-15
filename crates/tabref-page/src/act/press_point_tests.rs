@@ -25,7 +25,7 @@ fn covered(transport: ScriptedTransport, hit: i64) -> ScriptedTransport {
         )
         .expect(
             "Runtime.callFunctionOn",
-            json!({ "result": { "type": "boolean", "value": false } }),
+            json!({ "result": { "type": "object", "value": { "inside": false, "steer": false } } }),
         )
         .expect("Runtime.releaseObject", json!({}))
         .expect("Runtime.releaseObject", json!({}))
@@ -150,7 +150,7 @@ fn a_display_contents_host_is_pressed_where_its_child_draws() {
         )
         .expect(
             "Runtime.callFunctionOn",
-            json!({ "result": { "type": "boolean", "value": true } }),
+            json!({ "result": { "type": "object", "value": { "inside": true, "steer": false } } }),
         )
         .expect("Runtime.releaseObject", json!({}))
         .expect("Runtime.releaseObject", json!({}));
@@ -159,4 +159,49 @@ fn a_display_contents_host_is_pressed_where_its_child_draws() {
     let point = press_point(&mut connection, &session(), &token(7), deadline()).unwrap();
 
     assert_eq!(point, Point { x: 10.0, y: 5.0 });
+}
+
+fn hit_inside(transport: ScriptedTransport, hit: i64, steer: bool) -> ScriptedTransport {
+    transport
+        .expect("DOM.getNodeForLocation", json!({ "backendNodeId": hit }))
+        .expect(
+            "DOM.resolveNode",
+            json!({ "object": { "objectId": "target" } }),
+        )
+        .expect(
+            "DOM.resolveNode",
+            json!({ "object": { "objectId": "hit" } }),
+        )
+        .expect(
+            "Runtime.callFunctionOn",
+            json!({ "result": { "type": "object", "value": { "inside": true, "steer": steer } } }),
+        )
+        .expect("Runtime.releaseObject", json!({}))
+        .expect("Runtime.releaseObject", json!({}))
+}
+
+#[test]
+fn a_press_that_would_land_on_a_control_the_node_draws_moves_to_a_child_that_is_none() {
+    let own = quads(0.0, json!([[0, 0, 40, 0, 40, 10, 0, 10]]));
+    let steered = drawn_child(hit_inside(own, 5, true), Some(8)).expect(
+        "DOM.getContentQuads",
+        json!({ "quads": [[50, 0, 90, 0, 90, 10, 50, 10]] }),
+    );
+    let transport = hit_inside(steered, 8, false);
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let point = press_point(&mut connection, &session(), &token(7), deadline()).unwrap();
+
+    assert_eq!(point, Point { x: 70.0, y: 5.0 });
+}
+
+#[test]
+fn a_node_that_draws_only_separate_controls_is_not_pressed() {
+    let own = quads(0.0, json!([[0, 0, 40, 0, 40, 10, 0, 10]]));
+    let transport = drawn_child(hit_inside(own, 5, true), None);
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let error = press_point(&mut connection, &session(), &token(7), deadline()).unwrap_err();
+
+    assert_eq!(error.kind(), Some("cdp_press_on_inner_control"));
 }

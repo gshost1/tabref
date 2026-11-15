@@ -5,16 +5,28 @@ use super::element_errors::script_failed;
 use super::remote_element::with_element;
 use crate::{CdpConnection, ElementToken, PageSession};
 
-/// The first of a control's labels that has a box on screen.
-pub(crate) const DRAWN_LABEL: &str = r"function() {
+/// The selector for an element that takes a press of its own: a press that
+/// lands on one inside a label or a `display: contents` wrapper acts on it,
+/// not on the control the label or wrapper stands for.
+pub(crate) const CONTROLS: &str = "a[href], area[href], button, input, select, textarea, summary, \
+[role=button], [role=link], [role=checkbox], [role=radio], [role=switch], [role=menuitem], \
+[role=tab], [contenteditable=''], [contenteditable=true], [tabindex]";
+
+/// The first of a control's labels that has a box on screen and holds no
+/// other control, which a press on the label would reach instead.
+pub(crate) const DRAWN_LABEL: &str = r"function(controls) {
   const drawn = label => Array.from(label.getClientRects()).some(box => box.width > 0 && box.height > 0);
-  return Array.from(this.labels || []).find(drawn) || null;
+  const alone = label => Array.from(label.querySelectorAll(controls)).every(inner => inner === this);
+  return Array.from(this.labels || []).find(label => drawn(label) && alone(label)) || null;
 }";
 
 /// The first element a `display: contents` node draws through: a child,
 /// shadow child or slotted node with a box on screen, looking through
-/// children that are `display: contents` themselves.
-pub(crate) const DRAWN_CHILD: &str = r"function() {
+/// children that are `display: contents` themselves. A child that is or
+/// holds a separate control is passed over for one that holds none; only
+/// when the node holds one control and draws nothing else is that control's
+/// child taken, as for a host that wraps its one inner `<button>`.
+pub(crate) const DRAWN_CHILD: &str = r"function(controls) {
   const view = this.ownerDocument.defaultView;
   const drawn = el => Array.from(el.getClientRects()).some(box => box.width > 0 && box.height > 0);
   const children = node => {
@@ -22,19 +34,33 @@ pub(crate) const DRAWN_CHILD: &str = r"function() {
     const shadow = node.shadowRoot ? Array.from(node.shadowRoot.childNodes) : [];
     return own.concat(shadow, Array.from(node.childNodes));
   };
-  const find = node => {
+  const held = new Set();
+  const collect = node => {
+    for (const child of children(node)) {
+      if (child.nodeType !== 1) continue;
+      if (child.matches(controls)) held.add(child);
+      collect(child);
+    }
+  };
+  collect(this);
+  const inside = (node, root) => {
+    for (let at = node; at; at = at.parentNode || at.host) if (at === root) return true;
+    return false;
+  };
+  const holds = el => Array.from(held).some(control => inside(control, el));
+  const find = (node, accept) => {
     for (const child of children(node)) {
       if (child.nodeType !== 1) continue;
       if (view.getComputedStyle(child).display === 'contents') {
-        const deep = find(child);
+        const deep = find(child, accept);
         if (deep) return deep;
-      } else if (drawn(child)) {
+      } else if (drawn(child) && accept(child)) {
         return child;
       }
     }
     return null;
   };
-  return find(this);
+  return find(this, child => !holds(child)) || (held.size === 1 ? find(this, () => true) : null);
 }";
 
 /// Runs `function` (one of this module's lookups) on the resolved node
@@ -52,6 +78,7 @@ pub(crate) fn drawn_element(
         json!({
             "objectId": object_id,
             "functionDeclaration": function,
+            "arguments": [{ "value": CONTROLS }],
             "returnByValue": false,
             "awaitPromise": false,
         }),

@@ -1,10 +1,11 @@
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
 use super::action_need::ActionNeed;
 use super::blocker::Blocker;
+use super::drawn_element::CONTROLS;
 use super::element_call::ElementCall;
 use super::element_errors::stale;
 use super::remote_element::{call_function, with_element};
@@ -14,7 +15,7 @@ use crate::{CdpConnection, ElementToken, PageSession};
 const LONGEST_WAIT: Duration = Duration::from_millis(1500);
 const POLL: Duration = Duration::from_millis(50);
 
-const CHECK: &str = r"function(need) {
+const CHECK: &str = r"function(need, controls) {
   const el = this.nodeType === 1 ? this : this.parentElement;
   if (!el || !el.isConnected) return { blocker: 'detached' };
   const up = node => node.parentElement || (node.parentNode && node.parentNode.host) || null;
@@ -23,6 +24,7 @@ const CHECK: &str = r"function(need) {
     if (node.hasAttribute('inert')) return { blocker: 'hidden', detail: 'inside an inert section' };
     if (node.getAttribute('aria-hidden') === 'true') return { blocker: 'hidden', detail: 'aria-hidden' };
   }
+  if (need.box && el.localName === 'area') return { blocker: 'unpressable', detail: 'image-map area' };
   const area = boxes => Array.from(boxes).some(box => box.width > 0 && box.height > 0);
   const textArea = text => { const range = text.ownerDocument.createRange(); range.selectNodeContents(text); return area(range.getClientRects()); };
   const children = node => {
@@ -52,7 +54,8 @@ const CHECK: &str = r"function(need) {
     if (style.display === 'none') return { blocker: 'hidden', detail: 'display:none' };
     if (style.visibility === 'hidden' || style.visibility === 'collapse') return { blocker: 'hidden', detail: 'visibility:hidden' };
     if (need.box && !area(el.getClientRects())) {
-      const labelled = need.label && Array.from(el.labels || []).some(label => area(label.getClientRects()));
+      const alone = label => Array.from(label.querySelectorAll(controls)).every(inner => inner === el);
+      const labelled = need.label && Array.from(el.labels || []).some(label => area(label.getClientRects()) && alone(label));
       if (!labelled) return { blocker: 'zero', detail: 'zero size' };
     }
   }
@@ -115,7 +118,7 @@ pub fn wait_actionable(
                     return Ok(None);
                 };
                 let waited = started.elapsed();
-                if blocker == Blocker::NoSize || waited + POLL >= budget {
+                if blocker.is_settled() || waited + POLL >= budget {
                     let detail = state.get("detail").and_then(Value::as_str);
                     return Ok(Some(Unactionable {
                         blocker,
@@ -137,7 +140,7 @@ pub fn wait_actionable(
 fn check(need: ActionNeed) -> ElementCall {
     ElementCall {
         function: CHECK,
-        arguments: vec![need.spec()],
+        arguments: vec![need.spec(), json!(CONTROLS)],
     }
 }
 

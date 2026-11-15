@@ -50,7 +50,7 @@ fn a_click_whose_point_another_element_covers_sends_no_input() {
         )
         .expect(
             "Runtime.callFunctionOn",
-            json!({ "result": { "type": "boolean", "value": false } }),
+            json!({ "result": { "type": "object", "value": { "inside": false, "steer": false } } }),
         )
         .expect("Runtime.releaseObject", json!({}))
         .expect("Runtime.releaseObject", json!({}));

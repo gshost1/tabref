@@ -23,6 +23,9 @@ impl Unactionable {
                 "{subject} is hidden ({}); open the section, tab or menu that holds it first",
                 self.detail
             ),
+            Blocker::Unpressable => format!(
+                "{subject} is an image-map area, which has no box to press; open its link with tabref open"
+            ),
             Blocker::NoSize => {
                 format!("{subject} has no size on screen; click the text or label that draws it")
             }
