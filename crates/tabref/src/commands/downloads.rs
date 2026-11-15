@@ -1,3 +1,4 @@
+#![cfg_attr(windows, allow(dead_code))]
 //! Downloads around actions: the browser's download events turned on for a
 //! command (and, for a browser tabref did not launch, off again when the
 //! last command on it ends), and the downloads an action started followed

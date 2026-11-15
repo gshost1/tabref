@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "linux"), allow(unused_imports, dead_code))]
+
 use std::path::{Path, PathBuf};
 
 use super::{PROFILE_MARKER, mark, normalize, refusal, same_dir, unfit_existing};

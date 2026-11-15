@@ -1,6 +1,7 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod exports;
+#[cfg(unix)]
 pub mod own_chrome;
 
 use std::collections::HashMap;

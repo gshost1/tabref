@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "linux"), allow(unused_imports, dead_code))]
+
 use std::path::{Path, PathBuf};
 
 use tabref_cdp::{LaunchOptions, ProcessView, process_start};
