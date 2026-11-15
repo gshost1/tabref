@@ -52,6 +52,18 @@ pub(crate) fn wrong_session(token: &ElementToken, session_target: &str) -> AppEr
     .with_disposition(DeliverySemantics::not_delivered())
 }
 
+/// `ACTION_NOT_SUPPORTED` for a node that cannot take typed text: a button,
+/// a checkbox, a select, a link, or a disabled or read-only field.
+pub(crate) fn not_editable(backend_node_id: i64, reason: Option<&str>) -> AppError {
+    AppError::new(
+        ErrorCode::ActionNotSupported,
+        format!("DOM node {backend_node_id} does not accept typed text"),
+    )
+    .with_platform_detail(reason.unwrap_or("not editable"))
+    .with_details(json!({ "kind": "cdp_not_editable", "backend_node_id": backend_node_id }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
 pub(crate) fn script_failed(exception: &Value) -> AppError {
     let text = exception
         .pointer("/exception/description")

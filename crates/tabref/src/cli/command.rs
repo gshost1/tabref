@@ -37,8 +37,19 @@ pub(crate) enum Command {
         #[arg(value_name = "TARGET")]
         target: String,
     },
+    /// Click an element twice at one point, firing its double-click
+    DoubleClick {
+        #[arg(value_name = "TARGET")]
+        target: String,
+    },
     /// Replace a field's text and read it back
     Fill {
+        #[arg(value_name = "TARGET")]
+        target: String,
+        text: String,
+    },
+    /// Add text after what a field holds, without clearing it, and read it back
+    Type {
         #[arg(value_name = "TARGET")]
         target: String,
         text: String,
@@ -159,7 +170,9 @@ impl Command {
             Self::Open { .. } => "open",
             Self::Snap { .. } => "snap",
             Self::Click { .. } => "click",
+            Self::DoubleClick { .. } => "double-click",
             Self::Fill { .. } => "fill",
+            Self::Type { .. } => "type",
             Self::Select { .. } => "select",
             Self::Check { .. } => "check",
             Self::Uncheck { .. } => "uncheck",

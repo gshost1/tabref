@@ -27,6 +27,7 @@ pub(crate) mod step_words;
 pub(crate) mod tab;
 pub(crate) mod tabs;
 pub(crate) mod target_spec;
+pub(crate) mod type_text;
 pub(crate) mod upload;
 pub(crate) mod wait;
 pub(crate) mod wait_condition;
@@ -95,8 +96,10 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
                 section: None,
             },
         ),
-        Command::Click { target } => click::run(session, target),
+        Command::Click { target } => click::run(session, target, 1),
+        Command::DoubleClick { target } => click::run(session, target, 2),
         Command::Fill { target, text } => fill::run(session, target, text),
+        Command::Type { target, text } => type_text::run(session, target, text),
         Command::Select { target, option } => select::run(session, target, option),
         Command::Check { target } => check::run(session, target, true),
         Command::Uncheck { target } => check::run(session, target, false),
