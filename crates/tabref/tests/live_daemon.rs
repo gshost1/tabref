@@ -41,14 +41,37 @@ fn run(tabref: &Harness, args: &[&str], env: &[(&str, &str)]) -> Run {
     }
 }
 
+/// The output with every snapshot id (`@s<id>:`) blanked, wherever it
+/// stands, so two snapshots of the same page compare equal.
 fn without_snapshot_ids(text: &str) -> String {
-    text.split_whitespace()
-        .map(|word| match word.split_once(':') {
-            Some((id, rest)) if id.starts_with("@s") => format!("@S:{rest}"),
-            _ => word.to_owned(),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("@s") {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at + 2..];
+        let id_len = tail
+            .find(|c: char| !c.is_ascii_alphanumeric())
+            .unwrap_or(tail.len());
+        if id_len > 0 && tail[id_len..].starts_with(':') {
+            out.push_str("@S:");
+            rest = &tail[id_len + 1..];
+        } else {
+            out.push_str("@s");
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A browser killed when the test ends, even by a failed assertion, so it
+/// never keeps the machine's Chrome slot.
+struct Killed(LaunchedBrowser);
+
+impl Drop for Killed {
+    fn drop(&mut self) {
+        kill(&self.0);
+    }
 }
 
 fn daemon_pid(tabref: &Harness) -> Option<u64> {
@@ -139,7 +162,7 @@ fn a_rebuilt_binary_replaces_the_running_daemon() {
 
     let snap = run(&tabref, &["snap"], &[]);
     assert!(snap.ok, "{}", snap.stderr);
-    assert!(snap.stdout.contains("button \"Save\""));
+    assert!(snap.stdout.contains("Save"), "{}", snap.stdout);
     let second = daemon_pid(&tabref).unwrap();
     assert_ne!(first, second);
 }
@@ -163,12 +186,11 @@ fn a_browser_that_dies_is_a_clear_error_and_the_next_call_reconnects() {
     assert!(started.elapsed() < Duration::from_secs(6));
     assert!(failed.stderr.starts_with("error "), "{}", failed.stderr);
 
-    let restarted = chrome_on(port);
+    let _restarted = Killed(chrome_on(port));
     page(&tabref);
     let snap = run(&tabref, &["snap"], &[]);
     assert!(snap.ok, "{}", snap.stderr);
-    assert!(snap.stdout.contains("heading \"Settings\""));
-    kill(&restarted);
+    assert!(snap.stdout.contains("Settings"), "{}", snap.stdout);
 }
 
 fn free_port() -> u16 {

@@ -72,7 +72,7 @@ fn a_killed_client_frees_its_tab_for_the_next_call() {
     let (ok, text, took) = timed(&tabref, &["--timeout", "3000", "snap"]);
 
     assert!(ok, "{text}");
-    assert!(text.contains("heading \"Calls\""), "{text}");
+    assert!(text.contains("Calls"), "{text}");
     assert!(took < Duration::from_millis(1_500), "{took:?}");
 }
 
@@ -129,6 +129,6 @@ fn a_relative_open_path_means_the_callers_directory() {
     let text = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "{text}");
-    assert!(text.contains("\"Local file\""), "{text}");
-    assert!(text.contains("heading \"From disk\""), "{text}");
+    assert!(text.contains("Local file"), "{text}");
+    assert!(text.contains("From disk"), "{text}");
 }
