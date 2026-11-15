@@ -9,11 +9,11 @@ use super::do_read_steps::{expect_step, find_step, js_step, open_step, read_step
 use super::page_url::short_url;
 use super::step_done::StepDone;
 use super::target_spec::TargetSpec;
-use super::{check, click, fill, hover, press, scroll, select};
+use super::{check, click, fill, hover, press, scroll, select, type_text};
 use crate::session::Session;
 use crate::view::node_line::quote_text;
 
-const VERBS: &str = "open, click, fill, select, check, uncheck, press, hover, scroll, wait, expect, read, find, js, snap";
+const VERBS: &str = "open, click, double-click, fill, type, select, check, uncheck, press, hover, scroll, wait, expect, read, find, js, snap";
 const DIRECTIONS: &[&str] = &["down", "up", "left", "right"];
 
 /// Runs one step of a batch within `deadline`. The last step reports what
@@ -33,9 +33,10 @@ pub(crate) fn run_step(
         "js" => return js_step(session, step, deadline),
         "snap" => return snap_step(session),
         "scroll" => return scroll_step(session, args, deadline),
-        "click" => {
+        "click" | "double-click" => {
+            let count = if step.verb() == "click" { 1 } else { 2 };
             let found = target(session, args, LocateIntent::Click, deadline)?;
-            click::act(session, found, deadline)?
+            click::act(session, found, count, deadline)?
         }
         "hover" => {
             let found = target(session, args, LocateIntent::Hover, deadline)?;
@@ -46,10 +47,15 @@ pub(crate) fn run_step(
             let found = target(session, args, LocateIntent::Check, deadline)?;
             check::act(session, found, wanted, deadline)?
         }
-        "fill" | "type" => {
+        "fill" => {
             let (aim, value) = split_value(step)?;
             let found = target(session, aim, LocateIntent::Fill, deadline)?;
             fill::act(session, found, &value, deadline)?
+        }
+        "type" => {
+            let (aim, value) = split_value(step)?;
+            let found = target(session, aim, LocateIntent::Fill, deadline)?;
+            type_text::act(session, found, &value, deadline)?
         }
         "select" => {
             let (aim, value) = split_value(step)?;
@@ -74,7 +80,7 @@ pub(crate) fn run_step(
         }
     };
     let late = match (&acted.effects, last, step.verb().as_str()) {
-        (Some(effects), false, "click" | "press") => session
+        (Some(effects), false, "click" | "double-click" | "press") => session
             .follow_late(effects, deadline)?
             .map(|page| (effects.url_before.clone(), page)),
         _ => None,

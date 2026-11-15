@@ -18,6 +18,7 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
 
 ## Acting
 `click T`, `fill T VALUE`, `select T OPTION`, `check T`, `uncheck T`, `press KEY [T]`, `hover T`, `scroll down|T`.
+`type T TEXT` adds TEXT after what the field holds (`fill` replaces it); `double-click T` clicks twice.
 T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
 `"Edit" in "<row text>"`, `"Reply" after "<text>"` (or `before`). Several or no matches fail with candidates;
 nothing is guessed. Each action prints what changed (new address, `{3 -> 4}`, field `"67.00" -> "62.00"`,
