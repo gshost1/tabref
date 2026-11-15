@@ -9,6 +9,7 @@ use tabref_core::{AppError, Deadline};
 use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
 
 use super::act_target::resolve_target;
+use super::app_guard::refuse_app_page;
 use super::batch_step::BatchStep;
 use super::download_lines::{download_json, download_line};
 use super::downloads;
@@ -48,6 +49,7 @@ pub(crate) fn open_step(
     } else {
         let page = session.page()?;
         let current = PageInfo::read(session.connection(), &page.target_id, deadline)?.url;
+        refuse_app_page(session, &current, deadline)?;
         let url = normalize_url(&resolve_url(&current, &address.text));
         opened_line(session, &page, (&url, &current), deadline)?
     };
