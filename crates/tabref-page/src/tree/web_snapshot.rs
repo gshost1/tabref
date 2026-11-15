@@ -1,18 +1,27 @@
+use std::collections::HashMap;
+
+use serde_json::Value;
 use tabref_core::AccessibilityNode;
 
+use super::skipped_frame::SkippedFrame;
 use crate::NodeOrigin;
 
 /// A page's accessibility tree in core form. `origins[i]` belongs to the
 /// node at depth-first pre-order index `i` of `tree` (the root is 0); it is
 /// `None` for a node with no DOM backing. Every node that can receive a ref
 /// also carries its element token in `identity.retained_object`, so the
-/// side table is a convenience. `unreadable_frames` lists child frames whose
-/// tree the page session could not read, such as out-of-process iframes.
+/// side table is a convenience. `skipped_frames` lists every frame left out
+/// of the tree and why; `unreadable_frames` holds the ids of those that were
+/// left out unread (timed out or refused), whose content is unknown.
 #[derive(Debug, Clone)]
 pub struct WebSnapshot {
     pub tree: AccessibilityNode,
     pub origins: Vec<Option<NodeOrigin>>,
     pub unreadable_frames: Vec<String>,
+    pub skipped_frames: Vec<SkippedFrame>,
+    /// The raw `DOMSnapshot.captureSnapshot` of each target whose frames
+    /// are in the tree, by target id, for a DOM view to reuse.
+    pub dom_captures: HashMap<String, Value>,
 }
 
 impl WebSnapshot {

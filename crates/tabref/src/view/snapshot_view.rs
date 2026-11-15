@@ -20,7 +20,7 @@ pub(crate) fn snapshot_view(
     options: &ViewOptions,
     scope: &ViewScope,
 ) -> Result<Outcome, AppError> {
-    let input = match outline_input(session, Some(&captured.tree)) {
+    let input = match outline_input(session, Some(captured)) {
         Ok(input) => input,
         Err(error) => {
             let mut report = page_report(captured, ViewMode::Interactive);
@@ -35,7 +35,7 @@ pub(crate) fn snapshot_view(
         info: &captured.info,
         snapshot_id: Some(&captured.snapshot_id),
         ref_count: captured.ref_count,
-        unreadable_frames: captured.unreadable_frames,
+        skipped_frames: &captured.skipped_frames,
     };
     page_view(&subject, &input, options, scope)
 }
@@ -62,7 +62,7 @@ pub(crate) fn reading_view(
         info: &info,
         snapshot_id: None,
         ref_count: 0,
-        unreadable_frames: 0,
+        skipped_frames: &[],
     };
     page_view(&subject, &input, &options, scope)
 }

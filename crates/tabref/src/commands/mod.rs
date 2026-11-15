@@ -50,6 +50,12 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
     if let Command::Skill = cli.command {
         return Ok(skill::run());
     }
+    let mut session = Session::open(&session_options(cli))?;
+    dispatch(&mut session, &cli.command)
+}
+
+/// What the parsed command asks of its session.
+pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
     let launch = match &cli.command {
         Command::Open {
             launch: true,
@@ -62,7 +68,7 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         }),
         _ => None,
     };
-    let options = SessionOptions {
+    SessionOptions {
         cdp: cli.cdp.clone(),
         tab: cli.tab.clone(),
         timeout_ms: cli.timeout.unwrap_or(match cli.command {
@@ -70,12 +76,12 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
             _ => TIMEOUT_MS,
         }),
         launch,
-    };
-    let mut session = Session::open(&options)?;
-    dispatch(&mut session, &cli.command)
+        stdin: None,
+    }
 }
 
-fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
+/// Runs `command` against `session`, in-process or inside the daemon.
+pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
         Command::Open { url, .. } => open::run(session, url),
         Command::Snap {
@@ -148,6 +154,7 @@ fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppErro
         Command::Tab { tab } => tab::run(session, tab),
         Command::Close { tab } => close::run(session, tab.as_deref()),
         Command::Skill => Ok(skill::run()),
+        Command::Daemon { action } => crate::daemon::control::run_in_session(session, action),
     }
 }
 

@@ -30,7 +30,7 @@ pub(crate) fn run(
             role,
         ));
     }
-    let input = outline_input(session, Some(&captured.tree))?;
+    let input = outline_input(session, Some(&captured))?;
     let (matches, total) = search_text(&input, text, MAX_MATCHES);
     if total == 0 {
         return Ok(snapshot_find(

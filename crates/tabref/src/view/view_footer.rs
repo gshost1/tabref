@@ -1,4 +1,4 @@
-use tabref_page::PageOutline;
+use tabref_page::{PageOutline, SkippedFrame};
 
 use super::cut_report::CutReport;
 use super::cut_stats::CutStats;
@@ -72,8 +72,20 @@ pub(crate) fn footer_line(
 }
 
 /// One line for the frames the view left out, or `None` when it left none.
-pub(crate) fn frames_line(outline: &PageOutline, unreadable: usize) -> Option<String> {
-    let frames = outline.frames;
+/// The outline counts the frames of the page's DOM; an out-of-process frame
+/// the snapshot could not read in time has no DOM to show and is counted
+/// there as cross-origin, so the snapshot's list moves it to "not read in
+/// time". A frame the snapshot left out in-process is still in the DOM, and
+/// the outline has already judged it.
+pub(crate) fn frames_line(outline: &PageOutline, skipped: &[SkippedFrame]) -> Option<String> {
+    let mut frames = outline.frames;
+    let timed_out = skipped
+        .iter()
+        .filter(|frame| frame.out_of_process && frame.reason.is_unread())
+        .count();
+    let moved = timed_out.min(frames.cross_origin);
+    frames.cross_origin -= moved;
+    frames.unread += moved;
     let mut parts = Vec::new();
     if frames.cross_origin > 0 {
         parts.push(format!(
@@ -87,14 +99,13 @@ pub(crate) fn frames_line(outline: &PageOutline, unreadable: usize) -> Option<St
     if frames.empty > 0 {
         parts.push(format!("{} empty", frames.empty));
     }
-    let unread = frames.unread + unreadable;
-    if unread > 0 {
-        parts.push(format!("{unread} not read in time"));
+    if frames.unread > 0 {
+        parts.push(format!("{} not read in time", frames.unread));
     }
     if parts.is_empty() {
         return None;
     }
-    let total = frames.skipped() + unreadable;
+    let total = frames.skipped();
     Some(format!("frames: {total} not shown: {}", parts.join(", ")))
 }
 
@@ -104,3 +115,7 @@ fn kilo(chars: usize) -> String {
     }
     format!("{:.1}k", chars as f64 / 1_000.0)
 }
+
+#[cfg(test)]
+#[path = "view_footer_tests.rs"]
+mod tests;

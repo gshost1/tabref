@@ -146,6 +146,11 @@ pub(crate) enum Command {
     Close { tab: Option<String> },
     /// Print the agent guide
     Skill,
+    /// Start, inspect or stop the background daemon that keeps the browser connection
+    Daemon {
+        #[arg(value_parser = ["start", "status", "stop"])]
+        action: String,
+    },
 }
 
 impl Command {
@@ -171,6 +176,7 @@ impl Command {
             Self::Tab { .. } => "tab",
             Self::Close { .. } => "close",
             Self::Skill => "skill",
+            Self::Daemon { .. } => "daemon",
         }
     }
 }

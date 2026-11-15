@@ -3,10 +3,12 @@ use std::collections::{BTreeMap, HashMap};
 use tabref_core::capability::CLICK;
 use tabref_core::{AccessibilityNode, AppError};
 use tabref_page::{
-    ElementToken, OutlineInput, RefLabel, capture_dom, frame_owner_in, read_viewport,
+    DomTree, ElementToken, OutlineInput, RefLabel, capture_dom, frame_owner_in, parse_capture,
+    read_viewport,
 };
 
 use crate::session::Session;
+use crate::session::captured_snapshot::CapturedSnapshot;
 
 const FALLBACK_VIEWPORT: [f64; 2] = [1280.0, 800.0];
 const INPUT_ROLES: &[&str] = &[
@@ -24,15 +26,22 @@ const LARGE_FRAME_SHARE: f64 = 0.25;
 /// page's own target, the DOM of each out-of-process iframe that holds a
 /// field or a button with a ref or whose `<iframe>` covers a quarter of the
 /// viewport (other cross-origin frames, such as ads, are counted but not
-/// read), the viewport, and the refs of `tree` keyed by the target and
-/// backend node id their element tokens name.
+/// read), the viewport, and the refs of the snapshot's tree keyed by the
+/// target and backend node id their element tokens name. The DOM of a
+/// target the snapshot already captured is read from that capture; a frame
+/// the snapshot left out is not captured again, so a stalled one costs the
+/// view nothing.
 pub(crate) fn outline_input(
     session: &mut Session,
-    tree: Option<&AccessibilityNode>,
+    captured: Option<&CapturedSnapshot>,
 ) -> Result<OutlineInput, AppError> {
     let page = session.page()?;
     let deadline = session.deadline();
-    let trees = capture_dom(session.connection(), &page, deadline)?;
+    let tree = captured.map(|captured| &captured.tree);
+    let trees = match reused(captured, &page.target_id) {
+        Some(trees) => trees,
+        None => capture_dom(session.connection(), &page, deadline)?,
+    };
     let viewport =
         read_viewport(session.connection(), &page, deadline).unwrap_or(FALLBACK_VIEWPORT);
     let mut refs = HashMap::new();
@@ -54,6 +63,13 @@ pub(crate) fn outline_input(
         if !asks_input && !is_large(&trees, owner, viewport) {
             continue;
         }
+        if let Some(child_trees) = reused(captured, &target) {
+            frames.insert((page.target_id.clone(), owner), child_trees);
+            continue;
+        }
+        if captured.is_some_and(|captured| left_out(captured, &target)) {
+            continue;
+        }
         let Ok(child) = session.attach(&target) else {
             continue;
         };
@@ -67,6 +83,20 @@ pub(crate) fn outline_input(
         refs,
         viewport,
     })
+}
+
+/// The DOM of `target` from the snapshot's own capture, when it took one.
+fn reused(captured: Option<&CapturedSnapshot>, target: &str) -> Option<Vec<DomTree>> {
+    let capture = captured?.dom_captures.get(target)?;
+    Some(parse_capture(capture, target))
+}
+
+/// Whether the snapshot left `target` out, whatever the reason.
+fn left_out(captured: &CapturedSnapshot, target: &str) -> bool {
+    captured
+        .skipped_frames
+        .iter()
+        .any(|frame| frame.frame_id == target)
 }
 
 fn collect_refs(
@@ -106,7 +136,7 @@ fn collect_refs(
 
 /// Whether the `<iframe>` with backend id `owner` covers a quarter of the
 /// viewport.
-fn is_large(trees: &[tabref_page::DomTree], owner: i64, viewport: [f64; 2]) -> bool {
+fn is_large(trees: &[DomTree], owner: i64, viewport: [f64; 2]) -> bool {
     let area = viewport[0] * viewport[1];
     trees
         .iter()

@@ -2,10 +2,6 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-/// The one computed style a DOM capture asks for: its value tells an element
-/// laid out inside a line of text from one that starts its own box.
-pub(crate) const DISPLAY_STYLE: &str = "display";
-
 /// The backend node ids of the nodes a capture laid out inline: those whose
 /// computed `display` is `inline`. Every other laid-out element,
 /// `inline-block` and `inline-flex` included, holds its own box, so text never

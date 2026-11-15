@@ -100,6 +100,10 @@ impl CdpTransport for ScriptedTransport {
             .pop_front()
             .ok_or_else(|| transport_timeout("receive"))
     }
+
+    fn poll_text(&mut self) -> Result<Option<String>, AppError> {
+        Ok(self.inbound.pop_front())
+    }
 }
 
 impl Drop for ScriptedTransport {
