@@ -12,8 +12,9 @@ use tabref_core::{AppError, DeliverySemantics, ErrorCode};
 use super::NO_DAEMON_ENV;
 use super::build_id::build_id;
 use super::daemon_address::DaemonAddress;
+use super::private_dir::{check_private, check_socket};
 use super::spawn::spawn_daemon;
-use super::wire_io::{read_line, write_line};
+use super::wire_io::{MAX_REPLY, read_line, write_line};
 use super::wire_reply::WireReply;
 use super::wire_request::WireRequest;
 use crate::cli::Cli;
@@ -70,10 +71,15 @@ pub(crate) fn run_through_daemon(cli: &Cli) -> Option<Result<Outcome, AppError>>
     None
 }
 
-/// Sends `request` and waits up to `wait` for the reply. Connecting or
-/// writing that fails means no daemon has the request.
+/// Sends `request` and waits up to `wait` for the reply. A folder or
+/// socket that is not this user's own is never connected to; that, or
+/// connecting or writing that fails, means no daemon has the request.
 pub(crate) fn exchange(address: &DaemonAddress, request: &WireRequest, wait: Duration) -> Exchange {
-    let Ok(mut stream) = UnixStream::connect(address.socket()) else {
+    let socket = address.socket();
+    if check_private(&address.dir).is_err() || check_socket(&socket).is_err() {
+        return Exchange::NoDaemon;
+    }
+    let Ok(mut stream) = UnixStream::connect(&socket) else {
         return Exchange::NoDaemon;
     };
     if write_line(&mut stream, request).is_err() {
@@ -82,7 +88,7 @@ pub(crate) fn exchange(address: &DaemonAddress, request: &WireRequest, wait: Dur
     if stream.set_read_timeout(Some(wait)).is_err() {
         return Exchange::Lost(lost("could not bound the wait for its reply"));
     }
-    match read_line::<WireReply>(&stream) {
+    match read_line::<WireReply>(&stream, MAX_REPLY) {
         Ok(Some(reply)) => Exchange::Reply(reply),
         Ok(None) => Exchange::Lost(lost("exited before it replied")),
         Err(error) if is_timeout(&error) => Exchange::Lost(

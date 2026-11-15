@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tabref_core::{Deadline, ErrorCode};
 
-use super::{browser_args, launch_chrome, profile_dir};
+use super::{browser_args, launch_chrome};
 use crate::LaunchOptions;
 
 #[test]
@@ -42,6 +42,8 @@ fn a_binary_that_does_not_exist_fails_before_waiting() {
 #[test]
 fn the_throwaway_profile_is_private_to_the_user() {
     use std::os::unix::fs::PermissionsExt;
+
+    use super::profile_dir;
     let options = LaunchOptions {
         profile_root: Some(std::env::temp_dir()),
         ..LaunchOptions::default()

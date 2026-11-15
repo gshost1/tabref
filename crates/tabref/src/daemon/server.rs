@@ -16,10 +16,10 @@ use std::time::{Duration, Instant};
 use tabref_core::AppError;
 
 use super::daemon_address::DaemonAddress;
-use super::private_dir::ensure_private_dir;
+use super::private_dir::{effective_uid, ensure_private_dir};
 use super::run_request::run_request;
 use super::server_state::ServerState;
-use super::wire_io::{read_line, write_line};
+use super::wire_io::{MAX_REQUEST, read_line, write_line};
 use super::wire_reply::WireReply;
 use super::wire_request::WireRequest;
 use super::{CDP_ENV, IDLE_ENV, build_id::build_id};
@@ -29,6 +29,8 @@ const DEFAULT_IDLE: Duration = Duration::from_secs(600);
 const LOCK_WAIT: Duration = Duration::from_millis(1_500);
 const LOCK_POLL: Duration = Duration::from_millis(5);
 const IDLE_CHECK: Duration = Duration::from_millis(500);
+const REQUEST_WAIT: Duration = Duration::from_secs(5);
+const RETIRE_POLL: Duration = Duration::from_millis(20);
 
 pub(crate) fn serve() -> ExitCode {
     let cdp = std::env::var(CDP_ENV).ok().filter(|cdp| !cdp.is_empty());
@@ -41,6 +43,10 @@ pub(crate) fn serve() -> ExitCode {
     let state = Arc::new(ServerState::new(build_id(), cdp));
     watch_idle(Arc::clone(&state), address.clone(), idle_timeout());
     for stream in listener.incoming().flatten() {
+        if !peer_is_this_user(&stream) {
+            continue;
+        }
+        state.activity.begin();
         let state = Arc::clone(&state);
         let address = address.clone();
         thread::spawn(move || serve_connection(stream, &state, &address));
@@ -71,21 +77,36 @@ fn bind(address: &DaemonAddress) -> Result<(UnixListener, File), AppError> {
     Ok((listener, lock))
 }
 
+/// Serves one accepted connection, which the accept loop already counted
+/// as active. A request line is at most 1 MiB and must arrive within 5 s.
 fn serve_connection(mut stream: UnixStream, state: &ServerState, address: &DaemonAddress) {
-    let Ok(Some(request)) = read_line::<WireRequest>(&stream) else {
+    let _ = stream.set_read_timeout(Some(REQUEST_WAIT));
+    let Ok(Some(request)) = read_line::<WireRequest>(&stream, MAX_REQUEST) else {
+        state.activity.end(false);
         return;
     };
-    let counts = request.op != "status";
-    if counts {
-        state.activity.begin();
-    }
+    let touch = request.op != "status";
     let (reply, exit) = answer(state, request);
     let _ = write_line(&mut stream, &reply);
-    if counts {
-        state.activity.end();
-    }
+    state.activity.end(touch);
     if exit {
-        shut_down(address);
+        retire(state, address);
+    }
+}
+
+/// Whether the connecting process runs as this daemon's own user. Linux
+/// says through `SO_PEERCRED`; elsewhere the private folder and the 0600
+/// socket are the only way in.
+fn peer_is_this_user(stream: &UnixStream) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        rustix::net::sockopt::socket_peercred(stream)
+            .is_ok_and(|peer| peer.uid.as_raw() == effective_uid())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = (stream, effective_uid);
+        true
     }
 }
 
@@ -125,19 +146,30 @@ fn watch_idle(state: Arc<ServerState>, address: DaemonAddress, timeout: Duration
         loop {
             thread::sleep(IDLE_CHECK.min(timeout));
             let orphaned = !address.state_root.exists() && state.activity.idle() > IDLE_CHECK;
-            if orphaned {
-                let _ = std::fs::remove_dir_all(&address.dir);
-                std::process::exit(0);
-            }
-            if state.activity.idle() >= timeout {
-                shut_down(&address);
+            if orphaned || state.activity.idle() >= timeout {
+                if orphaned {
+                    let _ = std::fs::remove_dir_all(&address.dir);
+                }
+                retire(&state, &address);
             }
         }
     });
 }
 
-fn shut_down(address: &DaemonAddress) {
+/// Stops taking connections by removing the socket, then exits once no
+/// request is in flight, including any a client connected just before the
+/// socket went away.
+fn retire(state: &ServerState, address: &DaemonAddress) {
     let _ = std::fs::remove_file(address.socket());
+    let mut quiet = 0;
+    while quiet < 2 {
+        thread::sleep(RETIRE_POLL);
+        quiet = if state.activity.active() == 0 {
+            quiet + 1
+        } else {
+            0
+        };
+    }
     std::process::exit(0);
 }
 

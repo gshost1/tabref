@@ -118,8 +118,27 @@ fn an_iframe_whose_child_frames_cannot_be_listed_in_time_is_kept() {
 
     let snapshot = snapshot_page_within_budget(&mut connection, &session(), deadline()).unwrap();
 
-    assert!(snapshot.unreadable_frames.is_empty());
+    assert_eq!(snapshot.unreadable_frames, ["OOP"]);
     assert_eq!(snapshot.preorder().len(), 5);
+}
+
+#[test]
+fn an_iframe_whose_dom_capture_misses_the_budget_is_left_out_as_timed_out() {
+    let frames = json!({ "frameTree": {
+        "frame": { "id": "OOP", "parentId": "MAIN", "loaderId": "LO" },
+    } });
+    let transport = page_reads(vec![attached("S2", "OOP")], main_frame_only(), json!({}))
+        .expect("Target.setAutoAttach", json!({}))
+        .expect("Page.getFrameTree", frames)
+        .expect_silence("DOMSnapshot.captureSnapshot")
+        .expect("Accessibility.getFullAXTree", child_tree())
+        .expect("DOM.getFrameOwner", json!({ "backendNodeId": 30 }));
+    let mut connection = CdpConnection::new(release(transport, 2).boxed());
+
+    let snapshot = snapshot_page_within_budget(&mut connection, &session(), deadline()).unwrap();
+
+    assert_eq!(snapshot.unreadable_frames, ["OOP"]);
+    assert_eq!(snapshot.preorder().len(), 3);
 }
 
 #[test]

@@ -24,9 +24,17 @@ impl Activity {
         self.active.fetch_add(1, Ordering::SeqCst);
     }
 
-    pub(crate) fn end(&self) {
-        self.last_ms.store(self.now_ms(), Ordering::SeqCst);
+    /// Ends a request; `touch` says it counts as use, which a status probe
+    /// does not, so polling a daemon never keeps it alive.
+    pub(crate) fn end(&self, touch: bool) {
+        if touch {
+            self.last_ms.store(self.now_ms(), Ordering::SeqCst);
+        }
         self.active.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn active(&self) -> usize {
+        self.active.load(Ordering::SeqCst)
     }
 
     pub(crate) fn uptime(&self) -> Duration {

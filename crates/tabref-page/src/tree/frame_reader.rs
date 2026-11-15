@@ -52,6 +52,14 @@ impl FrameReader {
     /// Reads until every frame answered, was left out, or missed the
     /// budget. An error means the page itself could not be read.
     pub(crate) fn run(&mut self, connection: &mut CdpConnection) -> Result<(), AppError> {
+        let read = self.read_all(connection);
+        if read.is_err() {
+            self.abandon_where(connection, |_| true);
+        }
+        read
+    }
+
+    fn read_all(&mut self, connection: &mut CdpConnection) -> Result<(), AppError> {
         self.start_target(connection, 0)?;
         loop {
             let page_pending = self.pending.values().any(PendingRead::is_page_read);
@@ -218,6 +226,7 @@ impl FrameReader {
     /// its own short deadline, so a snapshot that ran out of time still
     /// leaves no auto-attach behind on a connection that is kept.
     pub(crate) fn release(&mut self, connection: &mut CdpConnection) {
+        self.abandon_where(connection, |_| true);
         let deadline = Deadline::after(RELEASE_CAP_MS).unwrap_or(self.budget.snapshot());
         let mut ids = Vec::new();
         for target in self.auto_attached.iter().rev() {
@@ -251,18 +260,42 @@ impl FrameReader {
     fn time_out_pending(&mut self, connection: &mut CdpConnection) {
         let pending: Vec<PendingRead> = self.pending.values().cloned().collect();
         self.abandon_where(connection, |_| true);
-        for read in pending {
+        for read in pending.clone() {
             match read {
                 PendingRead::Ax { target, frame_id } if !frame_id.is_empty() => {
                     let url = self.targets[target].frame_url(&frame_id);
                     self.leave_out(&frame_id, url, FrameSkipReason::TimedOut);
                 }
-                PendingRead::Ax { target, .. } | PendingRead::FrameTree(target) if target > 0 => {
+                PendingRead::Ax { target, .. }
+                | PendingRead::FrameTree(target)
+                | PendingRead::Dom(target)
+                    if target > 0 =>
+                {
                     self.fail_target(connection, target, FrameSkipReason::TimedOut);
                 }
                 _ => {}
             }
         }
+        for read in pending {
+            if let PendingRead::AutoAttach(target) = read {
+                self.unlisted_children(target);
+            }
+        }
+    }
+
+    /// A target that is kept but could not list its own iframes in time:
+    /// it is reported as timed out, without leaving it out, since frames
+    /// inside it may be missing.
+    fn unlisted_children(&mut self, target: usize) {
+        if target == 0 || self.is_closed_target(target) {
+            return;
+        }
+        let state = &self.targets[target];
+        self.left_out.push(SkippedFrame {
+            frame_id: state.session.target_id.clone(),
+            url: state.url.clone(),
+            reason: FrameSkipReason::TimedOut,
+        });
     }
 
     fn descends_from(&self, mut index: usize, ancestor: usize) -> bool {

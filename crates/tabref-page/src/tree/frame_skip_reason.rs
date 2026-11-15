@@ -5,7 +5,9 @@ use serde::Serialize;
 /// has no area, is a pixel (at most 5x5 with its border), lies wholly above or left of the
 /// page, or the frame was read and holds no text and no control. The last
 /// two say the frame may hold something but was not read: it missed the
-/// iframe budget, or the browser refused or lost it.
+/// iframe budget, or the browser refused or lost it. A frame that is shown
+/// but could not list the iframes inside it in time is also reported as
+/// timed out, since some of its content may be missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrameSkipReason {
