@@ -3,6 +3,7 @@ use tabref_core::{AppError, Deadline, ErrorCode};
 
 use super::cdp_event::CdpEvent;
 use super::event_buffer::EventBuffer;
+use super::frame_envelope::FrameEnvelope;
 use super::incoming::Incoming;
 use super::protocol_error::{protocol_error, target_gone};
 use super::reply_stash::ReplyStash;
@@ -14,6 +15,7 @@ use crate::transport::transport_error::{is_timeout, transport_failed};
 const DETACHED: &str = "Target.detachedFromTarget";
 const DIALOG_OPENING: &str = "Page.javascriptDialogOpening";
 const POLL_LIMIT: usize = 4096;
+const RAW_SCAN_MIN: usize = 64 * 1024;
 
 /// A CDP client over one transport. Requests carry monotonic ids and may be
 /// pipelined: [`send`](Self::send) several, then collect each reply with
@@ -93,6 +95,7 @@ impl CdpConnection {
                 method: method.to_owned(),
                 session_id: session_id.map(str::to_owned),
                 params: tracked,
+                raw: false,
             },
         );
         if local {
@@ -107,6 +110,22 @@ impl CdpConnection {
             self.replies.abandon(id);
             return Err(error);
         }
+        Ok(id)
+    }
+
+    /// [`send`](Self::send) for a reply too large to parse twice, such as a
+    /// full accessibility tree: its outcome is the whole reply frame's text
+    /// as a `Value::String`, for the caller to parse into its own types. An
+    /// error reply is still an error.
+    pub fn send_raw(
+        &mut self,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+        deadline: Deadline,
+    ) -> Result<u64, AppError> {
+        let id = self.send(method, params, session_id, deadline)?;
+        self.replies.mark_raw(id);
         Ok(id)
     }
 
@@ -244,10 +263,16 @@ impl CdpConnection {
     /// Settles a reply, or does an event's bookkeeping (accepting a dialog,
     /// failing the requests of a detached session) and hands the event back.
     fn route(&mut self, text: &str, deadline: Deadline) -> Result<Option<CdpEvent>, AppError> {
+        if text.len() >= RAW_SCAN_MIN && self.settle_raw(text) {
+            return Ok(None);
+        }
         match Incoming::parse(text) {
             Some(Incoming::Reply { id, body }) => {
                 if let Some(waiter) = self.replies.waiter(id).cloned() {
-                    let outcome = reply_result(&waiter.method, body);
+                    let mut outcome = reply_result(&waiter.method, body);
+                    if waiter.raw && outcome.is_ok() {
+                        outcome = Ok(Value::String(text.to_owned()));
+                    }
                     if outcome.is_ok() {
                         let params = waiter.params.unwrap_or(Value::Null);
                         self.ledger
@@ -276,6 +301,26 @@ impl CdpConnection {
             Some(Incoming::Unrecognized) => Ok(None),
             None => Err(transport_failed("receive", "unparseable DevTools frame")),
         }
+    }
+
+    /// Settles a large reply someone wants raw from its id and error alone,
+    /// without building the rest of it. `false` when the frame is not one.
+    fn settle_raw(&mut self, text: &str) -> bool {
+        let Ok(envelope) = serde_json::from_str::<FrameEnvelope>(text) else {
+            return false;
+        };
+        let Some(id) = envelope.id else {
+            return false;
+        };
+        let Some(waiter) = self.replies.waiter(id).filter(|waiter| waiter.raw) else {
+            return false;
+        };
+        let outcome = match &envelope.error {
+            Some(error) => Err(protocol_error(&waiter.method, error)),
+            None => Ok(Value::String(text.to_owned())),
+        };
+        self.replies.settle(id, outcome);
+        true
     }
 
     fn answer_dialog(&mut self, event: &CdpEvent, deadline: Deadline) -> Result<(), AppError> {

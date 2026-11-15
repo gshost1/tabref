@@ -19,6 +19,12 @@ impl ReplyStash {
         self.waiting.insert(id, waiter);
     }
 
+    pub(crate) fn mark_raw(&mut self, id: u64) {
+        if let Some(waiter) = self.waiting.get_mut(&id) {
+            waiter.raw = true;
+        }
+    }
+
     pub(crate) fn waiter(&self, id: u64) -> Option<&Waiter> {
         self.waiting.get(&id)
     }

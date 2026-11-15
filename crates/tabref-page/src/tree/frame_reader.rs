@@ -132,7 +132,13 @@ impl FrameReader {
             return Ok(());
         }
         let session = self.targets[target].session.session_id.clone();
-        match connection.send(method, params, Some(&session), self.budget.snapshot()) {
+        let deadline = self.budget.snapshot();
+        let sent = if matches!(read, PendingRead::Ax { .. }) {
+            connection.send_raw(method, params, Some(&session), deadline)
+        } else {
+            connection.send(method, params, Some(&session), deadline)
+        };
+        match sent {
             Ok(id) => {
                 self.pending.insert(id, read);
                 Ok(())

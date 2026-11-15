@@ -309,3 +309,40 @@ fn a_timeout_leaves_the_connection_usable() {
     assert_eq!(error.code, ErrorCode::Timeout);
     assert!(!connection.is_closed());
 }
+
+#[test]
+fn a_raw_reply_is_its_whole_frame_text_small_or_large_and_errors_stay_errors() {
+    let big = "x".repeat(100 * 1024);
+    let transport = ScriptedTransport::new()
+        .expect("Accessibility.getFullAXTree", json!({ "nodes": [] }))
+        .expect("Accessibility.getFullAXTree", json!({ "nodes": [big] }))
+        .expect_error("Accessibility.getFullAXTree", -32000, "No frame");
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let mut texts = Vec::new();
+    for _ in 0..2 {
+        let id = connection
+            .send_raw(
+                "Accessibility.getFullAXTree",
+                json!({}),
+                Some("S"),
+                deadline(),
+            )
+            .unwrap();
+        texts.push(connection.reply(id, deadline()).unwrap());
+    }
+    let failed = connection
+        .send_raw(
+            "Accessibility.getFullAXTree",
+            json!({}),
+            Some("S"),
+            deadline(),
+        )
+        .unwrap();
+
+    let small: serde_json::Value = serde_json::from_str(texts[0].as_str().unwrap()).unwrap();
+    assert_eq!(small["result"], json!({ "nodes": [] }));
+    assert!(texts[1].as_str().unwrap().len() > 100 * 1024);
+    let error = connection.reply(failed, deadline()).unwrap_err();
+    assert!(is_protocol_error(&error));
+}
