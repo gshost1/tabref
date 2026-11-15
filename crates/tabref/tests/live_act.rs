@@ -217,9 +217,9 @@ fn a_missing_or_ambiguous_target_fails_with_candidates_and_stops_the_batch() {
     );
     assert!(!stopped.ok);
     assert!(
-        stopped.stdout.starts_with("ok click \"Edit\""),
+        stopped.stderr.contains("\ndetail: ok click \"Edit\""),
         "{}",
-        stopped.stdout
+        stopped.stderr
     );
     assert!(
         stopped.stderr.contains("step 2 `fill \"Pirce\" 1`"),

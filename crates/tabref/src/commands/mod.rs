@@ -72,10 +72,10 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         launch,
     };
     let mut session = Session::open(&options)?;
-    dispatch(&mut session, &cli.command, cli.json)
+    dispatch(&mut session, &cli.command)
 }
 
-fn dispatch(session: &mut Session, command: &Command, json: bool) -> Result<Outcome, AppError> {
+fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
         Command::Open { url, .. } => open::run(session, url),
         Command::Snap {
@@ -143,14 +143,7 @@ fn dispatch(session: &mut Session, command: &Command, json: bool) -> Result<Outc
         Command::Do {
             steps,
             step_timeout,
-        } => do_batch::run(
-            session,
-            steps.as_deref(),
-            do_batch::BatchMode {
-                step_timeout_ms: *step_timeout,
-                json,
-            },
-        ),
+        } => do_batch::run(session, steps.as_deref(), *step_timeout),
         Command::Tabs => tabs::run(session),
         Command::Tab { tab } => tab::run(session, tab),
         Command::Close { tab } => close::run(session, tab.as_deref()),
