@@ -59,6 +59,7 @@ impl EndpointSpec {
                 websocket_url: url.clone(),
                 source: EndpointSource::WebSocketUrl,
                 product: None,
+                user_agent: None,
             }),
         }
     }

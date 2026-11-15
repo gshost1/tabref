@@ -24,6 +24,7 @@ fn a_checked_port_is_reached_only_at_127_0_0_1_on_that_port() {
             websocket_url: WebSocketUrl::parse(url).unwrap(),
             source: EndpointSource::JsonVersion,
             product: None,
+            user_agent: None,
         };
         let Err(error) = connect_held(&endpoint, &held, Deadline::after(500).unwrap()) else {
             panic!("{url} was connected to");
@@ -37,6 +38,7 @@ fn endpoint(source: EndpointSource) -> BrowserEndpoint {
         websocket_url: WebSocketUrl::loopback(9222, "/devtools/browser/x").unwrap(),
         source,
         product: None,
+        user_agent: None,
     }
 }
 

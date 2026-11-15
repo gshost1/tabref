@@ -9,6 +9,7 @@ use tabref_core::{AppError, Deadline};
 use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
 
 use super::act_target::resolve_target;
+use super::app_guard::refuse_in_app;
 use super::batch_step::BatchStep;
 use super::download_lines::{download_json, download_line};
 use super::downloads;
@@ -37,6 +38,7 @@ pub(crate) fn open_step(
     deadline: Deadline,
 ) -> Result<StepDone, AppError> {
     let (new_tab, address) = step_address(args)?;
+    refuse_in_app(session, deadline)?;
     let (mut text, mut data) = if new_tab {
         let url = new_tab_address(session, &address.text)?;
         let (index, page) = open_tab(session, deadline)?;

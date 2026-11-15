@@ -1,6 +1,7 @@
 pub(crate) mod act_target;
 pub(crate) mod acted;
 pub(crate) mod action_report;
+pub(crate) mod app_guard;
 pub(crate) mod batch_step;
 pub(crate) mod check;
 pub(crate) mod click;

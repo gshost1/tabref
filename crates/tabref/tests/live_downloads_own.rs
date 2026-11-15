@@ -237,7 +237,13 @@ fn a_wait_never_caps_a_download_the_user_started_in_another_tab() {
     std::thread::sleep(Duration::from_millis(800));
     tabref.ok(&["--tab", "1", "js", "location.href = '/bigslow.bin'; 1"]);
     let _ = waiting.wait_with_output().unwrap();
-    std::thread::sleep(Duration::from_millis(2_500));
+    let saved = site.own.join("bigslow.bin");
+    let landed = std::time::Instant::now();
+    while std::fs::metadata(&saved).map_or(true, |meta| meta.len() < BIG_BYTES as u64)
+        && landed.elapsed() < Duration::from_secs(15)
+    {
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert_eq!(
         std::fs::metadata(site.own.join("bigslow.bin"))
             .map(|meta| meta.len())

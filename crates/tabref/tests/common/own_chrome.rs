@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use tabref_cdp::{LaunchedBrowser, find_chrome, read_active_port};
 
-use super::{Harness, harness_home};
+use super::{Harness, chrome_args, harness_home};
 
 /// A harness whose browser saves its own downloads in `downloads`.
 pub fn own_chrome(name: &str, downloads: &Path) -> Harness {
@@ -34,9 +34,7 @@ pub fn own_chrome(name: &str, downloads: &Path) -> Harness {
         preferences.to_string(),
     )
     .unwrap();
-    let extra_args: Vec<String> = std::env::var("TABREF_CHROME_ARGS")
-        .map(|args| args.split_whitespace().map(str::to_owned).collect())
-        .unwrap_or_default();
+    let extra_args = chrome_args();
     let mut child = Command::new(find_chrome().unwrap())
         .args([
             "--headless=new",

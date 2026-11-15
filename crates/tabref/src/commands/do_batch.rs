@@ -2,8 +2,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tabref_core::AppError;
+use tabref_core::{AppError, DeliverySemantics};
 
+use super::app_guard::refuse_in_app;
 use super::do_expand::expand;
 use super::do_step::run_step;
 use super::downloads;
@@ -19,7 +20,9 @@ static NEXT_BATCH: AtomicU64 = AtomicU64::new(1);
 /// result is one `ok` line per step, the last step's with what it set off.
 /// The first step that fails stops the batch: the error names the step and
 /// what was wrong, and its detail lists the steps that ran and a view of the
-/// page at that point.
+/// page at that point; once a step ran, a retry is never called safe. A
+/// batch with an `open` in an app that embeds Chrome is refused before its
+/// first step runs.
 pub(crate) fn run(
     session: &mut Session,
     text: Option<&str>,
@@ -34,6 +37,13 @@ pub(crate) fn run(
         return Err(AppError::invalid_args(
             "no steps: pass them as one quoted argument or on stdin (tabref do <<'EOF' ... EOF)",
         ));
+    }
+    if steps
+        .iter()
+        .any(|step| matches!(step.verb().as_str(), "open" | "goto"))
+    {
+        let deadline = session.deadline();
+        refuse_in_app(session, deadline)?;
     }
     let mut lines: Vec<String> = Vec::new();
     let mut done: Vec<Value> = Vec::new();
@@ -92,6 +102,14 @@ fn failed(
         message.push_str(&format!("; the {skipped} step(s) after it did not run"));
     }
     error.message = message;
+    if !ran.data.is_empty()
+        && matches!(
+            error.disposition,
+            DeliverySemantics::NotDelivered | DeliverySemantics::Unknown
+        )
+    {
+        error.disposition = DeliverySemantics::uncertain();
+    }
     let mut detail: Vec<String> = ran.lines.to_vec();
     if let Some(cdp) = error.platform_detail.take() {
         detail.push(cdp);
