@@ -12,10 +12,10 @@ use crate::{BrowserEndpoint, CdpConnection, EndpointSource, WebSocketTransport};
 /// bounded by `deadline`, and reports a pending or declined approval as
 /// `PERM_DENIED` with `details.kind` `cdp_approval_pending` or
 /// `cdp_connection_rejected`. Any other endpoint already answered, or was
-/// started by tabref, so it costs no extra round trip. Any other endpoint
-/// whose upgrade stalls is retried once on a fresh connection (see
-/// `stalled_retry`); a held `DevToolsActivePort` upgrade is the browser
-/// asking its user, so it gets one attempt and is never asked twice.
+/// started by tabref, so it costs no extra round trip; when its upgrade
+/// stalls, it is retried once on a fresh connection (see `stalled_retry`).
+/// A held `DevToolsActivePort` upgrade is the browser asking its user, so it
+/// gets one attempt and the user is never asked twice.
 pub fn connect(endpoint: &BrowserEndpoint, deadline: Deadline) -> Result<CdpConnection, AppError> {
     let url = &endpoint.websocket_url;
     let transport = if endpoint.source == EndpointSource::DevToolsActivePort {
