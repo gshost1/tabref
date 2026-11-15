@@ -7,7 +7,7 @@ use tabref_core::{
     new_snapshot_id,
 };
 
-use super::abandon::{kill_group, remove_profile_soon};
+use super::abandon::{THROWAWAY_PREFIX, kill_group, remove_profile_soon};
 use super::chrome_binary::find_chrome;
 use super::launch_options::LaunchOptions;
 use super::launched_browser::LaunchedBrowser;
@@ -163,7 +163,7 @@ fn profile_dir(options: &LaunchOptions) -> Result<PathBuf, AppError> {
         .clone()
         .unwrap_or_else(std::env::temp_dir);
     create_private_dir(&root)?;
-    let dir = root.join(format!("tabref-profile-{}", new_snapshot_id()));
+    let dir = root.join(format!("{THROWAWAY_PREFIX}{}", new_snapshot_id()));
     create_new_private_dir(&dir)?;
     Ok(dir)
 }

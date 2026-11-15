@@ -1,7 +1,8 @@
-//! Ending a browser tabref started that could not be used (its DevTools
-//! never answered), so a failed launch leaves no browser running and no
-//! throwaway profile behind. Only for a browser this process launched: an
-//! adopted one, or the user's, is never ended here.
+//! Ending a browser tabref started: one that could not be used (its
+//! DevTools never answered), so a failed launch leaves no browser running
+//! and no throwaway profile behind, and one `close --browser` quits. Only
+//! for a browser tabref launched, as its record names it (pid and start
+//! time): an adopted one, or the user's, is never ended here.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -10,6 +11,8 @@ use std::time::{Duration, Instant};
 use super::process_start::launched_alive;
 use crate::LaunchedBrowser;
 
+/// The start of a throwaway profile's directory name.
+pub(crate) const THROWAWAY_PREFIX: &str = "tabref-profile-";
 const GRACE: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(25);
 
@@ -28,15 +31,17 @@ pub fn abandon_launch(browser: &LaunchedBrowser) -> bool {
     ended
 }
 
-/// Removes the throwaway `profile_dir` of a launch that failed, retrying
-/// while a browser that is going still writes into it.
+/// Removes the throwaway `profile_dir` of a launch that failed or a browser
+/// that quit, retrying while a browser that is going still writes into it.
 pub(crate) fn remove_profile_soon(profile_dir: &Path) {
     let started = Instant::now();
+    if !is_throwaway(profile_dir) {
+        return;
+    }
+    let _ = std::fs::remove_dir_all(profile_dir);
     while profile_dir.exists() && started.elapsed() < GRACE {
-        remove_throwaway(profile_dir);
-        if profile_dir.exists() {
-            std::thread::sleep(POLL);
-        }
+        std::thread::sleep(POLL);
+        let _ = std::fs::remove_dir_all(profile_dir);
     }
 }
 
@@ -52,8 +57,12 @@ fn wait_gone(browser: &LaunchedBrowser) -> bool {
     }
 }
 
-fn remove_throwaway(profile_dir: &Path) {
-    let _ = std::fs::remove_dir_all(profile_dir);
+/// Whether `profile_dir` is named as `launch_chrome` names a throwaway
+/// profile; only such a directory is ever deleted, whatever a record says.
+fn is_throwaway(profile_dir: &Path) -> bool {
+    profile_dir
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(THROWAWAY_PREFIX))
 }
 
 #[cfg(unix)]
@@ -76,3 +85,7 @@ pub(crate) fn kill_group(pid: u32) {
 
 #[cfg(not(any(unix, windows)))]
 pub(crate) fn kill_group(_pid: u32) {}
+
+#[cfg(test)]
+#[path = "abandon_tests.rs"]
+mod tests;
