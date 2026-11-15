@@ -1,13 +1,16 @@
-"""The warm-up before each run's timer: what it asks a browser's DevTools HTTP endpoint for, and what it leaves in
-the site's state. No Chrome, no model: a fake DevTools endpoint and the real (frozen) held-out site.
+"""The warm-up before each run's timer (harness/warmup.py): what it asks a browser's DevTools HTTP endpoint for, that
+it never touches the task site, that a failed warm-up makes the run invalid, and that the report keeps warm and cold
+rows apart. No Chrome, no model: a fake DevTools endpoint that, like Chrome, requests the new tab's page.
 
 Run: python3 -I -m unittest discover -s bench/tests -p 'test_*.py'
 """
+import importlib.util
 import json
 import sys
+import tempfile
 import threading
+import time
 import unittest
-import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,17 +18,22 @@ from pathlib import Path
 BENCH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BENCH / "harness"))
 import core  # noqa: E402
+import warmup  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("bench_report", BENCH / "report.py")
+report = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(report)
 
 
 class FakeDevTools:
-    """A DevTools HTTP endpoint with one starting tab: /json/new makes a tab whose title stays empty for
-    `pending_polls` listings (its document has not committed), then reads `title`."""
+    """A DevTools HTTP endpoint with one starting tab. PUT /json/new makes a tab and, unless `fetch` is off, requests
+    its URL the way Chrome loads a new tab; its reply comes after `put_delay` s. A closed tab stays listed for
+    `closing_polls` listings; with `closable` off it never goes."""
 
-    def __init__(self, pending_polls=2, title="Not found", closing_polls=0):
-        self.calls, self.closed, self.pending, self.title = [], [], pending_polls, title
-        self.closing = closing_polls
-        self.listed_after_close = 0
+    def __init__(self, fetch=True, put_delay=0.0, closing_polls=0, closable=True):
+        self.calls, self.closed, self.fetched = [], [], []
         self.tabs = [{"id": "START", "type": "page", "url": "about:blank", "title": "about:blank"}]
+        self.closing, self.closable, self.listed_after_close = closing_polls, closable, 0
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -42,25 +50,26 @@ class FakeDevTools:
 
             def do_PUT(self):
                 fake.calls.append(("PUT", self.path))
-                if self.path.startswith("/json/new?"):
-                    tab = {"id": "WARM", "type": "page", "url": self.path.split("?", 1)[1], "title": ""}
-                    fake.tabs.append(tab)
-                    return self.reply(tab)
-                self.reply({}, 404)
+                if not self.path.startswith("/json/new?"):
+                    return self.reply({}, 404)
+                url = self.path.split("?", 1)[1]
+                tab = {"id": "WARM", "type": "page", "url": url, "title": ""}
+                fake.tabs.append(tab)
+                if fetch:
+                    threading.Thread(target=fake.load, args=(url,), daemon=True).start()
+                time.sleep(put_delay)
+                try:
+                    self.reply(tab)
+                except OSError:
+                    pass
 
             def do_GET(self):
                 fake.calls.append(("GET", self.path))
                 if self.path == "/json/list":
-                    if fake.closed and any(t["id"] == "WARM" for t in fake.tabs):
+                    if fake.closable and "WARM" in fake.closed and any(t["id"] == "WARM" for t in fake.tabs):
                         fake.listed_after_close += 1
                         if fake.listed_after_close > fake.closing:
                             fake.tabs = [t for t in fake.tabs if t["id"] != "WARM"]
-                    for tab in fake.tabs:
-                        if tab["id"] == "WARM" and fake.title is not None:
-                            if fake.pending > 0:
-                                fake.pending -= 1
-                            else:
-                                tab["title"] = fake.title
                     return self.reply(fake.tabs)
                 if self.path.startswith("/json/close/"):
                     fake.closed.append(self.path.rsplit("/", 1)[1])
@@ -71,102 +80,114 @@ class FakeDevTools:
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
+    def load(self, url):
+        with urllib.request.urlopen(url, timeout=5) as r:
+            self.fetched.append((url, r.status))
+
     def stop(self):
         self.server.shutdown()
         self.server.server_close()
 
 
+def warm_with(fake, **kw):
+    try:
+        return warmup.warm_up(fake.port, poll=0.01, **kw)
+    finally:
+        fake.stop()
+
+
 class WarmUp(unittest.TestCase):
-    def test_one_throwaway_tab_commits_and_is_closed_over_http_only(self):
-        fake = FakeDevTools(pending_polls=3)
-        try:
-            warm = core.warm_up(fake.port, "http://127.0.0.1:8792", poll=0.01)
-        finally:
-            fake.stop()
-        self.assertTrue(warm["warmup_committed"], warm)
-        self.assertIsInstance(warm["warmup_s"], float)
+    def test_one_tab_loads_the_harness_page_and_is_closed_over_http_only(self):
+        fake = FakeDevTools()
+        warm = warm_with(fake)
+        self.assertEqual((warm["warmup"], warm["warmup_reached"], warm["warmup_tab_left"]),
+                         (warmup.VERSION, True, False), warm)
+        self.assertIsNone(warmup.verdict(warm))
         self.assertNotIn("warmup_error", warm)
-        self.assertEqual(fake.calls[0], ("PUT", "/json/new?http://127.0.0.1:8792/warm"))
+        method, path = fake.calls[0]
+        url = path.split("?", 1)[1]
+        self.assertEqual(method, "PUT")
+        self.assertTrue(url.startswith(f"{warmup.server().base}/warm/"), url)
+        self.assertEqual(fake.fetched, [(url, 200)])
         self.assertEqual(fake.closed, ["WARM"])
         self.assertEqual([t["id"] for t in fake.tabs], ["START"], "the starting about:blank tab is left alone")
-        paths = {path.split("?")[0].rsplit("/", 1)[0] if path.startswith("/json/close/") else path.split("?")[0]
-                 for _, path in fake.calls}
-        self.assertEqual(paths, {"/json/new", "/json/list", "/json/close"})
+        used = {p.split("?")[0] if not p.startswith("/json/close/") else "/json/close" for _, p in fake.calls}
+        self.assertEqual(used, {"/json/new", "/json/list", "/json/close"})
+
+    def test_each_warm_up_asks_for_its_own_page(self):
+        first, second = FakeDevTools(), FakeDevTools()
+        warm_with(first)
+        warm_with(second)
+        self.assertNotEqual(first.calls[0][1], second.calls[0][1])
+
+    def test_a_put_reply_later_than_its_timeout_still_closes_the_tab_by_url(self):
+        fake = FakeDevTools(put_delay=2.0)
+        warm = warm_with(fake, limit=0.5)
+        self.assertFalse(warm["warmup_tab_left"], warm)
+        self.assertIn("WARM", fake.closed)
+        self.assertEqual([t["id"] for t in fake.tabs], ["START"])
+        self.assertTrue(warmup.verdict(warm).startswith("warm-up failed"))
 
     def test_it_returns_only_once_the_closing_tab_has_left_the_list(self):
-        fake = FakeDevTools(pending_polls=0, closing_polls=3)
-        try:
-            warm = core.warm_up(fake.port, "http://127.0.0.1:8792", poll=0.01)
-            listed = [t["id"] for t in core.http_json(f"http://127.0.0.1:{fake.port}/json/list")]
-        finally:
-            fake.stop()
-        self.assertTrue(warm["warmup_committed"], warm)
-        self.assertNotIn("warmup_error", warm)
-        self.assertEqual(listed, ["START"])
+        fake = FakeDevTools(closing_polls=3)
+        warm = warm_with(fake)
+        self.assertFalse(warm["warmup_tab_left"], warm)
+        self.assertEqual([t["id"] for t in fake.tabs], ["START"])
         self.assertGreaterEqual(fake.listed_after_close, 4)
 
-    def test_a_page_with_no_title_counts_once_chrome_shows_its_address(self):
-        fake = FakeDevTools(pending_polls=1, title="127.0.0.1:8792/warm")
-        try:
-            warm = core.warm_up(fake.port, "http://127.0.0.1:8792", poll=0.01)
-        finally:
-            fake.stop()
-        self.assertTrue(warm["warmup_committed"], warm)
+    def test_a_tab_that_will_not_close_makes_the_run_invalid(self):
+        fake = FakeDevTools(closable=False)
+        warm = warm_with(fake, limit=0.5)
+        self.assertTrue(warm["warmup_tab_left"])
+        self.assertEqual(warmup.verdict(warm), "warm-up tab left open")
 
-    def test_a_tab_that_never_commits_is_logged_closed_and_does_not_raise(self):
-        fake = FakeDevTools(title=None)
-        try:
-            warm = core.warm_up(fake.port, "http://127.0.0.1:8792", limit=0.2, poll=0.01)
-        finally:
-            fake.stop()
-        self.assertFalse(warm["warmup_committed"])
-        self.assertIn("no commit", warm["warmup_error"])
+    def test_a_page_never_requested_makes_the_run_invalid_and_is_closed(self):
+        fake = FakeDevTools(fetch=False)
+        warm = warm_with(fake, limit=0.3)
+        self.assertFalse(warm["warmup_reached"])
+        self.assertIn("not requested", warm["warmup_error"])
         self.assertEqual(fake.closed, ["WARM"])
+        self.assertTrue(warmup.verdict(warm).startswith("warm-up failed"))
 
-    def test_an_unreachable_endpoint_is_logged_and_does_not_raise(self):
-        warm = core.warm_up(core.free_port(), "http://127.0.0.1:8792", limit=0.5)
-        self.assertFalse(warm["warmup_committed"])
-        self.assertTrue(warm["warmup_error"])
+    def test_an_unreachable_endpoint_or_no_port_makes_the_run_invalid(self):
+        for warm in (warmup.warm_up(core.free_port(), limit=0.5, poll=0.01), warmup.warm_up(None)):
+            self.assertFalse(warm["warmup_reached"])
+            self.assertFalse(warm["warmup_tab_left"])
+            self.assertTrue(warm["warmup_error"])
+            self.assertTrue(warmup.verdict(warm).startswith("warm-up failed"))
 
 
-class WarmLeavesNoTrace(unittest.TestCase):
-    """The real held-out site (frozen, unchanged): /warm is its 404 page, it records no event, and the state the
-    verifiers read has no trace of it, while the model's own page requests stay."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.site = core.Site(base=f"http://127.0.0.1:{core.free_port()}").start()
-
-    @classmethod
-    def tearDownClass(cls):
-        proc = cls.site.proc
-        cls.site.stop()
-        proc.wait(timeout=5)
-
-    def get(self, path):
+class TaskSiteUntouched(unittest.TestCase):
+    def test_the_warm_up_leaves_no_trace_in_the_task_site(self):
+        site = core.Site(base=f"http://127.0.0.1:{core.free_port()}").start()
         try:
-            with urllib.request.urlopen(f"{self.site.base}{path}", timeout=5) as r:
-                return r.status
-        except urllib.error.HTTPError as e:
-            return e.code
+            site.reset(7)
+            warm = warm_with(FakeDevTools())
+            state = site.state()
+        finally:
+            proc = site.proc
+            site.stop()
+            proc.wait(timeout=5)
+        self.assertTrue(warm["warmup_reached"])
+        self.assertNotEqual(warmup.server().base, site.base)
+        self.assertEqual((state["events"], state["navs"]), ([], []))
 
-    def test_warm_records_no_event_and_leaves_no_page_log_entry(self):
-        self.site.reset(7)
-        self.assertEqual(self.get(core.WARM_PATH), 404)
-        self.assertEqual(self.get("/shop/"), 200)
-        raw = core.http_json(f"{self.site.base}/__state")
-        state = self.site.state()
-        self.assertEqual(raw["events"], [])
-        self.assertEqual(state["events"], [])
-        self.assertIn(core.WARM_PATH, [n["path"] for n in raw["navs"]], "the frozen site logs it; the filter must act")
-        self.assertEqual([n["path"] for n in state["navs"]], ["/shop/"])
 
-    def test_the_filter_keeps_everything_else(self):
-        state = {"events": [{"kind": "x"}], "navs": [{"path": "/warm"}, {"path": "/warm/x"}, {"path": "/forum/"}],
-                 "seed": 3}
-        self.assertEqual(core.without_warm(state)["navs"], [{"path": "/warm/x"}, {"path": "/forum/"}])
-        self.assertEqual(core.without_warm(state)["events"], [{"kind": "x"}])
-        self.assertEqual(core.without_warm({"seed": 1}), {"seed": 1})
+class ReportKeepsWarmAndColdApart(unittest.TestCase):
+    def test_rows_are_split_on_the_warm_up(self):
+        cold = json.loads((BENCH / "results" / "linux-sonnet-5-5" / "results-web.jsonl").read_text().splitlines()[0])
+        warm = dict(cold, warmup=warmup.VERSION)
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "rows.jsonl"
+            path.write_text(json.dumps(cold) + "\n" + json.dumps(warm) + "\n")
+
+            def count(which):
+                rows, _, _ = report.load_by_taskset([str(path)], None, {cold["arm"]}, None, which)
+                return sum(len(v) for v in rows.values())
+
+            self.assertEqual((count(warmup.VERSION), count("cold"), count(None)), (1, 1, 2))
+        self.assertEqual(report.WARMUP_DEFAULT, warmup.VERSION)
+        self.assertEqual(report.warmup_of(cold), "cold")
 
 
 if __name__ == "__main__":

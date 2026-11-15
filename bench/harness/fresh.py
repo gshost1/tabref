@@ -139,17 +139,18 @@ class Vault:
                 fh.write(text)
 
 
-SEALED_FIELDS = ("verify", "answer", "strays", "invalid_reason")
+SEALED_FIELDS = ("verify", "answer", "strays", "invalid_reason", "warmup_error")
 
 
 def seal_record(record, vault):
-    """A fresh row: free text (answer, verifier reason, stray names, invalid reason) goes to the vault's detail; the
-    row keeps numbers, flags, the stray count and the invalid reason's generic prefix."""
+    """A fresh row: free text (answer, verifier reason, stray names, invalid reason, warm-up error) goes to the
+    vault's detail; the row keeps numbers, flags, the stray count and the invalid reason's generic prefix."""
     detail = {k: record[k] for k in SEALED_FIELDS if k in record}
     detail.update({k: record.get(k) for k in ("pass_id", "task", "arm", "round", "seed", "success")})
     vault.hold("detail.jsonl", json.dumps(detail) + "\n")
     out = dict(record, verify="sealed")
     out.pop("answer", None)
+    out.pop("warmup_error", None)
     if "strays" in record:
         out["strays"] = len(record["strays"])
     if record.get("invalid_reason"):

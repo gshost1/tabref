@@ -96,67 +96,9 @@ def arm_available(arm, tabref=None):
     return None if p.exists() else f"{arm}: {p} not found"
 
 
-def http_json(url, timeout=5, method=None):
-    with urllib.request.urlopen(urllib.request.Request(url, method=method), timeout=timeout) as r:
+def http_json(url, timeout=5):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
         return json.loads(r.read())
-
-
-WARM_PATH = "/warm"
-
-
-def warm_up(port, base, limit=30.0, poll=0.1):
-    """Loads one throwaway page before the timer starts, the same for every arm. A just-started Chrome holds its
-    first page load until it has read its profile (the cookie store), which under load takes seconds; without this
-    the wait lands in whichever arm's first call comes first. It goes through the DevTools HTTP endpoint only (no
-    tool's daemon is started and the starting about:blank tab is left alone): PUT /json/new?<base>/warm, poll
-    /json/list until that tab has committed (Chrome leaves a tab's title empty until its document commits, then
-    shows the page's title or host/path), then /json/close/<id>. The site answers /warm with its 404 page, and
-    Site.state() drops it from the page log. Never raises: returns the seconds spent, whether the page committed,
-    and why not."""
-    t0 = time.time()
-    devtools = f"http://127.0.0.1:{port}"
-    out = {"warmup_s": None, "warmup_committed": False}
-    tab = None
-    try:
-        tab = http_json(f"{devtools}/json/new?{base}{WARM_PATH}", method="PUT")["id"]
-        while time.time() - t0 < limit:
-            mine = [t for t in http_json(f"{devtools}/json/list") if t.get("id") == tab]
-            if mine and mine[0].get("title"):
-                out["warmup_committed"] = True
-                break
-            time.sleep(poll)
-        else:
-            out["warmup_error"] = f"no commit within {limit:.0f} s"
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        out["warmup_error"] = f"{type(e).__name__}: {e}"[:200]
-    finally:
-        if tab and not close_tab(devtools, tab, poll):
-            out["warmup_error"] = (out.get("warmup_error", "") + "; warm-up tab still listed after close").lstrip("; ")
-    out["warmup_s"] = round(time.time() - t0, 2)
-    return out
-
-
-def close_tab(devtools, tab, poll, limit=5.0):
-    """/json/close only starts closing a tab; it stays in /json/list for a moment, where a tool's first call could
-    pick it. Waits until it is gone. Whether it went."""
-    start = time.time()
-    try:
-        urllib.request.urlopen(f"{devtools}/json/close/{tab}", timeout=5).read()
-        while time.time() - start < limit:
-            if all(t.get("id") != tab for t in http_json(f"{devtools}/json/list")):
-                return True
-            time.sleep(poll)
-    except (OSError, ValueError):
-        pass
-    return False
-
-
-def without_warm(state):
-    """The site state with the warm-up's own page request taken out of its page log, so a verifier that reads the
-    pages opened (hw7 reads `navs`) sees only what the model did."""
-    if isinstance(state, dict) and isinstance(state.get("navs"), list):
-        state = dict(state, navs=[n for n in state["navs"] if not (isinstance(n, dict) and n.get("path") == WARM_PATH)])
-    return state
 
 
 def free_port():
@@ -615,7 +557,7 @@ class Site:
         return http_json(f"{self.base}/__reset?seed={seed}")
 
     def state(self):
-        return without_warm(http_json(f"{self.base}/__state"))
+        return http_json(f"{self.base}/__state")
 
     def stop(self):
         if self.proc is not None:

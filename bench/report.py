@@ -15,6 +15,9 @@
            recorded run's numbers beside them, and which kinds of call carry the output tokens
   all      the three
 
+Warm and cold rows are never pooled: models and replay show only rows run after the warm-up named by --warmup
+(default the current one, harness/warmup.py VERSION); --warmup cold shows the rows from before it.
+
 Usage: python3 -I bench/report.py models [--baseline] [--model claude-sonnet-5-5] [--taskset heldout|fresh]
                                           [--results f.jsonl ...]
        python3 -I bench/report.py latency [file.json]
@@ -73,7 +76,15 @@ def arms_prompt_frozen():
     return "frozen-2026-11-10"
 
 
-def load_by_taskset(paths, model, want, prompt=None):
+WARMUP_DEFAULT = "page-2026-11-15"
+
+
+def warmup_of(r):
+    """The warm-up a row ran after (harness/warmup.py VERSION); rows from before the field existed ran cold."""
+    return r.get("warmup") or "cold"
+
+
+def load_by_taskset(paths, model, want, prompt=None, warm=None):
     """Valid rows per task set (rows without one are heldout), normalized as heldout/report.py does plus the run's
     cost, with the hosts per arm and the invalid counts. Fresh rows never carry verifier text (the runner seals it);
     `why` is blanked here as well, so no report prints any."""
@@ -88,6 +99,8 @@ def load_by_taskset(paths, model, want, prompt=None):
             if model and r.get("model") != model or r.get("arm") not in want:
                 continue
             if prompt and prompt_of(r) != prompt:
+                continue
+            if warm and warmup_of(r) != warm:
                 continue
             ts = taskset_of(r)
             if r.get("valid") is False:
@@ -132,7 +145,8 @@ def models(a):
     if a.baseline:
         paths.append(str(BASELINE))
     want = set(a.arms.split(",")) if a.arms else set(ARMS)
-    by_set, hosts, skipped = load_by_taskset(paths, a.model, want, getattr(a, "prompt", None) or None)
+    by_set, hosts, skipped = load_by_taskset(paths, a.model, want, getattr(a, "prompt", None) or None,
+                                             getattr(a, "warmup", None) or None)
     ts = getattr(a, "taskset", None) or "heldout"
     if not by_set.get(ts):
         return [f"## Model runs: {ts} tasks", "", f"No valid {ts} rows in {paths}.", ""]
@@ -256,9 +270,11 @@ def recorded_cmds():
 
 def replay(a):
     rows, paths = load_replay(a.files)
-    rows = [r for r in rows if r.get("valid")]
+    warm = getattr(a, "warmup", WARMUP_DEFAULT)
+    rows = [r for r in rows if r.get("valid") and (not warm or warmup_of(r) == warm)]
     if not rows:
-        return ["## Replay", "", "No replay rows yet (python3 -I bench/replay/run.py).", ""]
+        return ["## Replay", "", f"No valid replay rows with warm-up '{warm or 'any'}' yet "
+                "(python3 -I bench/replay/run.py; --warmup cold for earlier rows).", ""]
     by = defaultdict(list)
     for r in rows:
         by[(r["arm"], r["task"])].append(r)
@@ -347,6 +363,9 @@ def main():
     ap.add_argument("--prompt", default="chained-2026-11-15",
                     help="models: only rows run under this tool-paragraph version (frozen-2026-11-10 for earlier "
                          "passes and --baseline rows; '' for all, which mixes them)")
+    ap.add_argument("--warmup", default=WARMUP_DEFAULT,
+                    help="models and replay: only rows run after this warm-up (harness/warmup.py VERSION; 'cold' for "
+                         "rows from before it, --baseline rows included; '' for all, which mixes them)")
     ap.add_argument("--model", default=None)
     ap.add_argument("--arms", default=None)
     ap.add_argument("--taskset", default=None, choices=TASKSETS, help="models: which task set (default heldout; fresh shows the aggregate ranking only)")
@@ -357,7 +376,7 @@ def main():
     if a.what in ("latency", "all"):
         out += latency(argparse.Namespace(files=a.files if a.what == "latency" else []))
     if a.what in ("replay", "all"):
-        out += replay(argparse.Namespace(files=a.files if a.what == "replay" else []))
+        out += replay(argparse.Namespace(files=a.files if a.what == "replay" else [], warmup=a.warmup))
     print("\n".join(out))
 
 

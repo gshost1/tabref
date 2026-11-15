@@ -64,6 +64,16 @@ already running with a DevTools endpoint on port P, and tabref is already pointe
 - The local site must start on a free port (a taken port is an error, never a shared site).
 - Results carry a generic host label (`laptop`, `vm`, `linux` for the old pass) and no operator paths.
 - Chrome on this laptop is 156.0.8078.79 (the VM had 157.0.8103.50).
+- Warm-up (from 2026-11-15, model passes and replay; the latency probe stays cold on purpose): after the launch and
+  before the timer, every arm's fresh Chrome loads one throwaway page from a server the harness owns on its own
+  127.0.0.1 port (`harness/warmup.py`), through the DevTools HTTP endpoint only (`/json/new`, `/json/list`,
+  `/json/close`), and the tab is closed before the first call. A just-started Chrome holds its first page load until
+  it has read the profile's cookie store, seconds under load; without the warm-up that wait fell on whichever arm
+  called first. The task site is never touched. Rows carry `"warmup": "page-2026-11-15"` with `warmup_s`,
+  `warmup_reached` and `warmup_tab_left`. A warm-up that failed, or a warm tab still open, makes the row invalid
+  (`invalid_reason` "warm-up failed: …" or "warm-up tab left open"), so no cold row passes as warm. Rows without
+  the field ran cold; `report.py` never pools the two (`--warmup`, default the current version; `--warmup cold` for
+  the earlier rows and the Linux baseline).
 
 ## Modes (one command each, from the repo root)
 
