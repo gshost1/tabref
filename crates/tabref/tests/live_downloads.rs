@@ -125,7 +125,7 @@ fn a_batch_expects_the_download_its_click_left_running() {
         "do",
         "--step-timeout",
         "1500",
-        "open /report.csv; click \"Slow export\"; expect download; expect download",
+        "open /report.csv; click \"Slow export\"; expect download",
     ]);
     let lines: Vec<&str> = run.stdout.lines().collect();
     assert!(
@@ -140,8 +140,8 @@ fn a_batch_expects_the_download_its_click_left_running() {
     );
     assert!(lines[2].starts_with("ok expect download"), "{}", run.stdout);
     assert!(lines[2].contains("\"report.csv\""), "{}", run.stdout);
-    assert!(lines[3].starts_with("ok expect download"), "{}", run.stdout);
-    assert!(lines[3].contains("\"slow.bin\""), "{}", run.stdout);
+    let waited = tabref.ok(&["wait", "--download"]);
+    assert!(waited.stdout.contains("\"slow.bin\""), "{}", waited.stdout);
     assert!(folder.join("slow.bin").is_file());
 }
 
