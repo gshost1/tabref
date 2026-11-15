@@ -17,7 +17,7 @@ use crate::{CdpConnection, PageSession};
 /// event and moves no focus.
 const ASSIGN_VALUE: &str = r"function(value) {
   const before = this.value;
-  if (before === value) return { status: 'unchanged', observed: before };
+  if (before === value) return { status: 'unchanged', observed: before, before };
   let owner = Object.getPrototypeOf(this);
   while (owner && !Object.getOwnPropertyDescriptor(owner, 'value')) owner = Object.getPrototypeOf(owner);
   const descriptor = owner ? Object.getOwnPropertyDescriptor(owner, 'value') : null;
@@ -30,12 +30,14 @@ const ASSIGN_VALUE: &str = r"function(value) {
   this.focus();
   this.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
   this.dispatchEvent(new Event('change', { bubbles: true }));
-  return { status: 'assigned', observed: this.value };
+  return { status: 'assigned', observed: this.value, before };
 }";
 
-/// Sets an input that takes its value whole to `target.text`. Text that is
-/// not a value of the input's type, or not in the input's own format, is
-/// `INVALID_ARGS` before the page is touched. A value the input rejects is
+/// Sets an input that takes its value whole to `target.text`, written in
+/// the input's own format first, so `2027-7-31` reaches a date input as
+/// `2027-07-31` and `7:30 PM` a time input as `19:30`. Text that is not a
+/// value of the input's type is `INVALID_ARGS` before the page is touched,
+/// naming the format. A value the input rejects is
 /// `ACTION_FAILED` and leaves the old value. A read-back that differs from
 /// the value is `ACTION_FAILED` with the observed value; a read-back that
 /// cannot be read leaves the outcome unverified.
@@ -47,11 +49,9 @@ pub(crate) fn assign_value(
     deadline: Deadline,
 ) -> Result<FillOutcome, AppError> {
     let kind = target.kind;
-    let value = match kind.canonical(target.text) {
-        Some(value) if value == target.text => value,
-        Some(value) => return Err(not_in_format(kind, target.text, &value)),
-        None => return Err(malformed(kind, target.text)),
-    };
+    let value = kind
+        .canonical(target.text)
+        .ok_or_else(|| malformed(kind, target.text))?;
     let reply = call_function(
         connection,
         session,
@@ -66,6 +66,10 @@ pub(crate) fn assign_value(
         .get("observed")
         .and_then(Value::as_str)
         .map(str::to_owned);
+    let previous = reply
+        .get("before")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let assigned = |unchanged| AssignedInput {
         input_type: kind.input_type().to_owned(),
         unchanged,
@@ -75,6 +79,7 @@ pub(crate) fn assign_value(
             observed,
             verified: true,
             assigned: Some(assigned(true)),
+            previous,
         }),
         Some("rejected") => Err(rejected(kind, &value, target.backend_node_id)),
         _ => match observed {
@@ -83,6 +88,7 @@ pub(crate) fn assign_value(
                 verified: observed.is_some(),
                 observed,
                 assigned: Some(assigned(false)),
+                previous,
             }),
         },
     }
@@ -104,7 +110,7 @@ pub(crate) fn part_of_input(backend_node_id: i64, input_type: &str) -> AppError 
         format!("DOM node {backend_node_id} is one part of a {input_type} input and has no value of its own"),
     )
     .with_suggestion(format!(
-        "Set the whole value with set-value on the {input_type} input's own ref{expected}"
+        "Fill the {input_type} input itself{expected}"
     ))
     .with_details(json!({
         "kind": "cdp_input_part",
@@ -124,19 +130,6 @@ fn malformed(kind: InputValueKind, text: &str) -> AppError {
     )
     .with_suggestion(takes(kind))
     .with_details(format_details(kind, "cdp_value_malformed", None))
-    .with_disposition(DeliverySemantics::not_delivered())
-}
-
-fn not_in_format(kind: InputValueKind, text: &str, value: &str) -> AppError {
-    AppError::new(
-        ErrorCode::InvalidArgs,
-        format!(
-            "'{text}' is not in the {} input's own format",
-            kind.input_type()
-        ),
-    )
-    .with_suggestion(format!("Pass '{value}'. {}", takes(kind)))
-    .with_details(format_details(kind, "cdp_value_not_canonical", Some(value)))
     .with_disposition(DeliverySemantics::not_delivered())
 }
 
@@ -165,13 +158,13 @@ fn adjusted(kind: InputValueKind, value: &str, observed: &str) -> AppError {
     AppError::new(
         ErrorCode::ActionFailed,
         format!(
-            "The {} input holds '{observed}' after set-value '{value}'",
+            "The {} input holds '{observed}' after fill '{value}'",
             kind.input_type()
         ),
     )
     .with_suggestion(
         "The input or the page changed the value, for example to fit min, max or step. \
-         Read it with 'get @ref --property value' before you set it again.",
+         Read it with 'tabref read <target>' before you fill it again.",
     )
     .with_details(details)
     .with_disposition(DeliverySemantics::delivered_unverified())

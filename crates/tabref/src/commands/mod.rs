@@ -1,20 +1,32 @@
+pub(crate) mod act_target;
+pub(crate) mod acted;
 pub(crate) mod action_report;
+pub(crate) mod batch_step;
 pub(crate) mod check;
 pub(crate) mod click;
 pub(crate) mod close;
+pub(crate) mod do_batch;
+pub(crate) mod do_expand;
+pub(crate) mod do_read_steps;
+pub(crate) mod do_step;
 pub(crate) mod fill;
 pub(crate) mod find;
 pub(crate) mod hover;
 pub(crate) mod js;
 pub(crate) mod open;
+pub(crate) mod page_url;
+pub(crate) mod page_view;
 pub(crate) mod press;
 pub(crate) mod read;
 pub(crate) mod scroll;
 pub(crate) mod select;
 pub(crate) mod skill;
 pub(crate) mod snap;
+pub(crate) mod step_done;
+pub(crate) mod step_words;
 pub(crate) mod tab;
 pub(crate) mod tabs;
+pub(crate) mod target_spec;
 pub(crate) mod upload;
 pub(crate) mod wait;
 pub(crate) mod wait_condition;
@@ -56,7 +68,7 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
     SessionOptions {
         cdp: cli.cdp.clone(),
         tab: cli.tab.clone(),
-        timeout_ms: cli.timeout,
+        timeout_ms: cli.timeout_ms(),
         launch,
         stdin: None,
     }
@@ -128,6 +140,10 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             )?,
         ),
         Command::Js { expression } => js::run(session, expression),
+        Command::Do {
+            steps,
+            step_timeout,
+        } => do_batch::run(session, steps.as_deref(), *step_timeout),
         Command::Tabs => tabs::run(session),
         Command::Tab { tab } => tab::run(session, tab),
         Command::Close { tab } => close::run(session, tab.as_deref()),

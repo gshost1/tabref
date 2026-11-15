@@ -121,6 +121,7 @@ impl Harness {
         let output = command
             .args(args)
             .env("TABREF_HOME", &self.home)
+            .env("TABREF_REFS", "long")
             .output()
             .unwrap();
         Run {

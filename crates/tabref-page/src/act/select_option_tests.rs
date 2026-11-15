@@ -18,9 +18,12 @@ fn answering(outcome: Value) -> CdpConnection {
 
 #[test]
 fn a_matching_option_returns_the_new_value() {
-    let mut connection = answering(json!({ "value": "green", "label": "Green" }));
-    let value = select_option(&mut connection, &session(), &token(4), "Green", deadline()).unwrap();
-    assert_eq!(value, "green");
+    let mut connection =
+        answering(json!({ "value": "green", "label": "Green", "previous": "Red" }));
+    let chosen =
+        select_option(&mut connection, &session(), &token(4), "Green", deadline()).unwrap();
+    assert_eq!(chosen.value, "green");
+    assert_eq!(chosen.previous.as_deref(), Some("Red"));
 }
 
 #[test]
@@ -41,4 +44,13 @@ fn a_non_select_is_not_supported() {
     let error =
         select_option(&mut connection, &session(), &token(4), "Green", deadline()).unwrap_err();
     assert_eq!(error.code, ErrorCode::ActionNotSupported);
+}
+
+#[test]
+fn several_options_at_the_best_rank_are_ambiguous() {
+    let mut connection = answering(json!({ "error": "ambiguous", "options": ["Ada A", "Ada B"] }));
+    let error =
+        select_option(&mut connection, &session(), &token(4), "Ada", deadline()).unwrap_err();
+    assert_eq!(error.code, ErrorCode::AmbiguousTarget);
+    assert!(error.message.contains("Ada A, Ada B"), "{}", error.message);
 }

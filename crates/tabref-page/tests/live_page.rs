@@ -93,7 +93,9 @@ fn form_controls_fill_select_check_upload_and_read_back() {
 
     let (_, country) = find(&snapshot, "combobox", "Country");
     assert_eq!(
-        select_option(&mut connection, &page, &country, "Sweden", deadline()).unwrap(),
+        select_option(&mut connection, &page, &country, "sweden", deadline())
+            .unwrap()
+            .value,
         "se"
     );
 

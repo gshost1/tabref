@@ -61,7 +61,7 @@ pub(crate) fn run_through_daemon(cli: &Cli) -> Option<Result<Outcome, AppError>>
         paths: resolved_paths(&cli.command),
         stdin,
     };
-    let wait = Duration::from_millis(cli.timeout).saturating_add(REPLY_SLACK);
+    let wait = Duration::from_millis(cli.timeout_ms()).saturating_add(REPLY_SLACK);
     for _ in 0..3 {
         match exchange(&address, &request, wait) {
             Exchange::Reply(reply) if reply.replaced => {

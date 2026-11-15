@@ -49,7 +49,7 @@ fn open_prints_a_snapshot_and_actions_read_back() {
     let email = opened.ref_for("textbox Email");
     let filled = tabref.ok(&["fill", &email, "ada@example.test"]);
     assert!(
-        filled.stdout.contains("= \"ada@example.test\""),
+        filled.stdout.contains("-> \"ada@example.test\""),
         "{}",
         filled.stdout
     );
@@ -68,7 +68,7 @@ fn open_prints_a_snapshot_and_actions_read_back() {
         tabref
             .ok(&["select", &size, "Large"])
             .stdout
-            .contains("selected \"Large\"")
+            .contains("-> \"Large\"")
     );
 
     let pressed = tabref.ok(&["press", "Enter", &email]);
@@ -103,7 +103,7 @@ fn a_click_that_navigates_prints_the_new_page_and_old_refs_go_stale() {
         "{}",
         clicked.stdout
     );
-    assert!(clicked.stdout.contains("heading \"Thank you\""));
+    assert!(clicked.stdout.contains("Thank you"), "{}", clicked.stdout);
 
     let stale = tabref.run(&["click", &finish]);
     assert!(!stale.ok);

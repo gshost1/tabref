@@ -9,7 +9,6 @@ impl Session {
     /// when the command runs in the daemon, else this process's own stdin.
     /// A command that reads its input (such as a batch of steps) reads it
     /// here, so it works the same in both.
-    #[allow(dead_code)]
     pub(crate) fn command_stdin(&mut self) -> Result<String, AppError> {
         if let Some(input) = self.scope.stdin.take() {
             return Ok(input);
