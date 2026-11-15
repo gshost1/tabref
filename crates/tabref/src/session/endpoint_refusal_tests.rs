@@ -1,6 +1,21 @@
+use std::net::SocketAddr;
+
 use tabref_cdp::ListenerVerdict;
 
-use super::{named_port_warning, unverified_port};
+use super::{named_port_warning, named_warning, unverified_port};
+
+#[test]
+fn a_named_endpoint_off_the_checked_address_always_warns() {
+    let v6: SocketAddr = "[::1]:9333".parse().unwrap();
+    let v4: SocketAddr = "127.0.0.1:9333".parse().unwrap();
+    let warning = named_warning(v6, &ListenerVerdict::Nothing).unwrap();
+    assert!(
+        warning.contains("[::1]:9333") && warning.contains("not checked"),
+        "{warning}"
+    );
+    assert_eq!(named_warning(v4, &ListenerVerdict::Nothing), None);
+    assert_eq!(named_warning(v6, &ListenerVerdict::Unknown), None);
+}
 
 fn untrusted(holder: Option<&str>) -> ListenerVerdict {
     ListenerVerdict::Untrusted {

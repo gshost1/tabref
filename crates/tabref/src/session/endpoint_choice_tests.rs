@@ -4,7 +4,18 @@ use serde_json::json;
 use tabref_cdp::{ListenerVerdict, ProcessView};
 use tabref_core::{AppError, ErrorCode};
 
-use super::{browser_is_gone, implicit_port, launched_check, launched_from};
+use super::{browser_is_gone, implicit_port, launched_check, launched_from, reached};
+
+#[test]
+fn a_port_that_changed_hands_or_points_elsewhere_is_an_error_not_no_browser() {
+    for kind in ["cdp_endpoint_changed", "cdp_endpoint_mismatch"] {
+        let refused: Result<u8, AppError> =
+            Err(AppError::new(ErrorCode::PermDenied, "x").with_details(json!({ "kind": kind })));
+        assert_eq!(reached(refused).unwrap_err().kind(), Some(kind));
+    }
+    assert_eq!(reached::<u8>(Err(refused())).unwrap(), None);
+    assert_eq!(reached(Ok(5_u8)).unwrap(), Some(5));
+}
 
 fn process(args: &[&str]) -> ProcessView {
     ProcessView {

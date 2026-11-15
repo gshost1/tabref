@@ -1,26 +1,46 @@
-//! The warning a connection carries to the first command that uses it: a
-//! `warning:` line before the command's text, and `data.warnings` in the
-//! JSON envelope. A kept daemon connection warns once, not on every command.
+//! The warning a connection tabref could not vouch for carries to every
+//! command that uses it, success or error: a `warning:` line before the
+//! command's text (or its error), and `warnings` in the JSON envelope's
+//! `data` (or the error's `details`). A kept daemon connection stays
+//! unverified, so it warns on each command, not only the first.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tabref_core::AppError;
 
 use super::Session;
 use crate::output::outcome::Outcome;
 
 impl Session {
-    /// `outcome` with the connection's warning, if it has one not yet shown.
+    /// `outcome` with the connection's warning, when it has one.
     pub(crate) fn with_warning(
-        &mut self,
+        &self,
         outcome: Result<Outcome, AppError>,
     ) -> Result<Outcome, AppError> {
-        let Ok(mut outcome) = outcome else {
-            return outcome;
-        };
-        if let Some(warning) = self.warning.take() {
-            add_warning(&mut outcome, &warning);
+        warned(outcome, self.warning.as_deref())
+    }
+}
+
+/// `outcome`, success or error, with `warning` added when there is one.
+pub(crate) fn warned(
+    outcome: Result<Outcome, AppError>,
+    warning: Option<&str>,
+) -> Result<Outcome, AppError> {
+    let Some(warning) = warning else {
+        return outcome;
+    };
+    match outcome {
+        Ok(mut outcome) => {
+            add_warning(&mut outcome, warning);
+            Ok(outcome)
         }
-        Ok(outcome)
+        Err(error) => {
+            let mut details = match error.details.clone() {
+                Some(Value::Object(details)) => details,
+                _ => Map::new(),
+            };
+            push_warning(&mut details, warning);
+            Err(error.with_details(Value::Object(details)))
+        }
     }
 }
 
@@ -31,11 +51,15 @@ pub(crate) fn add_warning(outcome: &mut Outcome, warning: &str) {
         format!("warning: {warning}\n{}", outcome.text)
     };
     if let Value::Object(data) = &mut outcome.data {
-        match data.get_mut("warnings") {
-            Some(Value::Array(list)) => list.push(json!(warning)),
-            _ => {
-                data.insert("warnings".to_owned(), json!([warning]));
-            }
+        push_warning(data, warning);
+    }
+}
+
+fn push_warning(data: &mut Map<String, Value>, warning: &str) {
+    match data.get_mut("warnings") {
+        Some(Value::Array(list)) => list.push(json!(warning)),
+        _ => {
+            data.insert("warnings".to_owned(), json!([warning]));
         }
     }
 }

@@ -4,18 +4,19 @@ use std::time::Duration;
 
 use tabref_cdp::{
     BrowserEndpoint, EndpointSpec, HeldPort, LaunchOptions, LaunchedBrowser, ListenerVerdict,
-    ProcessView, check_listener, connect, connect_held, is_chrome_family, launch_chrome,
-    launched_alive,
+    ProcessView, check_listener, connect, connect_held, endpoint_from_held, is_chrome_family,
+    launch_chrome, launched_alive,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 
 use super::connected_browser::ConnectedBrowser;
-use super::endpoint_refusal::{named_port_warning, unverified_port};
+use super::endpoint_refusal::{named_warning, unverified_port};
 use super::launch_record::{forget_launched, load_launched, save_launched};
 use super::session_options::SessionOptions;
 
 const DEFAULT_PORT: u16 = 9222;
 const PROBE_BUDGET: Duration = Duration::from_millis(300);
+const REFUSALS: [&str; 2] = ["cdp_endpoint_changed", "cdp_endpoint_mismatch"];
 
 /// Finds the browser and opens the one DevTools connection the command
 /// uses. tabref attaches only to a browser it can vouch for, in order:
@@ -57,7 +58,7 @@ pub(crate) fn connect_browser(
 fn named_browser(spec: &str, deadline: Deadline) -> Result<ConnectedBrowser, AppError> {
     let endpoint = EndpointSpec::parse(spec)?.resolve(deadline)?;
     let verdict = check_listener(endpoint.port(), &is_chrome_family);
-    let warning = named_port_warning(endpoint.port(), &verdict);
+    let warning = named_warning(endpoint.websocket_url.socket_addr(), &verdict);
     let connection = match &verdict {
         ListenerVerdict::Trusted(held) if at_checked_address(&endpoint, held) => {
             connect_held(&endpoint, held, deadline)?
@@ -157,16 +158,28 @@ fn default_port(
         return Ok(None);
     };
     let probe = deadline.capped(PROBE_BUDGET);
-    let Ok(endpoint) = EndpointSpec::Port(DEFAULT_PORT).resolve(probe) else {
+    let Some(endpoint) = reached(endpoint_from_held(&held, probe))? else {
         return Ok(None);
     };
-    Ok(connect_held(&endpoint, &held, deadline)
-        .ok()
-        .map(|connection| ConnectedBrowser {
+    Ok(
+        reached(connect_held(&endpoint, &held, deadline))?.map(|connection| ConnectedBrowser {
             endpoint,
             connection,
             warning: None,
-        }))
+        }),
+    )
+}
+
+/// A step of reaching the implicit port: its value, `None` when the port
+/// simply could not be reached (so the search goes on), or the error when
+/// the port changed hands or points elsewhere, which the caller must see
+/// rather than "no browser" or a second browser of tabref's own.
+pub(crate) fn reached<T>(step: Result<T, AppError>) -> Result<Option<T>, AppError> {
+    match step {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if REFUSALS.contains(&error.kind().unwrap_or_default()) => Err(error),
+        Err(_) => Ok(None),
+    }
 }
 
 /// The checked port 9222, when it may be tried without being named: only

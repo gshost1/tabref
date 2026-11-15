@@ -136,10 +136,63 @@ fn a_named_port_another_program_holds_works_but_warns() {
     );
 }
 
+#[test]
+fn a_named_ipv6_endpoint_is_never_taken_for_checked() {
+    if !live() {
+        return;
+    }
+    let tabref_home = common::harness("owner-named-v6");
+    let Some(proxy) = forward_on("[::1]:0", tabref_home.browser.port) else {
+        eprintln!("skipped: no IPv6 loopback");
+        return;
+    };
+    let endpoint = format!("ws://[::1]:{proxy}{}", tabref_home.browser.websocket_path);
+    let mut runs = Vec::new();
+    for _ in 0..2 {
+        runs.push(tabref(
+            &tabref_home.home,
+            &["--cdp", &endpoint, "--json", "tabs"],
+            false,
+        ));
+    }
+    let failed = tabref(
+        &tabref_home.home,
+        &["--cdp", &endpoint, "--json", "click", "@s00000000:e1"],
+        false,
+    );
+    stop_daemon(&tabref_home.home);
+    for run in &runs {
+        assert!(run.ok, "{}{}", run.stdout, run.stderr);
+        let warning = run.json()["data"]["warnings"][0]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            warning.contains(&format!("[::1]:{proxy} was not checked")),
+            "{}",
+            run.stdout
+        );
+    }
+    assert!(!failed.ok);
+    let error = &failed.json()["error"];
+    assert!(
+        error["details"]["warnings"][0]
+            .as_str()
+            .unwrap_or_default()
+            .contains("was not checked"),
+        "{error}"
+    );
+}
+
 /// A forwarder on a fresh loopback port, held by this test process, that
 /// relays every connection to `port`.
 fn forward_to(port: u16) -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    forward_on("127.0.0.1:0", port).unwrap()
+}
+
+/// [`forward_to`], listening on `address`; `None` when it cannot bind.
+fn forward_on(address: &str, port: u16) -> Option<u16> {
+    let listener = TcpListener::bind(address).ok()?;
     let own = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
         for client in listener.incoming().flatten() {
@@ -153,7 +206,7 @@ fn forward_to(port: u16) -> u16 {
             std::thread::spawn(move || std::io::copy(&mut upstream_in, &mut client_out));
         }
     });
-    own
+    Some(own)
 }
 
 #[test]

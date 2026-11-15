@@ -4,6 +4,8 @@
 //! only when the holder is a program of this user the message names, since a
 //! holder tabref cannot see belongs to another user or to root.
 
+use std::net::{Ipv4Addr, SocketAddr};
+
 use tabref_cdp::ListenerVerdict;
 use tabref_core::{AppError, DeliverySemantics, ErrorCode};
 
@@ -49,6 +51,26 @@ pub(crate) fn unverified_port(port: u16, verdict: &ListenerVerdict) -> AppError 
             "checked": !matches!(verdict, ListenerVerdict::CantCheck(_)),
         }))
         .with_disposition(DeliverySemantics::not_delivered())
+}
+
+/// The warning for an endpoint the user named, at `address`, given the
+/// owner check of its port's IPv4-reachable listeners. An address other than
+/// `127.0.0.1:<port>` (an IPv6 endpoint, or `localhost` that fell back to
+/// one) is a socket the check never looked at, so it always warns, whatever
+/// the check said; `None` only when a Chrome of this user holds the checked
+/// address, or when the platform cannot tell.
+pub(crate) fn named_warning(address: SocketAddr, verdict: &ListenerVerdict) -> Option<String> {
+    if matches!(verdict, ListenerVerdict::Unknown) {
+        return None;
+    }
+    let port = address.port();
+    if address != SocketAddr::from((Ipv4Addr::LOCALHOST, port)) {
+        return Some(format!(
+            "{address} was not checked (tabref checks who holds 127.0.0.1:{port} only); \
+             tabref attached only because --cdp names it"
+        ));
+    }
+    named_port_warning(port, verdict)
 }
 
 /// The warning for an endpoint the user named whose port tabref could not

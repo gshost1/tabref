@@ -19,6 +19,7 @@ use super::process_view::ProcessView;
 
 const LISTEN: &str = "0A";
 const V6_LOOPBACK: &str = "00000000000000000000000001000000";
+const MAX_NAME: usize = 64;
 const CHROME_FAMILY: &[&str] = &[
     "chrome",
     "chromium",
@@ -61,13 +62,17 @@ pub(crate) fn check_in(
     uid: u32,
     trusted: &dyn Fn(&ProcessView) -> bool,
 ) -> ListenerVerdict {
-    let listening = match listening_inodes(proc_root, port) {
-        Ok(inodes) => inodes,
+    let sockets = match listening_sockets(proc_root, port) {
+        Ok(sockets) => sockets,
         Err(what) => return ListenerVerdict::CantCheck(what),
     };
-    if listening.is_empty() {
+    if sockets.is_empty() {
         return ListenerVerdict::Nothing;
     }
+    if sockets.iter().any(|(_, owner)| *owner != uid) {
+        return ListenerVerdict::Untrusted { holder: None };
+    }
+    let listening: BTreeSet<u64> = sockets.into_iter().map(|(inode, _)| inode).collect();
     let Ok(entries) = std::fs::read_dir(proc_root) else {
         return ListenerVerdict::CantCheck("the process list could not be read".to_owned());
     };
@@ -100,7 +105,9 @@ pub(crate) fn check_in(
     })
 }
 
-/// A process as an error names it: `python3 (pid 1234)`.
+/// A process as an error names it: `"python3" (pid 1234)`. The name comes
+/// from a binary anyone can name, so it is quoted, stripped of control
+/// characters (a newline would forge a line of the message) and cut to 64.
 fn describe(view: &ProcessView) -> String {
     let name = view.exe_name();
     let name = if name.is_empty() {
@@ -114,7 +121,12 @@ fn describe(view: &ProcessView) -> String {
     } else {
         name
     };
-    format!("{name} (pid {})", view.pid)
+    let name: String = name
+        .chars()
+        .filter(|c| !c.is_control() && *c != '"')
+        .take(MAX_NAME)
+        .collect();
+    format!("\"{name}\" (pid {})", view.pid)
 }
 
 #[cfg(unix)]
@@ -156,18 +168,27 @@ fn socket_inodes(dir: &Path) -> Vec<u64> {
 /// The inodes of every socket listening on `port`, on any address but
 /// `[::1]`.
 pub(crate) fn listening_inodes(proc_root: &Path, port: u16) -> Result<BTreeSet<u64>, String> {
+    Ok(listening_sockets(proc_root, port)?
+        .into_iter()
+        .map(|(inode, _)| inode)
+        .collect())
+}
+
+/// Every socket listening on `port`, on any address but `[::1]`, as its
+/// inode and the uid that owns it.
+fn listening_sockets(proc_root: &Path, port: u16) -> Result<Vec<(u64, u32)>, String> {
     let v4 = std::fs::read_to_string(proc_root.join("net/tcp"))
         .map_err(|_| "the TCP socket table could not be read".to_owned())?;
-    let mut inodes = listeners(&v4, port, None);
+    let mut sockets = listeners(&v4, port, None);
     match std::fs::read_to_string(proc_root.join("net/tcp6")) {
-        Ok(v6) => inodes.extend(listeners(&v6, port, Some(V6_LOOPBACK))),
+        Ok(v6) => sockets.extend(listeners(&v6, port, Some(V6_LOOPBACK))),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err("the TCP6 socket table could not be read".to_owned()),
     }
-    Ok(inodes)
+    Ok(sockets)
 }
 
-fn listeners(table: &str, port: u16, except: Option<&str>) -> BTreeSet<u64> {
+fn listeners(table: &str, port: u16, except: Option<&str>) -> Vec<(u64, u32)> {
     table
         .lines()
         .skip(1)
@@ -177,9 +198,10 @@ fn listeners(table: &str, port: u16, except: Option<&str>) -> BTreeSet<u64> {
             let listening = fields.get(3) == Some(&LISTEN)
                 && u16::from_str_radix(raw_port, 16).ok() == Some(port)
                 && except.is_none_or(|skip| !skip.eq_ignore_ascii_case(address));
-            listening
-                .then(|| fields.get(9)?.parse::<u64>().ok())
-                .flatten()
+            if !listening {
+                return None;
+            }
+            Some((fields.get(9)?.parse().ok()?, fields.get(7)?.parse().ok()?))
         })
         .collect()
 }

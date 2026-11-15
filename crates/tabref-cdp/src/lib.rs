@@ -18,7 +18,7 @@ pub use discovery::connect::{connect, connect_held};
 pub use discovery::endpoint_source::EndpointSource;
 pub use discovery::endpoint_spec::EndpointSpec;
 pub use discovery::held_port::HeldPort;
-pub use discovery::json_version::endpoint_from_port;
+pub use discovery::json_version::{endpoint_from_held, endpoint_from_port};
 pub use discovery::listener_owner::{check_listener, is_chrome_family};
 pub use discovery::listener_verdict::ListenerVerdict;
 pub use discovery::process_view::ProcessView;

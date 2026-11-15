@@ -3,7 +3,9 @@
 //! the socket tables cannot be read). A live browser keeps its port, so a
 //! browser that still runs means the port is still its own. A pid alone is
 //! not enough, as pids are reused: the process must also have the start time
-//! recorded at launch (Linux: `/proc/<pid>/stat`; macOS: `ps -o lstart=`).
+//! recorded at launch (Linux: `/proc/<pid>/stat`; macOS: `/bin/ps -o
+//! lstart=` in the C locale and UTC, so the text never depends on the
+//! caller's environment).
 //! Windows has neither without unsafe code, so there the profile's
 //! `lockfile`, which a running Chrome holds open exclusively, says it.
 
@@ -22,8 +24,10 @@ pub fn process_start(pid: u32) -> Option<String> {
     }
     #[cfg(target_os = "macos")]
     {
-        let output = std::process::Command::new("ps")
+        let output = std::process::Command::new("/bin/ps")
             .args(["-o", "lstart=", "-p", &pid.to_string()])
+            .env("LC_ALL", "C")
+            .env("TZ", "UTC0")
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();

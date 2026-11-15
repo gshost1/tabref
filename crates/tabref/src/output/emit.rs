@@ -27,7 +27,20 @@ pub(crate) fn emit_error(command: &str, error: &AppError, json: bool) {
 }
 
 pub(crate) fn error_text(error: &AppError) -> String {
-    let mut text = format!("error {}", error.code.as_str());
+    let mut text = String::new();
+    let warnings = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("warnings"))
+        .and_then(serde_json::Value::as_array);
+    for warning in warnings
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+    {
+        text.push_str(&format!("warning: {warning}\n"));
+    }
+    text.push_str(&format!("error {}", error.code.as_str()));
     if let Some(kind) = error.kind() {
         text.push_str(&format!(" ({kind})"));
     }

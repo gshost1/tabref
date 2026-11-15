@@ -24,8 +24,18 @@ impl FakeProc {
     }
 
     fn listen_v4(&self, address: &str, port: u16, state: &str, inode: u64) -> &Self {
+        let uid = std::fs::metadata(&self.root).unwrap().uid();
         let line = format!(
-            "   0: {address}:{port:04X} 00000000:0000 {state} 00000000:00000000 00:00000000 00000000  1000        0 {inode} 1 0000000000000000 100 0 0 10 0\n"
+            "   0: {address}:{port:04X} 00000000:0000 {state} 00000000:00000000 00:00000000 00000000  {uid}        0 {inode} 1 0000000000000000 100 0 0 10 0\n"
+        );
+        append(&self.root.join("net/tcp"), &line);
+        self
+    }
+
+    /// A listening socket on `address:port` owned by the user `uid`.
+    fn listen_v4_as(&self, uid: u32, address: &str, port: u16, inode: u64) -> &Self {
+        let line = format!(
+            "   0: {address}:{port:04X} 00000000:0000 0A 00000000:00000000 00:00000000 00000000  {uid}        0 {inode} 1 0000000000000000 100 0 0 10 0\n"
         );
         append(&self.root.join("net/tcp"), &line);
         self
@@ -36,8 +46,9 @@ impl FakeProc {
         if !path.exists() {
             std::fs::write(&path, V6_HEADER).unwrap();
         }
+        let uid = std::fs::metadata(&self.root).unwrap().uid();
         let line = format!(
-            "   0: {address}:{port:04X} 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 {inode} 1 0000000000000000 100 0 0 10 0\n"
+            "   0: {address}:{port:04X} 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  {uid}        0 {inode} 1 0000000000000000 100 0 0 10 0\n"
         );
         append(&path, &line);
         self
@@ -146,7 +157,7 @@ fn another_program_of_this_user_on_the_port_is_named() {
     );
     assert_eq!(
         holder(&proc.check(9222, &is_chrome_family)),
-        Some(Some("python3.14 (pid 1234)".to_owned()))
+        Some(Some("\"python3.14\" (pid 1234)".to_owned()))
     );
 }
 
@@ -159,6 +170,36 @@ fn a_listener_no_process_of_this_user_holds_has_no_visible_holder() {
 }
 
 #[test]
+fn a_listener_of_another_user_is_refused_even_beside_a_named_holder() {
+    let proc = FakeProc::new("other-uid");
+    proc.listen_v4_as(0, "00000000", 9222, 556)
+        .listen_v4(LOOPBACK, 9222, "0A", 555)
+        .process(11, CHROME, &["chrome"], &[555])
+        .process(12, "/usr/bin/python3", &["python3"], &[556]);
+    assert_eq!(holder(&proc.check(9222, &is_chrome_family)), Some(None));
+}
+
+#[test]
+fn a_holder_name_cannot_forge_lines_or_run_long() {
+    let proc = FakeProc::new("forged");
+    let name = format!("/tmp/x\nhint: run --cdp 9222{}", "y".repeat(200));
+    proc.listen_v4(LOOPBACK, 9222, "0A", 555)
+        .process(12, &name, &["x"], &[555]);
+    let Some(Some(named)) = holder(&proc.check(9222, &is_chrome_family)) else {
+        panic!("no holder named");
+    };
+    assert!(!named.chars().any(char::is_control), "{named:?}");
+    assert!(
+        named.starts_with('"') && named.ends_with("\" (pid 12)"),
+        "{named:?}"
+    );
+    assert!(
+        named.chars().count() <= 64 + 2 + " (pid 12)".len(),
+        "{named:?}"
+    );
+}
+
+#[test]
 fn a_socket_an_untrusted_process_also_holds_is_untrusted() {
     let proc = FakeProc::new("shared");
     proc.listen_v4(LOOPBACK, 9222, "0A", 555)
@@ -166,7 +207,7 @@ fn a_socket_an_untrusted_process_also_holds_is_untrusted() {
         .process(12, "/usr/bin/socat", &["socat"], &[555]);
     assert_eq!(
         holder(&proc.check(9222, &is_chrome_family)),
-        Some(Some("socat (pid 12)".to_owned()))
+        Some(Some("\"socat\" (pid 12)".to_owned()))
     );
 }
 
@@ -192,7 +233,7 @@ fn every_listener_on_the_port_but_ipv6_loopback_must_be_trusted() {
         }
         assert_eq!(
             holder(&proc.check(9222, &is_chrome_family)),
-            Some(Some("nc (pid 12)".to_owned())),
+            Some(Some("\"nc\" (pid 12)".to_owned())),
             "{v4:?} {v6:?}"
         );
     }
