@@ -16,6 +16,9 @@ pub(crate) enum Command {
         /// Open the address in a new tab, which becomes the current tab
         #[arg(long)]
         new_tab: bool,
+        /// Save this browser's downloads in DIR from now on
+        #[arg(long, value_name = "DIR", value_parser = absolute_path)]
+        download_dir: Option<PathBuf>,
     },
     /// Print the page view: text in reading order, controls with refs
     Snap {
@@ -141,6 +144,9 @@ pub(crate) enum Command {
         /// Until the network has been quiet for 500 ms
         #[arg(long)]
         idle: bool,
+        /// Until a download finishes; prints its path, name, address, size and time
+        #[arg(long)]
+        download: bool,
     },
     /// Run several steps in one call, one per line, from STEPS or stdin
     Do {
@@ -165,6 +171,12 @@ pub(crate) enum Command {
         #[arg(value_parser = ["start", "status", "stop"])]
         action: String,
     },
+}
+
+/// `text` as an absolute path, made so where the command was typed, as a
+/// daemon runs it from another directory.
+fn absolute_path(text: &str) -> Result<PathBuf, String> {
+    std::path::absolute(text).map_err(|error| error.to_string())
 }
 
 impl Command {

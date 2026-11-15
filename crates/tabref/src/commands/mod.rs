@@ -9,6 +9,9 @@ pub(crate) mod do_batch;
 pub(crate) mod do_expand;
 pub(crate) mod do_read_steps;
 pub(crate) mod do_step;
+pub(crate) mod download_folder;
+pub(crate) mod download_place;
+pub(crate) mod downloads;
 pub(crate) mod fill;
 pub(crate) mod find;
 pub(crate) mod hover;
@@ -79,7 +82,12 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
 /// Runs `command` against `session`, in-process or inside the daemon.
 pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
-        Command::Open { url, new_tab, .. } => open::run(session, url, *new_tab),
+        Command::Open {
+            url,
+            new_tab,
+            download_dir,
+            ..
+        } => open::run(session, url, (*new_tab, download_dir.as_deref())),
         Command::Snap {
             all,
             root,
@@ -134,13 +142,14 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             gone,
             url,
             idle,
+            download,
         } => wait::run(
             session,
             wait_condition::Condition::from_flags(
                 text.as_deref(),
                 gone.as_deref(),
                 url.as_deref(),
-                *idle,
+                (*idle, *download),
             )?,
         ),
         Command::Js { expression } => js::run(session, expression),

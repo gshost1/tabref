@@ -3,9 +3,11 @@ use std::time::Duration;
 
 use tabref_cdp::{PageSession, navigate_by};
 use tabref_core::{AppError, Deadline};
-use tabref_page::PageInfo;
+use tabref_page::{DownloadRecord, PageInfo};
 
 use super::action_report::set;
+use super::download_folder::choose_folder;
+use super::downloads;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::page_url::resolve_url;
 use crate::output::outcome::Outcome;
@@ -24,9 +26,18 @@ const SNAPSHOT_RESERVE_MS: u64 = 1_000;
 /// quarters of the deadline is snapshotted as it stands, with a note. The
 /// browser may take until one second before the deadline to start the new
 /// document, as a browser that has just started can hold its first page
-/// load for seconds.
-pub(crate) fn run(session: &mut Session, url: &str, new_tab: bool) -> Result<Outcome, AppError> {
+/// load for seconds. An address that downloads reports the saved file and
+/// leaves the page as it was. `download_dir` chooses where this browser's
+/// downloads land from now on.
+pub(crate) fn run(
+    session: &mut Session,
+    url: &str,
+    (new_tab, download_dir): (bool, Option<&Path>),
+) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
+    if let Some(dir) = download_dir {
+        choose_folder(session, dir)?;
+    }
     if new_tab {
         let url = new_tab_address(session, url)?;
         let (index, page) = open_tab(session, deadline)?;
@@ -62,13 +73,19 @@ fn load(
     let remaining = deadline.remaining_ms();
     let load = remaining * 3 / 4;
     let commit = remaining.saturating_sub(SNAPSHOT_RESERVE_MS).max(load);
-    let unfinished = match navigate_by(
+    let _ = downloads::enable(session, deadline);
+    let navigated = navigate_by(
         session.connection(),
         page,
         url,
         deadline.capped(Duration::from_millis(commit)),
         deadline.capped(Duration::from_millis(load)),
-    ) {
+    );
+    let started = downloads::after_action(session, deadline, downloads::grace_after(&navigated));
+    if !started.is_empty() {
+        return Ok(downloaded(&started));
+    }
+    let unfinished = match navigated {
         Ok(()) => false,
         Err(error) if error.kind() == Some("cdp_load_timeout") => true,
         Err(error) => return Err(error),
@@ -86,6 +103,17 @@ fn load(
         serde_json::json!(!unfinished),
     );
     Ok(report)
+}
+
+/// An `open` whose address downloaded: one line per download, the page
+/// left as it was.
+fn downloaded(started: &[DownloadRecord]) -> Outcome {
+    let lines: Vec<String> = started.iter().map(downloads::download_line).collect();
+    let data: Vec<serde_json::Value> = started.iter().map(downloads::download_json).collect();
+    Outcome::new(
+        lines.join("\n"),
+        serde_json::json!({ "opened": "download", "downloads": data }),
+    )
 }
 
 /// A navigation the browser did not start in time, for `open` alone:

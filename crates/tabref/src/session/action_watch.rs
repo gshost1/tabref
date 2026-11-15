@@ -7,19 +7,22 @@ use tabref_page::{PageInfo, WatchedAction, follow_late_navigation};
 
 use super::Session;
 use super::action_effects::ActionEffects;
+use crate::commands::downloads;
 
 const NEW_TAB_LOAD: Duration = Duration::from_millis(3_000);
 const LATE_WINDOW: Duration = Duration::from_millis(60);
 
 impl Session {
     /// Starts watching `tab_id` for what the next action sets off: its
-    /// navigations, requests, dialogs and DOM changes, and tabs it opens.
+    /// navigations, requests, dialogs and DOM changes, tabs it opens, and
+    /// downloads it starts.
     pub(crate) fn watch_action(
         &mut self,
         tab_id: &str,
         deadline: Deadline,
     ) -> Result<WatchedAction, AppError> {
         let tab = self.attach(tab_id)?;
+        let _ = downloads::enable(self, deadline);
         let watched = WatchedAction::start(self.connection(), &tab, deadline)?;
         let connection = self.connection();
         connection.call(
@@ -41,6 +44,7 @@ impl Session {
         deadline: Deadline,
     ) -> Result<ActionEffects, AppError> {
         let (settled, page) = watched.finish(self.connection(), deadline)?;
+        let downloads = downloads::after_action(self, deadline, Duration::ZERO);
         let opener = watched.session.target_id.clone();
         let new_tab = self
             .connection()
@@ -61,6 +65,7 @@ impl Session {
             url_before: watched.mark.url.clone(),
             page,
             main_frame: watched.main_frame.clone(),
+            downloads,
         })
     }
 }

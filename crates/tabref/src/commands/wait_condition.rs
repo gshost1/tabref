@@ -8,6 +8,7 @@ pub(crate) enum Condition {
     Gone(String),
     Url(String),
     Idle,
+    Download,
 }
 
 impl Condition {
@@ -17,7 +18,7 @@ impl Condition {
         text: Option<&str>,
         gone: Option<&str>,
         url: Option<&str>,
-        idle: bool,
+        (idle, download): (bool, bool),
     ) -> Result<Self, AppError> {
         let mut named = Vec::new();
         named.extend(text.map(|text| Self::Text(text.to_owned())));
@@ -26,15 +27,18 @@ impl Condition {
         if idle {
             named.push(Self::Idle);
         }
+        if download {
+            named.push(Self::Download);
+        }
         match named.len() {
             1 => Ok(named.remove(0)),
             _ => Err(AppError::invalid_args(
-                "Name exactly one of --text, --gone, --url or --idle",
+                "Name exactly one of --text, --gone, --url, --idle or --download",
             )),
         }
     }
 
-    /// `text "Saved"`, `gone "Loading"`, `url ~saved=1`, `idle`, or bare
+    /// `text "Saved"`, `gone "Loading"`, `url ~saved=1`, `idle`, `download`, or bare
     /// text, which waits for that text to show.
     pub(crate) fn from_words(words: &[Word]) -> Result<Self, AppError> {
         let joined = |rest: &[Word]| {
@@ -48,6 +52,7 @@ impl Condition {
             [first, rest @ ..] if first.is_keyword("gone") => Self::Gone(joined(rest)),
             [first, rest @ ..] if first.is_keyword("url") => Self::Url(url_part(&joined(rest))),
             [first] if first.is_keyword("idle") => Self::Idle,
+            [first] if first.is_keyword("download") => Self::Download,
             rest => Self::Text(joined(rest)),
         };
         match &condition {
@@ -66,6 +71,7 @@ impl Condition {
             Self::Gone(text) => format!("text {text:?} to go"),
             Self::Url(url) => format!("the address to contain {url:?}"),
             Self::Idle => "the network to go quiet".to_owned(),
+            Self::Download => "a download to finish".to_owned(),
         }
     }
 }

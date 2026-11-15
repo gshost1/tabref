@@ -10,6 +10,7 @@ use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_elemen
 
 use super::act_target::resolve_target;
 use super::batch_step::BatchStep;
+use super::downloads;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open::normalize_url;
 use super::page_url::{resolve_url, short_url};
@@ -91,7 +92,19 @@ fn opened_line(
     deadline: Deadline,
 ) -> Result<(String, Value), AppError> {
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
-    match navigate(session.connection(), page, url, navigation) {
+    let _ = downloads::enable(session, deadline);
+    let navigated = navigate(session.connection(), page, url, navigation);
+    let started = downloads::after_action(session, deadline, downloads::grace_after(&navigated));
+    if !started.is_empty() {
+        let lines: Vec<String> = started.iter().map(downloads::download_line).collect();
+        let data: Vec<Value> = started.iter().map(downloads::download_json).collect();
+        let text = format!("ok open {url}: {}", lines.join("; "));
+        return Ok((
+            text,
+            json!({ "action": "open", "opened": "download", "downloads": data }),
+        ));
+    }
+    match navigated {
         Ok(()) => {}
         Err(error) if error.kind() == Some("cdp_load_timeout") => {}
         Err(error) => return Err(error),

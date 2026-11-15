@@ -9,6 +9,7 @@ fn open(url: &str) -> Command {
         launch: false,
         headed: false,
         new_tab: false,
+        download_dir: None,
     }
 }
 

@@ -6,6 +6,7 @@ use tabref_cdp::{PageSession, is_timeout};
 use tabref_core::{AppError, Deadline, DeliverySemantics};
 use tabref_page::{wait_for_text, wait_for_url};
 
+use super::downloads::{download_json, download_line, wait_download};
 use super::wait_condition::Condition;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -20,6 +21,18 @@ const MATCHES_SHOWN: usize = 5;
 pub(crate) fn run(session: &mut Session, condition: Condition) -> Result<Outcome, AppError> {
     let started = Instant::now();
     let deadline = session.deadline();
+    if condition == Condition::Download {
+        let download = wait_download(session, deadline)?;
+        let elapsed = started.elapsed().as_millis();
+        let line = download_line(&download);
+        return Ok(Outcome::new(
+            format!(
+                "ok after {elapsed} ms waiting for {}\n{line}",
+                condition.describe()
+            ),
+            json!({ "elapsed_ms": elapsed, "detail": line, "download": download_json(&download) }),
+        ));
+    }
     let detail = wait_for(session, &condition, deadline, true)?;
     let elapsed = started.elapsed().as_millis();
     let mut text = format!("ok after {elapsed} ms waiting for {}", condition.describe());
@@ -41,7 +54,12 @@ pub(crate) fn wait_for(
     deadline: Deadline,
     show: bool,
 ) -> Result<String, AppError> {
-    let page = session.page()?;
+    let page = match condition {
+        Condition::Download => {
+            return wait_download(session, deadline).map(|download| download_line(&download));
+        }
+        _ => session.page()?,
+    };
     match condition {
         Condition::Text(text) | Condition::Gone(text) => {
             let present = matches!(condition, Condition::Text(_));
@@ -64,6 +82,9 @@ pub(crate) fn wait_for(
         Condition::Idle => {
             wait_idle(session, &page, condition, deadline)?;
             Ok(String::new())
+        }
+        Condition::Download => {
+            wait_download(session, deadline).map(|download| download_line(&download))
         }
     }
 }

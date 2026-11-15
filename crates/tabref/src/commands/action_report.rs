@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
+use super::downloads::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
 use crate::output::outcome::Outcome;
@@ -65,6 +66,9 @@ pub(crate) fn step_report(
     for dialog in effects.dialogs() {
         line.push_str(&format!("; {}", dialog_line(dialog)));
     }
+    for download in &effects.downloads {
+        line.push_str(&format!("; {}", download_line(download)));
+    }
     if effects.new_tab.is_some() {
         line.push_str(" -> a new tab, now the current tab");
     } else if let Some(page) = &effects.page {
@@ -93,10 +97,15 @@ fn effect_block(
     known: &HashSet<String>,
 ) -> Result<(Vec<String>, Value), AppError> {
     let mut lines: Vec<String> = effects.dialogs().iter().map(dialog_line).collect();
+    lines.extend(effects.downloads.iter().map(download_line));
     let mut data = json!({
         "dialogs": effects.dialogs(),
         "navigated": effects.settled.navigated,
     });
+    if !effects.downloads.is_empty() {
+        let downloads: Vec<Value> = effects.downloads.iter().map(download_json).collect();
+        merge(&mut data, json!({ "downloads": downloads }));
+    }
     if let Some(tab) = &effects.new_tab {
         lines.push("opened a new tab, now the current tab".to_owned());
         let report = current_page_view(session)?;
@@ -153,6 +162,7 @@ fn nothing_seen(acted: &Acted) -> bool {
         && !effects.settled.same_document
         && effects.new_tab.is_none()
         && effects.dialogs().is_empty()
+        && effects.downloads.is_empty()
         && effects
             .page
             .as_ref()
