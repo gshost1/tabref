@@ -4,6 +4,7 @@ use tabref_cdp::PageSession;
 use tabref_core::{AccessibilityNode, AppError, Deadline};
 use tabref_page::{ElementToken, LocateIntent, locate, snapshot_page_within_budget};
 
+use super::action_report::styled;
 use super::target_spec::TargetSpec;
 use crate::session::Session;
 use crate::view::node_line::quote_text;
@@ -34,7 +35,7 @@ pub(crate) fn resolve_target(
         TargetSpec::Ref(text) => {
             let target = session.resolve_ref(text)?;
             Ok(ActTarget {
-                label: target.label(),
+                label: styled(&target.label()),
                 token: target.token,
                 session: target.session,
                 tab_id: target.tab_id,
