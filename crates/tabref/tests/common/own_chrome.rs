@@ -75,6 +75,7 @@ pub fn own_chrome(name: &str, downloads: &Path) -> Harness {
             websocket_path: active.websocket_path,
             profile_dir,
             headless: true,
+            started: None,
         },
         home: harness_home(name),
     }
