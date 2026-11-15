@@ -255,3 +255,34 @@ fn a_stale_ref_names_its_fresh_candidate() {
     );
     assert!(stale.stderr.contains("fresh: @s"), "{}", stale.stderr);
 }
+
+#[test]
+fn short_refs_keep_their_numbers_and_go_stale_with_their_document() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    let opened = tabref.ok(&["open", &format!("{base}/widgets")]);
+    let long = opened.ref_for("button \"Noop\"");
+    let short = long.rsplit(':').next().unwrap().to_owned();
+    let again = tabref.ok(&["snap"]);
+    assert_eq!(
+        again.ref_for("button \"Noop\"").rsplit(':').next(),
+        Some(short.as_str())
+    );
+    let clicked = tabref.ok(&["click", &short]);
+    assert!(
+        clicked.stdout.starts_with("clicked @s"),
+        "{}",
+        clicked.stdout
+    );
+    tabref.ok(&["js", "location.reload(); 1"]);
+    tabref.ok(&["wait", "--text", "Nothing yet"]);
+    tabref.ok(&["snap"]);
+    let stale = tabref.run(&["click", &short]);
+    assert!(
+        stale.stderr.starts_with("error STALE_REF"),
+        "{}",
+        stale.stderr
+    );
+}

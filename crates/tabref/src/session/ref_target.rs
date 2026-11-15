@@ -1,16 +1,14 @@
-use std::time::SystemTime;
+use std::collections::HashMap;
 
 use serde_json::json;
 use tabref_cdp::PageSession;
-use tabref_core::{
-    AccessibilityNode, AppError, DeliverySemantics, ErrorCode, RefEntry, RefId, RefMap,
-};
+use tabref_core::{AccessibilityNode, AppError, ErrorCode, RefEntry, RefId, RefMap, is_ref_able};
 use tabref_page::{ElementToken, read_node_identity};
 
 use super::Session;
 use crate::view::node_line::node_line;
 
-const RECENT_VIEWS: usize = 6;
+const RESTART_AFTER: usize = 2_000;
 const FRESH_SHOWN: usize = 3;
 
 /// A ref resolved to a live element: the ref, what its snapshot recorded,
@@ -61,9 +59,11 @@ impl Session {
     /// element: its document must be the one the snapshot read, and its role
     /// and accessible name must still be the recorded ones. Anything else is
     /// `STALE_REF` naming the fresh candidate, so a ref never reaches a
-    /// different element. A short ref `e4` is looked up in the current tab's
-    /// latest snapshot, and only when every recent view of the same address
-    /// gave `e4` to the same element. The ref's tab becomes the current tab.
+    /// different element. A short ref `e4` is element 4 of the current tab's
+    /// latest snapshot; numbers stay with their element across a tab's
+    /// snapshots, so a short ref the agent holds names what it named, or is
+    /// `STALE_REF` once that element is gone. The ref's tab becomes the
+    /// current tab.
     pub(crate) fn resolve_ref(&mut self, text: &str) -> Result<RefTarget, AppError> {
         let ref_id = match short_element(text) {
             Some(element) => self.expand_short_ref(element)?,
@@ -102,40 +102,38 @@ impl Session {
     }
 
     fn expand_short_ref(&mut self, element: u32) -> Result<RefId, AppError> {
-        let latest = self.store().latest_id().ok_or_else(|| {
-            AppError::invalid_args(format!(
-                "e{element} needs a snapshot; run 'tabref snap' first"
-            ))
-        })?;
-        let map = self.store().load(&latest)?;
         let tab = self.tab_id()?;
-        let short = format!("e{element}");
-        if map.tab_id != tab {
-            return Err(AppError::stale_ref_because(format!(
-                "{short} names the latest snapshot, which shows another tab; use the full ref @{latest}:{short}"
-            )));
-        }
-        let entry = map
-            .get(element)
-            .ok_or_else(|| AppError::stale_ref(&format!("@{latest}:{short}")))?;
-        for (id, other) in recent_maps(self, &latest) {
-            let differs = other.tab_id == map.tab_id
-                && other.url == map.url
-                && other
-                    .get(element)
-                    .is_some_and(|seen| seen.token != entry.token);
-            if differs {
-                return Err(AppError::new(
-                    ErrorCode::AmbiguousTarget,
-                    format!(
-                        "{short} named other elements in earlier views of this page; use the full ref: @{latest}:{short} (latest) or @{id}:{short}"
-                    ),
-                )
-                .with_details(json!({ "kind": "short_ref_ambiguous" }))
-                .with_disposition(DeliverySemantics::not_delivered()));
-            }
-        }
+        let latest = self
+            .store()
+            .read_state(&latest_name(&tab))
+            .map(|id| id.trim().to_owned())
+            .ok_or_else(|| {
+                AppError::invalid_args(format!(
+                    "e{element} needs a snapshot of this tab; run 'tabref snap' first"
+                ))
+            })?;
         Ok(RefId::new(latest, element))
+    }
+
+    /// The refs a new snapshot of `tab_id` starts from: the tab's latest
+    /// snapshot's, so every element keeps its number and new elements get
+    /// new ones. A tab whose numbers ran past 2,000 starts again at 1 when
+    /// it shows a new document.
+    pub(crate) fn continued_refs(&self, tab_id: &str, url: &str) -> RefMap {
+        let mut map = self
+            .store()
+            .read_state(&latest_name(tab_id))
+            .and_then(|id| self.store().load(id.trim()).ok())
+            .filter(|map| map.tab_id == tab_id)
+            .unwrap_or_else(|| RefMap::new(tab_id, url));
+        map.url = url.to_owned();
+        map
+    }
+
+    /// Records `snapshot_id` as the tab's latest snapshot, the one short
+    /// refs name.
+    pub(crate) fn remember_latest(&self, tab_id: &str, snapshot_id: &str) -> Result<(), AppError> {
+        self.store().write_state(&latest_name(tab_id), snapshot_id)
     }
 
     /// `error` with the elements of a fresh snapshot that carry the stale
@@ -190,29 +188,88 @@ fn same_identity(node: &AccessibilityNode, entry: &RefEntry, found: &mut Vec<Str
     }
 }
 
-fn recent_maps(session: &Session, latest: &str) -> Vec<(String, RefMap)> {
-    let Ok(entries) = std::fs::read_dir(session.store().base_dir().join("snapshots")) else {
-        return Vec::new();
-    };
-    let mut dated: Vec<(SystemTime, String)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let modified = entry.metadata().and_then(|meta| meta.modified()).ok()?;
-            let name = entry.file_name().into_string().ok()?;
-            (name != latest).then_some((modified, name))
+/// Gives every ref-able node with an element token a ref in `map`, which
+/// holds the tab's earlier refs: a node already numbered keeps its number,
+/// and a new node gets the next one, so a number never moves to another
+/// element within a tab. Returns how many nodes got a ref.
+pub(crate) fn allocate_stable_refs(
+    tree: &mut AccessibilityNode,
+    snapshot_id: &str,
+    map: &mut RefMap,
+) -> usize {
+    let mut numbers: HashMap<String, u32> = map
+        .refs
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            (
+                entry.token.clone(),
+                u32::try_from(index + 1).unwrap_or(u32::MAX),
+            )
         })
         .collect();
-    dated.sort_by(|a, b| b.0.cmp(&a.0));
-    dated
-        .into_iter()
-        .take(RECENT_VIEWS)
-        .filter_map(|(_, id)| {
-            let map = session.store().load(&id).ok()?;
-            Some((id, map))
-        })
-        .collect()
+    if map.len() > RESTART_AFTER && !shares_a_token(tree, &numbers) {
+        map.refs.clear();
+        numbers.clear();
+    }
+    let mut given = 0;
+    let mut pending: Vec<&mut AccessibilityNode> = vec![tree];
+    while let Some(node) = pending.pop() {
+        if is_ref_able(node)
+            && let Some(token) = node.identity.retained_object.clone()
+        {
+            let entry = RefEntry {
+                role: node.role.clone(),
+                name: node.identity_name().map(str::to_owned),
+                token: token.clone(),
+            };
+            let element = match numbers.get(&token) {
+                Some(&element) => {
+                    if let Some(slot) = usize::try_from(element - 1)
+                        .ok()
+                        .and_then(|i| map.refs.get_mut(i))
+                    {
+                        *slot = entry;
+                    }
+                    element
+                }
+                None => {
+                    let element = map.push(entry);
+                    numbers.insert(token, element);
+                    element
+                }
+            };
+            node.ref_id = Some(RefId::new(snapshot_id, element).to_string());
+            given += 1;
+        }
+        pending.extend(node.children.iter_mut().rev());
+    }
+    given
+}
+
+fn shares_a_token(node: &AccessibilityNode, numbers: &HashMap<String, u32>) -> bool {
+    node.identity
+        .retained_object
+        .as_ref()
+        .is_some_and(|token| numbers.contains_key(token))
+        || node
+            .children
+            .iter()
+            .any(|child| shares_a_token(child, numbers))
+}
+
+fn latest_name(tab_id: &str) -> String {
+    let safe: String = tab_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    format!("refs-latest-{safe}")
 }
 
 fn quote(text: &str) -> String {
     crate::view::node_line::quote_text(text)
 }
+
+#[cfg(test)]
+#[path = "ref_target_tests.rs"]
+mod tests;

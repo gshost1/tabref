@@ -19,6 +19,12 @@ fn a_rewritten_line_shows_the_changed_words_in_their_context() {
         "Total: {42 -> 47} EUR"
     );
     assert_eq!(changed("Waiting", "Sent ada"), "{Waiting -> Sent ada}");
+    assert_eq!(changed("▲3 Books", "▲4 Books"), "▲{3 -> 4} Books");
+    assert_eq!(
+        changed("$9.99 total", "$19.99 total"),
+        "${9 -> 19}.99 total"
+    );
+    assert_eq!(changed("Open", "Shut"), "{Open -> Shut}");
 }
 
 #[test]

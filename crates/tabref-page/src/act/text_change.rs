@@ -60,6 +60,7 @@ fn inline_change(before: &str, after: &str) -> String {
     line.push_str(&match (removed.is_empty(), added.is_empty()) {
         (true, _) => format!("{{-> {added}}}"),
         (_, true) => format!("{{{removed} ->}}"),
+        _ if !removed.contains(' ') && !added.contains(' ') => in_word(&removed, &added),
         _ => format!("{{{removed} -> {added}}}"),
     });
     let rest = old[old.len() - suffix..].join(" ");
@@ -68,6 +69,54 @@ fn inline_change(before: &str, after: &str) -> String {
         line.push_str(&cut(&rest, CONTEXT_CHARS));
     }
     line
+}
+
+/// One changed word shown by the characters that changed, as `▲{3 -> 4}`
+/// for a counter glued to its button; a word that changed whole stays
+/// whole.
+fn in_word(removed: &str, added: &str) -> String {
+    let old: Vec<char> = removed.chars().collect();
+    let new: Vec<char> = added.chars().collect();
+    let mut prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    while prefix > 0 && splits_number(&old, prefix) {
+        prefix -= 1;
+    }
+    let room = old.len().min(new.len()) - prefix;
+    let mut suffix = old
+        .iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take(room)
+        .take_while(|(a, b)| a == b)
+        .count();
+    while suffix > 0
+        && (splits_number(&old, old.len() - suffix) || splits_number(&new, new.len() - suffix))
+    {
+        suffix -= 1;
+    }
+    if prefix + suffix == 0 {
+        return format!("{{{removed} -> {added}}}");
+    }
+    let text = |chars: &[char]| chars.iter().collect::<String>();
+    let (gone, came) = (
+        text(&old[prefix..old.len() - suffix]),
+        text(&new[prefix..new.len() - suffix]),
+    );
+    let middle = match (gone.is_empty(), came.is_empty()) {
+        (true, _) => format!("{{-> {came}}}"),
+        (_, true) => format!("{{{gone} ->}}"),
+        _ => format!("{{{gone} -> {came}}}"),
+    };
+    format!(
+        "{}{middle}{}",
+        text(&old[..prefix]),
+        text(&old[old.len() - suffix..])
+    )
+}
+
+/// Whether a cut before `chars[at]` falls between two digits of a number.
+fn splits_number(chars: &[char], at: usize) -> bool {
+    at > 0 && chars.get(at).is_some_and(char::is_ascii_digit) && chars[at - 1].is_ascii_digit()
 }
 
 /// `text` cut to `limit` characters, ending in `…` when cut.
