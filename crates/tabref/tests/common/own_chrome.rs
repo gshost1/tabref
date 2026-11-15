@@ -74,6 +74,7 @@ pub fn own_chrome(name: &str, downloads: &Path) -> Harness {
             profile_dir,
             headless: true,
             started: None,
+            persistent: false,
         },
         home: harness_home(name),
     }
