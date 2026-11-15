@@ -72,7 +72,9 @@ fn collect_refs(
     if let (Some(ref_id), Some(token)) = (&node.ref_id, &node.identity.retained_object) {
         if let Ok(token) = ElementToken::parse(token) {
             let asks = INPUT_ROLES.contains(&node.role.as_str());
-            let entry = frame_targets.entry(token.target_id.clone()).or_insert(false);
+            let entry = frame_targets
+                .entry(token.target_id.clone())
+                .or_insert(false);
             *entry = *entry || asks;
             refs.insert(
                 (token.target_id, token.backend_node_id),

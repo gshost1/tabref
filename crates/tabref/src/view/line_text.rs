@@ -1,6 +1,7 @@
 use tabref_page::{Block, Control, Item, squash};
 
-use super::control_text::{control_reading, control_text};
+use super::control_text::{control_reading, control_token};
+use super::escape::{escape_href, escape_in_token, escape_text};
 use super::view_options::ViewOptions;
 
 const PROSE_OWN_WORDS: usize = 4;
@@ -8,16 +9,18 @@ const PROSE_ALL_WORDS: usize = 6;
 const FOLDED_LINK_WORDS: usize = 3;
 
 /// One output line being assembled from text runs, controls and the lines
-/// of folded child blocks. Text keeps the spacing the page had; a control
-/// is set off by a space. In prose (a line whose own text outweighs its
-/// link text) links read as plain words, so a paragraph full of links stays
-/// a sentence; buttons and fields keep their refs everywhere.
+/// of folded child blocks. Text keeps the spacing the page had, with its
+/// brackets escaped so it cannot pass for a control; a control is set off
+/// by a space. In prose a link of up to three words prints as `[e12 word]`,
+/// its ref without its address, so a paragraph full of links stays a
+/// sentence; longer links (titles), buttons and fields print whole.
 pub(crate) struct LineText<'a> {
     out: String,
     hrefs: Vec<String>,
     options: &'a ViewOptions,
     prose: bool,
     after_control: bool,
+    shortened: bool,
 }
 
 impl<'a> LineText<'a> {
@@ -28,6 +31,7 @@ impl<'a> LineText<'a> {
             options,
             prose,
             after_control: false,
+            shortened: false,
         }
     }
 
@@ -41,7 +45,7 @@ impl<'a> LineText<'a> {
                 if self.after_control && run.starts_with(char::is_alphanumeric) {
                     self.out.push(' ');
                 }
-                self.out.push_str(run);
+                self.out.push_str(&escape_text(run));
                 self.after_control = false;
             }
             Item::Break => {
@@ -54,12 +58,16 @@ impl<'a> LineText<'a> {
     }
 
     pub(crate) fn push_control(&mut self, control: &Control) {
-        let reading = self.options.reading && !control.has_state("collapsed");
+        let reading = self.options.reading() && !control.has_state("collapsed");
+        if reading {
+            self.push_word(&escape_text(&control_reading(control)));
+            self.after_control = true;
+            return;
+        }
         let short = control.name.split_whitespace().count() <= FOLDED_LINK_WORDS;
-        let as_word =
-            reading || (self.prose && control.is_link() && short && !control.name.is_empty());
-        if as_word {
-            self.push_word(&control_reading(control));
+        if self.prose && control.is_link() && short && !control.name.is_empty() {
+            let token = prose_link(control, self.options);
+            self.push_word(&token);
             self.after_control = true;
             return;
         }
@@ -73,9 +81,15 @@ impl<'a> LineText<'a> {
         if let Some(href) = &control.href {
             self.hrefs.push(href.clone());
         }
-        let token = control_text(control, self.options, !repeated);
+        let (token, cut) = control_token(control, self.options, !repeated);
+        self.shortened |= cut;
         self.push_word(&token);
         self.after_control = true;
+    }
+
+    /// Whether a control token on the line was cut.
+    pub(crate) fn shortened(&self) -> bool {
+        self.shortened
     }
 
     /// Appends `text` as its own word.
@@ -104,6 +118,24 @@ impl<'a> LineText<'a> {
 
     pub(crate) fn finish(self) -> String {
         squash(&self.out)
+    }
+}
+
+/// A short link inside prose: `[e12 word]` with its ref, or, with no ref,
+/// `[word -> /path]`. `TABREF_PROSE_LINKS=href` prints the address instead
+/// of the ref, and `=word` the bare word, for measuring.
+fn prose_link(control: &Control, options: &ViewOptions) -> String {
+    let name = escape_in_token(&control.name);
+    let href = control
+        .href
+        .as_deref()
+        .map(|href| escape_href(&tabref_page::short_href(&options.page_url, href)));
+    let style = std::env::var("TABREF_PROSE_LINKS").unwrap_or_default();
+    match (style.as_str(), &control.ref_text, href) {
+        ("word", _, _) => name,
+        ("href", _, Some(href)) | (_, None, Some(href)) => format!("[{name} -> {href}]"),
+        (_, Some(ref_text), _) => format!("[{} {name}]", options.refs.print(ref_text)),
+        _ => name,
     }
 }
 

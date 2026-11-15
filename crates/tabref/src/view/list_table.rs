@@ -1,6 +1,7 @@
-use tabref_page::{Block, BlockKind, cut_chars};
+use tabref_page::{Block, BlockKind};
 
 use super::block_renderer::{BlockRenderer, LINE_MAX};
+use super::node_line::quote_text;
 use super::row_window::DEFAULT_ROWS;
 
 const COUNTED_LIST: usize = 6;
@@ -81,7 +82,7 @@ impl BlockRenderer<'_> {
         let caption = block
             .blocks()
             .find(|inner| inner.kind == BlockKind::Paragraph)
-            .map(|caption| format!(" \"{}\"", cut_chars(&self.pack_unbounded(caption), 80)))
+            .map(|caption| format!(" {}", quote_text(&self.pack_unbounded(caption))))
             .unwrap_or_default();
         let head = if header {
             cells
@@ -104,12 +105,8 @@ impl BlockRenderer<'_> {
             if windowed && !self.options.rows.contains(position + 1) {
                 continue;
             }
-            let text = row
-                .iter()
-                .map(|cell| cut_chars(cell, CELL_MAX))
-                .collect::<Vec<_>>()
-                .join(" | ");
-            self.push(depth + 1, text, None);
+            let text = row.join(" | ");
+            self.push_content(depth + 1, "", text);
         }
         if windowed {
             self.note_window(body_rows, depth + 1, "rows");
@@ -131,9 +128,15 @@ impl BlockRenderer<'_> {
         };
         self.stats.next_row.get_or_insert(next);
         let text = if next > 1 {
-            format!("… {cut} more {noun} ({total} in all): tabref snap --rows {next}-")
+            format!(
+                "… {cut} more {noun} ({total} in all): {}",
+                self.options.route.rows_from(next, self.options.asks_full())
+            )
         } else {
-            format!("… {cut} {noun} before these ({total} in all): tabref snap --rows 1-")
+            format!(
+                "… {cut} {noun} before these ({total} in all): {}",
+                self.options.route.rows_from(1, self.options.asks_full())
+            )
         };
         self.push(depth, text, None);
     }

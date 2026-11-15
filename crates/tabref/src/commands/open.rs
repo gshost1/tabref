@@ -7,9 +7,8 @@ use tabref_core::AppError;
 use super::action_report::set;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
-use crate::view::row_window::RowWindow;
 use crate::view::snapshot_view::snapshot_view;
-use crate::view::view_options::ViewOptions;
+use crate::view::view_request::ViewRequest;
 use crate::view::view_scope::ViewScope;
 
 const SCHEMES: &[&str] = &["about:", "data:", "file:", "chrome:", "javascript:"];
@@ -28,7 +27,7 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
         Err(error) => return Err(error),
     };
     let captured = session.capture()?;
-    let options = ViewOptions::snap(&captured.info.url, false, RowWindow::default());
+    let options = ViewRequest::default().snap_options(&captured.info.url)?;
     let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
     if unfinished {
         report

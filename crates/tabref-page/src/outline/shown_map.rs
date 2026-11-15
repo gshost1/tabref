@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use super::dom_tree::DomTree;
-use super::ref_label::RefLabel;
 use super::node_kind::NodeKind;
+use super::ref_label::RefLabel;
 use super::walk_context::WalkContext;
 
 /// For every node of every captured document, whether it or anything

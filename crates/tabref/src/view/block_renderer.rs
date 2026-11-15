@@ -1,8 +1,11 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 
 use tabref_page::{Block, BlockKind, Item, cut_chars};
 
+use super::block_titles::{folds_never, plain_text, prefix, prefix_in_line, title_of};
 use super::cut_stats::CutStats;
+use super::escape::{escape_line_start, escape_text};
 use super::line_text::{LineText, is_prose, label_echoes};
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
@@ -10,7 +13,6 @@ use super::view_options::ViewOptions;
 /// The longest line a block with nested blocks folds into.
 pub(crate) const LINE_MAX: usize = 240;
 const PROSE_MAX: usize = 700;
-const READ_PROSE_MAX: usize = 4_000;
 const MAX_PARTS: usize = 12;
 const PRE_LINES: usize = 40;
 const CHROME_LANDMARKS: &[&str] = &["header", "nav", "footer", "aside"];
@@ -19,13 +21,16 @@ const CHROME_LANDMARKS: &[&str] = &["header", "nav", "footer", "aside"];
 /// prints as one line; anything larger prints its parts in order. Siblings
 /// that share a shape key are marked: a one-line repeat as `- `, a larger
 /// one as `(k/N) ` with its other lines indented, so a reader can count
-/// repeated sections without reading them all.
+/// repeated sections without reading them all. A line cut short records
+/// what it lost; the view adds the command that shows it once lines are
+/// numbered.
 pub(crate) struct BlockRenderer<'a> {
     pub(crate) options: &'a ViewOptions,
     pub(crate) lines: Vec<ViewLine>,
     pub(crate) stats: CutStats,
     chrome: Option<usize>,
     chrome_groups: usize,
+    token_cut: Cell<bool>,
 }
 
 impl<'a> BlockRenderer<'a> {
@@ -36,19 +41,40 @@ impl<'a> BlockRenderer<'a> {
             stats: CutStats::default(),
             chrome: None,
             chrome_groups: 0,
+            token_cut: Cell::new(false),
         }
     }
 
+    /// Pushes a line the view writes itself (a title, a count, a note).
     pub(crate) fn push(&mut self, depth: usize, text: String, heading: Option<u8>) {
         if text.trim().is_empty() {
             return;
         }
-        self.lines.push(ViewLine {
-            depth,
-            text,
-            heading,
-            chrome: self.chrome,
-        });
+        let mut line = ViewLine::new(depth, text);
+        line.heading = heading;
+        line.chrome = self.chrome;
+        self.lines.push(line);
+    }
+
+    /// Pushes a line of page content: escaped where it would open like the
+    /// view's own lines, cut past the prose limit unless lines print whole,
+    /// and marked when it or a token in it was cut.
+    pub(crate) fn push_content(&mut self, depth: usize, prefix: &str, text: String) {
+        let token_cut = self.token_cut.replace(false);
+        if text.trim().is_empty() {
+            return;
+        }
+        let mut text = format!("{prefix}{}", escape_line_start(text));
+        let mut cut = token_cut.then(|| "cut".to_owned());
+        let length = text.chars().count();
+        if !self.options.whole_lines() && length > PROSE_MAX {
+            cut = Some(format!("+{} chars", length - PROSE_MAX));
+            text = cut_chars(&text, PROSE_MAX);
+        }
+        self.push(depth, text, None);
+        if let Some(last) = self.lines.last_mut() {
+            last.cut = cut;
+        }
     }
 
     pub(crate) fn render_block(&mut self, block: &Block, depth: usize) {
@@ -56,7 +82,11 @@ impl<'a> BlockRenderer<'a> {
             BlockKind::Heading(level) => {
                 let text = self.pack_unbounded(block);
                 let marks = "#".repeat(usize::from((*level).clamp(1, 6)));
-                self.push(depth, format!("{marks} {text}"), Some(*level));
+                self.push_content(depth, &format!("{marks} "), text);
+                if let Some(last) = self.lines.last_mut() {
+                    last.heading = Some(*level);
+                    last.plain = Some(plain_text(block));
+                }
             }
             BlockKind::List => self.render_list(block, depth),
             BlockKind::Table => self.render_table(block, depth),
@@ -64,10 +94,13 @@ impl<'a> BlockRenderer<'a> {
             BlockKind::Landmark(_) | BlockKind::Dialog | BlockKind::Frame => {
                 self.render_labelled(block, depth);
             }
-            _ => match self.pack(block) {
-                Some(line) => self.push(depth, format!("{}{line}", prefix(&block.kind)), None),
-                None => self.render_children(block, depth),
-            },
+            _ => {
+                self.token_cut.set(false);
+                match self.pack(block) {
+                    Some(line) => self.push_content(depth, prefix(&block.kind), line),
+                    None => self.render_children(block, depth),
+                }
+            }
         }
     }
 
@@ -80,11 +113,18 @@ impl<'a> BlockRenderer<'a> {
                 self.chrome = Some(self.chrome_groups);
             }
         }
+        self.token_cut.set(false);
         match self
             .pack(block)
             .filter(|line| line.chars().count() <= LINE_MAX)
         {
-            Some(line) => self.push(depth, format!("{title}: {line}"), None),
+            Some(line) => {
+                let cut = self.token_cut.replace(false);
+                self.push(depth, format!("{title}: {line}"), None);
+                if let Some(last) = self.lines.last_mut().filter(|_| cut) {
+                    last.cut = Some("cut".to_owned());
+                }
+            }
             None => {
                 self.push(depth, format!("{title}:"), None);
                 self.render_children(block, depth + 1);
@@ -93,6 +133,8 @@ impl<'a> BlockRenderer<'a> {
         self.chrome = outer;
     }
 
+    /// A `<pre>` block as one entry of `| `-prefixed lines, so its size does
+    /// not change the numbering of the lines after it.
     fn render_pre(&mut self, block: &Block, depth: usize) {
         let mut text = String::new();
         for item in &block.items {
@@ -106,19 +148,30 @@ impl<'a> BlockRenderer<'a> {
                 }
             }
         }
-        let lines: Vec<&str> = text
+        let lines: Vec<String> = text
             .lines()
             .filter(|line| !line.trim().is_empty())
+            .map(|line| format!("| {}", escape_text(line.trim_end())))
             .collect();
-        for line in lines.iter().take(PRE_LINES) {
-            self.push(depth, format!("| {}", line.trim_end()), None);
-        }
-        if lines.len() > PRE_LINES {
-            self.push(
-                depth,
-                format!("| … {} more lines", lines.len() - PRE_LINES),
-                None,
-            );
+        let keep = if self.options.whole_lines() {
+            lines.len()
+        } else {
+            PRE_LINES
+        };
+        self.push(
+            depth,
+            lines
+                .iter()
+                .take(keep)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n"),
+            None,
+        );
+        if lines.len() > keep {
+            if let Some(last) = self.lines.last_mut() {
+                last.cut = Some(format!("+{} lines", lines.len() - keep));
+            }
         }
     }
 
@@ -229,22 +282,13 @@ impl<'a> BlockRenderer<'a> {
         for item in &items {
             line.push_item(item);
         }
+        self.token_cut.set(line.shortened());
         let text = line.finish();
-        let limit = self.prose_limit();
-        self.push(depth, cut_chars(&text, limit), None);
-    }
-
-    fn prose_limit(&self) -> usize {
-        if self.options.reading {
-            READ_PROSE_MAX
-        } else {
-            PROSE_MAX
-        }
+        self.push_content(depth, "", text);
     }
 
     /// The block on one line, or `None` when it holds a table, a heading,
-    /// a landmark or too much to fit. Inline content alone always fits, cut
-    /// to the prose limit.
+    /// a landmark or too much to fit. Inline content alone always fits.
     pub(crate) fn pack(&self, block: &Block) -> Option<String> {
         self.pack_with(block, true, false)
     }
@@ -282,15 +326,14 @@ impl<'a> BlockRenderer<'a> {
             line.push_part(separator, &format!("{}{text}", prefix_in_line(&inner.kind)));
             parts += 1;
         }
+        if line.shortened() {
+            self.token_cut.set(true);
+        }
         let text = line.finish();
         if bounded && parts > 0 && text.chars().count() > LINE_MAX {
             return None;
         }
-        Some(if bounded {
-            cut_chars(&text, self.prose_limit())
-        } else {
-            text
-        })
+        Some(text)
     }
 
     fn pack_list(&self, block: &Block) -> Option<String> {
@@ -301,49 +344,6 @@ impl<'a> BlockRenderer<'a> {
         let parts: Option<Vec<String>> = items.iter().map(|item| self.pack(item)).collect();
         let joined = parts?.join(" · ");
         (joined.chars().count() <= LINE_MAX).then_some(joined)
-    }
-}
-
-fn folds_never(kind: &BlockKind) -> bool {
-    matches!(
-        kind,
-        BlockKind::Heading(_)
-            | BlockKind::Table
-            | BlockKind::Landmark(_)
-            | BlockKind::Dialog
-            | BlockKind::Frame
-            | BlockKind::Pre
-    )
-}
-
-fn prefix(kind: &BlockKind) -> &'static str {
-    match kind {
-        BlockKind::ListItem => "- ",
-        BlockKind::Quote => "> ",
-        _ => "",
-    }
-}
-
-fn prefix_in_line(kind: &BlockKind) -> &'static str {
-    match kind {
-        BlockKind::Quote => "> ",
-        _ => "",
-    }
-}
-
-/// How a landmark, dialog or frame is titled: `nav`,
-/// `nav "Primary"`, `dialog "Cookies"`, `frame example.com`.
-pub(crate) fn title_of(block: &Block) -> String {
-    let base = match &block.kind {
-        BlockKind::Landmark(name) => name.clone(),
-        BlockKind::Dialog => "dialog".to_owned(),
-        BlockKind::Frame => "frame".to_owned(),
-        _ => String::new(),
-    };
-    match (&block.kind, block.label.as_deref()) {
-        (BlockKind::Frame, Some(origin)) => format!("{base} {origin}"),
-        (_, Some(label)) => format!("{base} \"{label}\""),
-        (_, None) => base,
     }
 }
 

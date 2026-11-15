@@ -124,7 +124,7 @@ fn a_long_table_prints_its_header_once_a_window_of_rows_and_how_to_see_more() {
 }
 
 #[test]
-fn prose_reads_short_links_as_words_but_keeps_titles_and_menus_as_links() {
+fn prose_keeps_short_links_as_ref_and_word_and_menus_as_links() {
     let paragraph = block(
         BlockKind::Paragraph,
         None,
@@ -158,7 +158,7 @@ fn prose_reads_short_links_as_words_but_keeps_titles_and_menus_as_links() {
     assert_eq!(
         render(&root),
         vec![
-            "He worked at Bletchley Park breaking German naval codes in the war.",
+            "He worked at [e1 Bletchley Park] breaking German naval codes in the war.",
             "[e2 Shop -> /shop/] · [e3 Forum -> /forum/]",
         ]
     );

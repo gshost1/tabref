@@ -25,6 +25,12 @@ pub(crate) enum Command {
         /// Rows of long tables and lists to print: 21-40, 21- or 5
         #[arg(long, value_name = "FROM-TO")]
         rows: Option<String>,
+        /// Print every line whole: no paragraph, code, dialog or option cuts
+        #[arg(long)]
+        full: bool,
+        /// Start at this line of the view (the cut markers name it)
+        #[arg(long, value_name = "LINE", default_value_t = 1)]
+        from: usize,
     },
     /// Click an element
     Click {
@@ -97,9 +103,15 @@ pub(crate) enum Command {
         /// The main content (the default when no REF is given)
         #[arg(long, conflicts_with_all = ["target", "section"])]
         main: bool,
-        /// The section under the first heading containing this text
+        /// The section under the heading with this text (exact match first)
         #[arg(long, value_name = "HEADING", conflicts_with = "target")]
         section: Option<String>,
+        /// Rows of long tables and lists to print: 21-40, 21- or 5
+        #[arg(long, value_name = "FROM-TO")]
+        rows: Option<String>,
+        /// Start at this line of the text (the cut markers name it)
+        #[arg(long, value_name = "LINE", default_value_t = 1)]
+        from: usize,
     },
     /// Wait until a condition holds (bounded by --timeout)
     Wait {

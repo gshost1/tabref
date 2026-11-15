@@ -4,7 +4,7 @@ use tabref_page::{Block, OutlineInput, PageOutline, build_outline, build_outline
 
 use super::block_renderer::BlockRenderer;
 use super::budget::fit;
-use super::main_content::{has_main, main_block};
+use super::main_content::{has_main, main_block, text_size};
 use super::node_line::quote_text;
 use super::ref_style::RefStyle;
 use super::section::section_lines;
@@ -34,24 +34,35 @@ pub(crate) fn page_view(
         })?,
         _ => build_outline(input),
     };
-    let mut renderer = BlockRenderer::new(options);
-    if *scope == ViewScope::Page {
-        for dialog in &outline.dialogs {
-            renderer.render_dialog(dialog);
-        }
-    }
     let body: &Block = match scope {
         ViewScope::Main => main_block(&outline.body),
         _ => &outline.body,
     };
+    let mut renderer = BlockRenderer::new(options);
+    let body_size = text_size(body);
+    for dialog in &outline.dialogs {
+        if text_size(dialog) > body_size {
+            renderer.render_block(dialog, 0);
+        } else if *scope == ViewScope::Page {
+            renderer.render_dialog(dialog);
+        }
+    }
     renderer.render_children(body, 0);
     let stats = renderer.stats;
     let mut lines = renderer.lines;
     if let ViewScope::Section(wanted) = scope {
         lines = section_lines(lines, wanted).ok_or_else(|| no_section(wanted))?;
     }
+    for (position, line) in lines.iter_mut().enumerate() {
+        line.number = position + 1;
+        if let Some(cut) = &line.cut {
+            let command = options.route.starting_at(line.number, true);
+            line.text.push_str(&format!(" …({cut}: {command})"));
+        }
+    }
+    let lines: Vec<ViewLine> = lines.into_iter().skip(options.route.from - 1).collect();
     let main = *scope == ViewScope::Page && has_main(&outline.body);
-    let (kept, report) = fit(lines, options.budget, options.whole_chrome, main);
+    let (kept, report) = fit(lines, options, main);
     let mut text = header(subject, options);
     for line in &kept {
         text.push('\n');
@@ -62,7 +73,7 @@ pub(crate) fn page_view(
         text.push_str(&frames);
     }
     text.push('\n');
-    text.push_str(&footer_line(&report, &stats));
+    text.push_str(&footer_line(&report, &stats, &kept, options));
     Ok(Outcome::new(text, data(subject, &kept, &report, &outline)))
 }
 
@@ -98,6 +109,7 @@ fn data(
         "lines_shown": report.lines_shown,
         "chars_total": report.chars_total,
         "frames_skipped": outline.frames.skipped(),
+        "first_cut_line": report.budget_from,
     })
 }
 
@@ -105,3 +117,7 @@ fn no_section(wanted: &str) -> AppError {
     AppError::invalid_args(format!("no heading on the page contains {wanted:?}"))
         .with_suggestion("Copy a heading from the view, or run tabref find <text>")
 }
+
+#[cfg(test)]
+#[path = "page_view_tests.rs"]
+mod tests;

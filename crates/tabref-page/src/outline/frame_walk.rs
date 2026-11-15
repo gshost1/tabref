@@ -111,7 +111,10 @@ impl OutlineBuilder<'_> {
             return;
         }
         self.frames.shown += 1;
-        if self.lift_dialogs && is_dialog_candidate(node, self.input.viewport) && keeps_as_dialog(node, &block) {
+        if self.lift_dialogs
+            && is_dialog_candidate(node, self.input.viewport)
+            && keeps_as_dialog(node, &block)
+        {
             block.kind = BlockKind::Dialog;
             self.dialogs.push(block);
             return;

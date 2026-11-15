@@ -4,10 +4,10 @@ use super::block_kind::BlockKind;
 use super::control_build::control_of;
 use super::dom_tree::DomTree;
 use super::element_kind::{is_skipped, semantic_kind};
-use super::search_blocks::{block_of, find_folded, fold, own_text, window};
 use super::expander::{expander_for, is_hidden_at};
 use super::node_kind::NodeKind;
 use super::outline_input::OutlineInput;
+use super::search_blocks::{block_of, find_folded, fold, own_text, window};
 use super::text_match::TextMatch;
 use super::text_runs::{squash, subtree_text};
 

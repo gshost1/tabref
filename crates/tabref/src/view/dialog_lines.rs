@@ -1,7 +1,9 @@
 use tabref_page::{Block, Control, Item, cut_chars, squash};
 
-use super::block_renderer::{BlockRenderer, title_of};
-use super::control_text::control_text;
+use super::block_renderer::BlockRenderer;
+use super::block_titles::title_of;
+use super::control_text::control_token;
+use super::escape::escape_text;
 
 const DIALOG_TEXT: usize = 200;
 const DIALOG_CONTROLS: usize = 10;
@@ -24,13 +26,31 @@ impl BlockRenderer<'_> {
             return;
         }
         let title = title_of(dialog);
-        let text = cut_chars(&squash(&text), DIALOG_TEXT);
-        self.push(0, format!("{title}: {text}").trim_end().to_owned(), None);
+        let text = escape_text(&squash(&text));
+        let length = text.chars().count();
+        let whole = self.options.whole_lines() || length <= DIALOG_TEXT;
+        let shown = if whole {
+            text
+        } else {
+            cut_chars(&text, DIALOG_TEXT)
+        };
+        self.push(0, format!("{title}: {shown}").trim_end().to_owned(), None);
+        if let Some(last) = self.lines.last_mut().filter(|_| !whole) {
+            last.cut = Some(format!("+{} chars", length - DIALOG_TEXT));
+        }
+        let mut cut = false;
         let tokens: Vec<String> = controls
             .iter()
-            .map(|control| control_text(control, self.options, true))
+            .map(|control| {
+                let (token, shortened) = control_token(control, self.options, true);
+                cut |= shortened;
+                token
+            })
             .collect();
         self.push(1, tokens.join(" "), None);
+        if let Some(last) = self.lines.last_mut().filter(|_| cut) {
+            last.cut = Some("cut".to_owned());
+        }
     }
 }
 

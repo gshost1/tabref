@@ -2,31 +2,55 @@ use tabref_page::PageOutline;
 
 use super::cut_report::CutReport;
 use super::cut_stats::CutStats;
+use super::view_line::ViewLine;
+use super::view_options::ViewOptions;
+use super::view_route::quoted_argument;
 
-/// The view's last line: its size, and when anything was left out, what
-/// and the commands that show it.
-pub(crate) fn footer_line(report: &CutReport, stats: &CutStats) -> String {
+/// The view's last line: its size, and when anything was left out, every
+/// kind of cut with the command that shows it: lines past the budget,
+/// sections left as headings, rows past the window, chrome, and lines cut
+/// short (each of those also carries its own marker).
+pub(crate) fn footer_line(
+    report: &CutReport,
+    stats: &CutStats,
+    kept: &[ViewLine],
+    options: &ViewOptions,
+) -> String {
     let size = format!("{} lines, {}", report.lines_total, kilo(report.chars_total));
-    if report.is_complete() && stats.rows_cut == 0 {
+    let shortened: Vec<&ViewLine> = kept.iter().filter(|line| line.cut.is_some()).collect();
+    if report.is_complete() && stats.rows_cut == 0 && shortened.is_empty() {
         return format!("-- {size} chars, all shown");
     }
+    let route = &options.route;
+    let full = options.asks_full();
     let mut cut = Vec::new();
     let mut more = Vec::new();
-    if report.sections_cut > 0 {
-        cut.push(format!("{} sections after the budget", report.sections_cut));
-        if let Some(heading) = &report.first_cut_heading {
-            more.push(format!("tabref read --section \"{heading}\""));
+    if let Some(from) = report.budget_from {
+        cut.push(format!("lines {from}- over the budget"));
+        more.push(route.starting_at(from, full));
+    }
+    if report.sections.count > 0 {
+        cut.push(format!("{} sections as headings", report.sections.count));
+        if let Some(heading) = &report.sections.first_heading {
+            more.push(format!(
+                "tabref read --section {}",
+                quoted_argument(heading)
+            ));
         }
     }
     if stats.rows_cut > 0 {
         cut.push(format!("{} rows", stats.rows_cut));
         if let Some(next) = stats.next_row {
-            more.push(format!("tabref snap --rows {next}-"));
+            more.push(route.rows_from(next, full));
         }
     }
     if report.chrome_cut > 0 {
         cut.push(format!("{} navigation lines", report.chrome_cut));
-        more.push("tabref snap --all".to_owned());
+        more.push(format!("{} --all", route.command));
+    }
+    if let Some(first) = shortened.first() {
+        cut.push(format!("{} lines cut short", shortened.len()));
+        more.push(route.starting_at(first.number, true));
     }
     more.push("tabref find <text>".to_owned());
     let shown = if report.lines_shown < report.lines_total {

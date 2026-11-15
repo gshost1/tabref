@@ -6,31 +6,26 @@ use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::ref_target::RefTarget;
 use crate::view::snapshot_view::reading_view;
-use crate::view::view_options::ViewOptions;
+use crate::view::view_request::ViewRequest;
 use crate::view::view_scope::ViewScope;
 
 const FIELD_ROLES: &[&str] = &[
     "textfield",
-    "combobox",
     "checkbox",
     "radiobutton",
     "switch",
     "slider",
     "incrementor",
-    "listbox",
 ];
 
-/// Prints text in reading order: the page's main content (the `main`
-/// landmark with the most text, across same-origin frames), the section
-/// under a heading, or one element. A form field reads as its text, value
-/// and checked state.
-pub(crate) fn run(
-    session: &mut Session,
-    target: Option<&str>,
-    section: Option<&str>,
-) -> Result<Outcome, AppError> {
-    let options = ViewOptions::read("");
-    if let Some(text) = target {
+/// Prints text in reading order, whole lines: the page's main content (the
+/// `main` landmark with the most text, across same-origin frames), the
+/// section under a heading, or one element (a select with all its
+/// options). A form field reads as its text, value and checked state.
+pub(crate) fn run(session: &mut Session, request: &ViewRequest) -> Result<Outcome, AppError> {
+    let options = request.read_options("")?;
+    let section = request.section.as_deref();
+    if let Some(text) = request.root.as_deref() {
         let target = session.resolve_ref(text)?;
         if FIELD_ROLES.contains(&target.entry.role.as_str()) {
             return read_field(session, &target);
