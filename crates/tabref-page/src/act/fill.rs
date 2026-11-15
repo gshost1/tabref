@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
-use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
+use tabref_core::{AppError, Deadline};
 
 use super::element_call::ElementCall;
+use super::element_errors::not_editable;
 use super::fill_outcome::FillOutcome;
 use super::input_value::{assign_value, part_of_input};
 use super::input_value_kind::InputValueKind;
@@ -124,16 +125,6 @@ fn script(function: &'static str) -> ElementCall {
         function,
         arguments: Vec::new(),
     }
-}
-
-fn not_editable(backend_node_id: i64, reason: Option<&str>) -> AppError {
-    AppError::new(
-        ErrorCode::ActionNotSupported,
-        format!("DOM node {backend_node_id} does not accept typed text"),
-    )
-    .with_platform_detail(reason.unwrap_or("not editable"))
-    .with_details(json!({ "kind": "cdp_not_editable", "backend_node_id": backend_node_id }))
-    .with_disposition(DeliverySemantics::not_delivered())
 }
 
 #[cfg(test)]

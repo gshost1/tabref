@@ -2,6 +2,7 @@
 pub(crate) mod act_fixture;
 pub(crate) mod action_need;
 pub(crate) mod actionable;
+pub(crate) mod append_outcome;
 pub(crate) mod append_text;
 pub(crate) mod assigned_input;
 pub(crate) mod blocker;

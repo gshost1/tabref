@@ -16,6 +16,7 @@ pub(crate) use tabref_cdp::{CdpConnection, CdpEvent, PageSession};
 
 pub use act::action_need::ActionNeed;
 pub use act::actionable::wait_actionable;
+pub use act::append_outcome::AppendOutcome;
 pub use act::append_text::append_text;
 pub use act::assigned_input::AssignedInput;
 pub use act::blocker::Blocker;
