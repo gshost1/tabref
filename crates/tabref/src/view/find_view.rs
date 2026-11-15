@@ -1,6 +1,7 @@
 use tabref_page::{TextMatch, cut_chars};
 
 use super::control_text::control_text;
+use super::escape::escape_text;
 use super::view_options::ViewOptions;
 
 const SECTION_DEPTH: usize = 2;
@@ -42,16 +43,16 @@ fn match_line(found: &TextMatch, options: &ViewOptions) -> String {
         .rev()
         .take(SECTION_DEPTH)
         .rev()
-        .map(|heading| cut_chars(heading, HEADING_LIMIT))
+        .map(|heading| escape_text(&cut_chars(heading, HEADING_LIMIT)))
         .collect();
     if !path.is_empty() {
         line.push_str(&path.join(" > "));
         line.push_str(" | ");
     }
-    line.push_str(&found.line);
+    line.push_str(&escape_text(&found.line));
     if let Some(control) = &found.control {
         let token = control_text(control, options, true);
-        if !found.line.contains(&token) {
+        if !line.contains(&token) {
             line.push(' ');
             line.push_str(&token);
         }
