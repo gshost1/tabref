@@ -206,10 +206,7 @@ impl FrameReader {
         let Some(boxes) = state.dom.as_ref().and_then(|dom| dom.boxes.as_ref()) else {
             return;
         };
-        let reason = boxes
-            .get(backend)
-            .map_or(Some(FrameSkipReason::Hidden), |owner| owner.skip_reason());
-        let Some(reason) = reason else {
+        let Some(reason) = boxes.skip_reason(*backend) else {
             return;
         };
         let child = (1..self.targets.len())

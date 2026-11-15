@@ -1,21 +1,20 @@
-use std::collections::HashMap;
-
 use serde_json::{Value, json};
 
 use super::dom_display::{DISPLAY_STYLE, collect_inline};
 use super::dom_facts::DomFacts;
 use super::dom_ids::{collect_clickable, collect_dom_ids};
-use super::owner_box::{OwnerBox, collect_owner_boxes};
+use super::owner_box::collect_owner_boxes;
+use super::owner_boxes::OwnerBoxes;
 
 const VISIBILITY_STYLE: &str = "visibility";
 
 /// What one target's DOM capture gives a snapshot: the facts its tree build
-/// reads, and where it laid out its frame owner elements (`None` when the
-/// capture had no layout to say).
+/// reads, and which nodes it holds and where it laid them out, for frame
+/// owners (`None` when the capture had no layout to say).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FrameDom {
     pub(crate) facts: DomFacts,
-    pub(crate) boxes: Option<HashMap<i64, OwnerBox>>,
+    pub(crate) boxes: Option<OwnerBoxes>,
 }
 
 impl FrameDom {

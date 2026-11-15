@@ -37,24 +37,26 @@ fn boxes_that_cannot_show_a_frame_name_their_reason() {
 }
 
 #[test]
-fn only_frame_elements_are_collected_with_their_visibility() {
+fn any_owner_element_is_judged_by_its_box_and_an_absent_one_is_kept() {
     let capture = json!({
-        "strings": ["IFRAME", "DIV", "block", "visible", "hidden", "iframe"],
+        "strings": ["HTML", "OBJECT", "EMBED", "block", "visible", "hidden", "FENCEDFRAME"],
         "documents": [{
-            "nodes": { "nodeName": [1, 0, 5], "backendNodeId": [7, 8, 9] },
+            "nodes": { "nodeName": [0, 1, 2, 6, 1], "backendNodeId": [7, 8, 9, 10, 11] },
             "layout": {
-                "nodeIndex": [0, 1, 2],
-                "bounds": [[0, 0, 800, 600], [5, 5, 1, 1], [0, 0, 300, 200]],
-                "styles": [[2, 3], [2, 3], [2, 4]],
+                "nodeIndex": [0, 1, 2, 3],
+                "bounds": [[0, 0, 800, 600], [10, 10, 300, 200], [5, 5, 1, 1], [0, 0, 300, 200]],
+                "styles": [[3, 4], [3, 4], [3, 4], [3, 5]],
             },
         }],
     });
 
-    let boxes = collect_owner_boxes(&capture).unwrap();
+    let owners = collect_owner_boxes(&capture).unwrap();
 
-    assert_eq!(boxes.len(), 2);
-    assert_eq!(boxes[&8].skip_reason(), Some(FrameSkipReason::Tiny));
-    assert_eq!(boxes[&9].skip_reason(), Some(FrameSkipReason::Hidden));
+    assert_eq!(owners.skip_reason(8), None);
+    assert_eq!(owners.skip_reason(9), Some(FrameSkipReason::Tiny));
+    assert_eq!(owners.skip_reason(10), Some(FrameSkipReason::Hidden));
+    assert_eq!(owners.skip_reason(11), Some(FrameSkipReason::Hidden));
+    assert_eq!(owners.skip_reason(999), None);
 }
 
 #[test]

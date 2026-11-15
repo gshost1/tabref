@@ -87,6 +87,42 @@ fn a_visible_iframe_box_keeps_the_frame() {
 }
 
 #[test]
+fn a_frame_inside_an_object_element_or_an_owner_the_capture_lacks_is_kept() {
+    let object_owner = json!({
+        "strings": ["HTML", "OBJECT", "block", "visible"],
+        "documents": [{
+            "nodes": { "nodeName": [0, 1], "backendNodeId": [1, 30] },
+            "layout": {
+                "nodeIndex": [0, 1],
+                "bounds": [[0, 0, 800, 600], [10, 10, 300, 200]],
+                "styles": [[2, 3], [2, 3]],
+            },
+        }],
+    });
+    let elsewhere = json!({
+        "strings": ["HTML", "block", "visible"],
+        "documents": [{
+            "nodes": { "nodeName": [0], "backendNodeId": [1] },
+            "layout": { "nodeIndex": [0], "bounds": [[0, 0, 800, 600]], "styles": [[1, 2]] },
+        }],
+    });
+    for capture in [object_owner, elsewhere] {
+        let transport = page_reads(vec![attached("S2", "OOP")], main_frame_only(), capture);
+        let transport = release(child_reads(transport, "OOP"), 2);
+        let mut connection = CdpConnection::new(transport.boxed());
+
+        let snapshot = snapshot_page(&mut connection, &session(), deadline()).unwrap();
+
+        assert!(
+            snapshot.skipped_frames.is_empty(),
+            "{:?}",
+            snapshot.skipped_frames
+        );
+        assert_eq!(snapshot.preorder().len(), 5);
+    }
+}
+
+#[test]
 fn iframes_past_the_budget_are_listed_without_being_asked() {
     let transport = page_reads(vec![attached("S2", "OOP")], main_frame_only(), json!({}));
     let transport = release(transport, 1);

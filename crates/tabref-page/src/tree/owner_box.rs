@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-
 use serde_json::Value;
 
 use super::frame_skip_reason::FrameSkipReason;
+use super::owner_boxes::OwnerBoxes;
 
-const FRAME_ELEMENTS: &[&str] = &["IFRAME", "FRAME"];
 const TINY_EDGE: f64 = 5.0;
 
 /// Where a DOM capture laid out a frame's owner element, in document
@@ -37,12 +35,12 @@ impl OwnerBox {
     }
 }
 
-/// The boxes of every `<iframe>` and `<frame>` element a capture laid out,
-/// keyed by backend node id. The capture must have asked for `display` and
-/// then `visibility`, so each layout object's `styles` holds those two.
-/// `None` when the capture carries no layout at all, so nothing can be said
-/// about an owner it does not list.
-pub(crate) fn collect_owner_boxes(capture: &Value) -> Option<HashMap<i64, OwnerBox>> {
+/// Every node of a capture and the box of every node it laid out, keyed by
+/// backend node id. The capture must have asked for `display` and then
+/// `visibility`, so each layout object's `styles` holds those two. `None`
+/// when the capture carries no layout at all, so nothing can be said about
+/// any owner.
+pub(crate) fn collect_owner_boxes(capture: &Value) -> Option<OwnerBoxes> {
     let empty = Vec::new();
     let strings = capture.get("strings")?.as_array().unwrap_or(&empty);
     let string = |index: Option<&Value>| {
@@ -52,12 +50,11 @@ pub(crate) fn collect_owner_boxes(capture: &Value) -> Option<HashMap<i64, OwnerB
             .and_then(|index| strings.get(index))
             .and_then(Value::as_str)
     };
-    let mut boxes = HashMap::new();
+    let mut owners = OwnerBoxes::default();
     let mut laid_out = false;
     for document in capture.get("documents")?.as_array()? {
         let column = |pointer: &str| document.pointer(pointer).and_then(Value::as_array);
-        let (Some(names), Some(backends), Some(indexes), Some(bounds)) = (
-            column("/nodes/nodeName"),
+        let (Some(backends), Some(indexes), Some(bounds)) = (
             column("/nodes/backendNodeId"),
             column("/layout/nodeIndex"),
             column("/layout/bounds"),
@@ -65,15 +62,17 @@ pub(crate) fn collect_owner_boxes(capture: &Value) -> Option<HashMap<i64, OwnerB
             continue;
         };
         laid_out = true;
+        owners
+            .present
+            .extend(backends.iter().filter_map(Value::as_i64));
         let styles = column("/layout/styles");
         for (position, node) in indexes.iter().enumerate() {
-            let Some(node) = node.as_u64().and_then(|node| usize::try_from(node).ok()) else {
-                continue;
-            };
-            let is_frame = string(names.get(node))
-                .is_some_and(|name| FRAME_ELEMENTS.contains(&name.to_ascii_uppercase().as_str()));
-            let (true, Some(backend)) = (is_frame, backends.get(node).and_then(Value::as_i64))
-            else {
+            let backend = node
+                .as_u64()
+                .and_then(|node| usize::try_from(node).ok())
+                .and_then(|node| backends.get(node))
+                .and_then(Value::as_i64);
+            let Some(backend) = backend else {
                 continue;
             };
             let rect: Vec<f64> = bounds
@@ -87,20 +86,18 @@ pub(crate) fn collect_owner_boxes(capture: &Value) -> Option<HashMap<i64, OwnerB
                 .and_then(|values| string(values.get(1)));
             if let [x, y, width, height] = rect[..] {
                 let visible = !matches!(visibility, Some("hidden" | "collapse"));
-                boxes.insert(
-                    backend,
-                    OwnerBox {
-                        x,
-                        y,
-                        width,
-                        height,
-                        visible,
-                    },
-                );
+                let owner = OwnerBox {
+                    x,
+                    y,
+                    width,
+                    height,
+                    visible,
+                };
+                owners.boxes.entry(backend).or_insert(owner);
             }
         }
     }
-    laid_out.then_some(boxes)
+    laid_out.then_some(owners)
 }
 
 #[cfg(test)]
