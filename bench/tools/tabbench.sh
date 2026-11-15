@@ -26,7 +26,7 @@ H=/home/$U
 here=$(cd "$(dirname "$0")/.." && pwd)
 cmd=${1:?setup, sync, run or results}; shift || true
 AS=${TABBENCH_AS:-as-tabbench}
-as_user() { "$AS" env -i HOME="$H" USER="$U" LOGNAME="$U" LANG=C.UTF-8 PATH=/usr/bin:/bin "$@"; }
+as_user() { ( cd / && "$AS" env -i HOME="$H" USER="$U" LOGNAME="$U" LANG=C.UTF-8 PATH=/usr/bin:/bin "$@" ); }
 need_user() {
   as_user true 2>/dev/null || { echo "cannot run as $U through $AS; see the header" >&2; exit 2; }
 }
