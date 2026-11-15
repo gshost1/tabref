@@ -157,8 +157,10 @@ fn nothing_seen(acted: &Acted) -> bool {
     let Some(effects) = &acted.effects else {
         return false;
     };
-    matches!(acted.verb, "click" | "double-click" | "press" | "hover")
-        && !effects.settled.navigated
+    matches!(
+        acted.verb,
+        "click" | "double-click" | "press" | "hover" | "focus"
+    ) && !effects.settled.navigated
         && !effects.settled.same_document
         && effects.new_tab.is_none()
         && effects.dialogs().is_empty()

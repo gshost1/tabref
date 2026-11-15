@@ -91,6 +91,11 @@ pub(crate) enum Command {
         #[arg(value_name = "TARGET")]
         target: Option<String>,
     },
+    /// Move the keyboard focus to an element
+    Focus {
+        #[arg(value_name = "TARGET")]
+        target: String,
+    },
     /// Move the pointer over an element
     Hover {
         #[arg(value_name = "TARGET")]
@@ -207,6 +212,7 @@ impl Command {
             Self::Check { .. } => "check",
             Self::Uncheck { .. } => "uncheck",
             Self::Press { .. } => "press",
+            Self::Focus { .. } => "focus",
             Self::Hover { .. } => "hover",
             Self::Scroll { .. } => "scroll",
             Self::Upload { .. } => "upload",
