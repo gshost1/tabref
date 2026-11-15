@@ -1,6 +1,6 @@
 use serde_json::json;
 use tabref_core::{AppError, Deadline};
-use tabref_page::{LocateIntent, read_element, select_option};
+use tabref_page::{ActionNeed, LocateIntent, read_element, select_option};
 
 use super::act_target::{ActTarget, resolve_target};
 use super::acted::Acted;
@@ -28,7 +28,7 @@ pub(crate) fn act(
     option: &str,
     deadline: Deadline,
 ) -> Result<Acted, AppError> {
-    target.ensure_ready(session, LocateIntent::Select, deadline)?;
+    target.ensure_ready(session, ActionNeed::Select, deadline)?;
     let watched = session.watch_action(&target.tab_id, deadline)?;
     let chosen = select_option(
         session.connection(),

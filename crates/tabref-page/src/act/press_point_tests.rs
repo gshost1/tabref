@@ -3,7 +3,7 @@ use tabref_core::{ErrorCode, Point};
 
 use super::press_point;
 use crate::CdpConnection;
-use crate::act::act_fixture::{deadline, metrics, session, token};
+use crate::act::act_fixture::{deadline, metrics, resolved, session, token};
 use tabref_cdp::ScriptedTransport;
 
 fn quads(page_y: f64, quads: Value) -> ScriptedTransport {
@@ -102,12 +102,61 @@ fn only_the_visible_part_of_a_tall_node_is_pressed() {
     assert_eq!(point, Point { x: 50.0, y: 500.0 });
 }
 
+/// Scripts the look for an element a boxless node draws through, finding
+/// `child` (a backend node id) or nothing.
+fn drawn_child(transport: ScriptedTransport, child: Option<i64>) -> ScriptedTransport {
+    let found = match child {
+        Some(_) => json!({ "result": { "type": "object", "objectId": "C" } }),
+        None => json!({ "result": { "type": "object", "subtype": "null", "value": null } }),
+    };
+    let transport = resolved(transport).expect("Runtime.callFunctionOn", found);
+    match child {
+        Some(backend) => transport
+            .expect(
+                "DOM.describeNode",
+                json!({ "node": { "backendNodeId": backend } }),
+            )
+            .expect("Runtime.releaseObject", json!({}))
+            .expect("Runtime.releaseObject", json!({})),
+        None => transport.expect("Runtime.releaseObject", json!({})),
+    }
+}
+
 #[test]
 fn a_node_with_no_boxes_has_nothing_to_press() {
-    let mut connection = CdpConnection::new(quads(0.0, json!([])).boxed());
+    let mut connection = CdpConnection::new(drawn_child(quads(0.0, json!([])), None).boxed());
 
     let error = press_point(&mut connection, &session(), &token(7), deadline()).unwrap_err();
 
     assert_eq!(error.code, ErrorCode::ActionFailed);
     assert_eq!(error.details.unwrap()["kind"], "cdp_node_not_rendered");
+}
+
+#[test]
+fn a_display_contents_host_is_pressed_where_its_child_draws() {
+    let transport = drawn_child(quads(0.0, json!([])), Some(8))
+        .expect(
+            "DOM.getContentQuads",
+            json!({ "quads": [[0, 0, 20, 0, 20, 10, 0, 10]] }),
+        )
+        .expect("DOM.getNodeForLocation", json!({ "backendNodeId": 8 }))
+        .expect(
+            "DOM.resolveNode",
+            json!({ "object": { "objectId": "target" } }),
+        )
+        .expect(
+            "DOM.resolveNode",
+            json!({ "object": { "objectId": "hit" } }),
+        )
+        .expect(
+            "Runtime.callFunctionOn",
+            json!({ "result": { "type": "boolean", "value": true } }),
+        )
+        .expect("Runtime.releaseObject", json!({}))
+        .expect("Runtime.releaseObject", json!({}));
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let point = press_point(&mut connection, &session(), &token(7), deadline()).unwrap();
+
+    assert_eq!(point, Point { x: 10.0, y: 5.0 });
 }

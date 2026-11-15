@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use tabref_cdp::PageSession;
 use tabref_core::{AccessibilityNode, AppError, Deadline};
 use tabref_page::{
-    ElementToken, LocateIntent, locate, snapshot_page_within_budget, wait_actionable,
+    ActionNeed, ElementToken, LocateIntent, locate, snapshot_page_within_budget, wait_actionable,
 };
 
 use super::action_report::styled;
@@ -27,20 +27,21 @@ pub(crate) struct ActTarget {
 }
 
 impl ActTarget {
-    /// Waits briefly for the element to be able to take the action `intent`
-    /// names, and refuses it with the reason and the next step when it
-    /// stays hidden, disabled or read-only, before any input is sent.
+    /// Waits briefly for the element to be able to take an action that
+    /// needs `need`, and refuses it with the reason and the next step when
+    /// it stays hidden, disabled or read-only, or has no size to press,
+    /// before any input is sent.
     pub(crate) fn ensure_ready(
         &self,
         session: &mut Session,
-        intent: LocateIntent,
+        need: ActionNeed,
         deadline: Deadline,
     ) -> Result<(), AppError> {
         match wait_actionable(
             session.connection(),
             &self.session,
             &self.token,
-            intent,
+            need,
             deadline,
         )? {
             None => Ok(()),
@@ -69,7 +70,7 @@ pub(crate) fn resolve_target(
                     session.connection(),
                     &target.session,
                     &target.token,
-                    LocateIntent::Hover,
+                    ActionNeed::Shown,
                     deadline,
                 )?;
                 if let Some(blocked) = shown {
@@ -106,7 +107,10 @@ pub(crate) fn resolve_target(
                 ));
             }
             Ok(ActTarget {
-                subject: format!("{} {label}", found.role),
+                subject: match &found.name {
+                    Some(_) => format!("{} {label}", found.role),
+                    None => label.clone(),
+                },
                 token: found.token,
                 session: target_session,
                 tab_id: page.target_id,

@@ -23,12 +23,17 @@ impl Unactionable {
                 "{subject} is hidden ({}); open the section, tab or menu that holds it first",
                 self.detail
             ),
+            Blocker::NoSize => {
+                format!("{subject} has no size on screen; click the text or label that draws it")
+            }
             Blocker::Disabled => {
                 let why = match self.detail.as_str() {
                     "disabled" => String::new(),
                     other => format!(" ({other})"),
                 };
-                format!("{subject} is disabled{why}; it may need a field filled first")
+                format!(
+                    "{subject} is disabled{why}; wait for the page to enable it, or fill what it needs"
+                )
             }
             Blocker::ReadOnly => format!(
                 "{subject} is read-only; the page sets it, so change the control that fills it"

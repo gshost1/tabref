@@ -1,6 +1,6 @@
 use serde_json::json;
 use tabref_core::{AppError, Deadline};
-use tabref_page::{LocateIntent, click};
+use tabref_page::{ActionNeed, LocateIntent, click};
 
 use super::act_target::{ActTarget, resolve_target};
 use super::acted::Acted;
@@ -26,7 +26,7 @@ pub(crate) fn act(
     target: ActTarget,
     deadline: Deadline,
 ) -> Result<Acted, AppError> {
-    target.ensure_ready(session, LocateIntent::Click, deadline)?;
+    target.ensure_ready(session, ActionNeed::Click, deadline)?;
     let watched = session.watch_action(&target.tab_id, deadline)?;
     let point = click(
         session.connection(),

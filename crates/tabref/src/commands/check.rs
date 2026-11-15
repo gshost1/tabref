@@ -1,6 +1,6 @@
 use serde_json::json;
 use tabref_core::{AppError, Deadline};
-use tabref_page::{LocateIntent, read_element, set_checked};
+use tabref_page::{ActionNeed, LocateIntent, read_element, set_checked};
 
 use super::act_target::{ActTarget, resolve_target};
 use super::acted::Acted;
@@ -42,7 +42,7 @@ pub(crate) fn act(
             known: target.known,
         });
     }
-    target.ensure_ready(session, LocateIntent::Check, deadline)?;
+    target.ensure_ready(session, ActionNeed::Check, deadline)?;
     let watched = session.watch_action(&target.tab_id, deadline)?;
     let state = set_checked(
         session.connection(),

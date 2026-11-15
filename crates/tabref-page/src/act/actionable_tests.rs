@@ -2,9 +2,10 @@ use serde_json::{Value, json};
 use tabref_core::{Deadline, ErrorCode};
 
 use super::wait_actionable;
+use crate::CdpConnection;
 use crate::act::act_fixture::{deadline, resolved, session, token};
+use crate::act::action_need::ActionNeed;
 use crate::act::blocker::Blocker;
-use crate::{CdpConnection, LocateIntent};
 use tabref_cdp::ScriptedTransport;
 
 fn checked(transport: ScriptedTransport, state: Value) -> ScriptedTransport {
@@ -37,7 +38,7 @@ fn a_ready_element_costs_one_check_and_no_wait() {
         &mut connection,
         &session(),
         &token(3),
-        LocateIntent::Click,
+        ActionNeed::Click,
         deadline(),
     )
     .unwrap();
@@ -47,6 +48,7 @@ fn a_ready_element_costs_one_check_and_no_wait() {
     assert_eq!(calls(&sent, "Runtime.callFunctionOn"), 1);
     let need = &sent[2]["params"]["arguments"][0]["value"];
     assert_eq!(need["enabled"], true);
+    assert_eq!(need["box"], true);
     assert_eq!(need["editable"], false);
 }
 
@@ -67,7 +69,7 @@ fn an_element_that_becomes_enabled_is_waited_for_on_one_resolve() {
         &mut connection,
         &session(),
         &token(3),
-        LocateIntent::Click,
+        ActionNeed::Click,
         deadline(),
     )
     .unwrap();
@@ -90,7 +92,7 @@ fn an_element_still_blocked_when_the_wait_ends_is_reported_not_acted_on() {
         &mut connection,
         &session(),
         &token(3),
-        LocateIntent::Hover,
+        ActionNeed::Hover,
         Deadline::after(60).unwrap(),
     )
     .unwrap()
@@ -113,7 +115,7 @@ fn a_fill_asks_for_an_editable_field() {
         &mut connection,
         &session(),
         &token(3),
-        LocateIntent::Fill,
+        ActionNeed::Fill,
         Deadline::after(60).unwrap(),
     )
     .unwrap()
@@ -121,7 +123,9 @@ fn a_fill_asks_for_an_editable_field() {
 
     assert_eq!(blocked.blocker, Blocker::ReadOnly);
     let sent = sent.lock().unwrap();
-    assert_eq!(sent[2]["params"]["arguments"][0]["value"]["editable"], true);
+    let need = &sent[2]["params"]["arguments"][0]["value"];
+    assert_eq!(need["editable"], true);
+    assert_eq!(need["box"], false);
 }
 
 #[test]
@@ -136,10 +140,34 @@ fn a_detached_element_is_a_stale_ref_at_once() {
         &mut connection,
         &session(),
         &token(3),
-        LocateIntent::Click,
+        ActionNeed::Click,
         deadline(),
     )
     .unwrap_err();
 
     assert_eq!(error.code, ErrorCode::StaleRef);
+}
+
+#[test]
+fn an_element_with_no_size_is_reported_at_once_without_a_wait() {
+    let transport = released(checked(
+        resolved(ScriptedTransport::new()),
+        json!({ "blocker": "zero", "detail": "zero size" }),
+    ));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let blocked = wait_actionable(
+        &mut connection,
+        &session(),
+        &token(3),
+        ActionNeed::Click,
+        deadline(),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(blocked.blocker, Blocker::NoSize);
+    assert_eq!(blocked.waited_ms, 0);
+    assert_eq!(calls(&sent.lock().unwrap(), "Runtime.callFunctionOn"), 1);
 }

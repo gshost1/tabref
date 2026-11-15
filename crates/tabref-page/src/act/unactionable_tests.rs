@@ -18,7 +18,7 @@ fn a_disabled_button_names_itself_and_the_next_step() {
     assert_eq!(error.kind(), Some("element_disabled"));
     assert_eq!(
         error.message,
-        r#"button "Save" is disabled; it may need a field filled first"#
+        r#"button "Save" is disabled; wait for the page to enable it, or fill what it needs"#
     );
     assert_eq!(error.disposition, DeliverySemantics::not_delivered());
 }
@@ -53,4 +53,14 @@ fn a_read_only_field_is_its_own_kind() {
     let error = blocked(Blocker::ReadOnly, "read-only").error(r#"textfield "Code""#);
     assert_eq!(error.kind(), Some("element_readonly"));
     assert!(error.message.contains("is read-only"), "{}", error.message);
+}
+
+#[test]
+fn an_element_with_no_size_says_what_to_click_instead() {
+    let error = blocked(Blocker::NoSize, "zero size").error(r#"link "Floaty""#);
+    assert_eq!(error.kind(), Some("element_zero_size"));
+    assert_eq!(
+        error.message,
+        r#"link "Floaty" has no size on screen; click the text or label that draws it"#
+    );
 }

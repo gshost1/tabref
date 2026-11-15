@@ -45,7 +45,7 @@ fn a_disabled_button_is_refused_with_the_reason_and_is_not_clicked() {
     assert!(!run.ok, "{}", run.stdout);
     assert!(
         run.stderr.starts_with(
-            r#"error ACTION_FAILED (element_disabled): button "Save" is disabled; it may need a field filled first"#
+            r#"error ACTION_FAILED (element_disabled): button "Save" is disabled; wait for the page to enable it, or fill what it needs"#
         ),
         "{}",
         run.stderr
