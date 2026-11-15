@@ -172,6 +172,8 @@ fn a_profile_keeps_its_data_and_its_running_browser_is_reused() {
     };
     let url = format!("http://127.0.0.1:{}/", serve(&[("/", PAGE)]));
     let launch = [
+        "--timeout",
+        "30000",
         "open",
         url.as_str(),
         "--launch",
@@ -255,12 +257,19 @@ fn a_launch_on_a_profile_is_not_served_by_a_kept_connection_to_another_browser()
     let profiles = Dirs {
         homes: vec![profile.parent().unwrap().to_path_buf()],
     };
-    let throwaway = tabref(&home, &config, &["open", "about:blank", "--launch"], false);
+    let throwaway = tabref(
+        &home,
+        &config,
+        &["--timeout", "30000", "open", "about:blank", "--launch"],
+        false,
+    );
     let first = launched_pid(&home);
     let on_profile = tabref(
         &home,
         &config,
         &[
+            "--timeout",
+            "30000",
             "open",
             "about:blank",
             "--launch",
