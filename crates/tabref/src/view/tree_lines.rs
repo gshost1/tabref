@@ -78,14 +78,6 @@ fn shows(node: &AccessibilityNode, mode: ViewMode, holds_shown: bool) -> bool {
     }
     match mode {
         ViewMode::Interactive => node.role == "heading" && named,
-        ViewMode::All => {
-            named
-                || node
-                    .identity
-                    .value
-                    .as_deref()
-                    .is_some_and(|value| !value.trim().is_empty())
-        }
     }
 }
 

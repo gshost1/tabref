@@ -27,6 +27,7 @@ use crate::cli::command::Command;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::session_options::SessionOptions;
+use crate::view::view_request::ViewRequest;
 
 /// Runs the parsed command. Every command but `skill` runs against one
 /// [`Session`], built here and nowhere else.
@@ -59,7 +60,23 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
 fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
         Command::Open { url, .. } => open::run(session, url),
-        Command::Snap { all, root } => snap::run(session, *all, root.as_deref()),
+        Command::Snap {
+            all,
+            root,
+            rows,
+            full,
+            from,
+        } => snap::run(
+            session,
+            &ViewRequest {
+                all: *all,
+                full: *full,
+                root: root.clone(),
+                rows: rows.clone(),
+                from: *from,
+                section: None,
+            },
+        ),
         Command::Click { target } => click::run(session, target),
         Command::Fill { target, text } => fill::run(session, target, text),
         Command::Select { target, option } => select::run(session, target, option),
@@ -74,7 +91,22 @@ fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppErro
         } => scroll::run(session, direction, target.as_deref(), *px),
         Command::Upload { target, files } => upload::run(session, target, files),
         Command::Find { text, role } => find::run(session, text, role.as_deref()),
-        Command::Read { target } => read::run(session, target.as_deref()),
+        Command::Read {
+            target,
+            section,
+            rows,
+            from,
+            ..
+        } => read::run(
+            session,
+            &ViewRequest {
+                root: target.clone(),
+                rows: rows.clone(),
+                from: *from,
+                section: section.clone(),
+                ..ViewRequest::default()
+            },
+        ),
         Command::Wait {
             text,
             gone,

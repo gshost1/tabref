@@ -1,37 +1,27 @@
-use tabref_core::{AccessibilityNode, AppError};
+use tabref_core::AppError;
 
 use crate::output::outcome::Outcome;
-use crate::output::page_report::{page_report, subtree_report};
 use crate::session::Session;
-use crate::view::view_mode::ViewMode;
+use crate::view::snapshot_view::snapshot_view;
+use crate::view::view_request::ViewRequest;
+use crate::view::view_scope::ViewScope;
 
-/// Takes a new snapshot of the current tab. With `root`, prints only the
-/// subtree of that element, read fresh, with refs of the new snapshot.
-pub(crate) fn run(
-    session: &mut Session,
-    all: bool,
-    root: Option<&str>,
-) -> Result<Outcome, AppError> {
-    let mode = ViewMode::from_all(all);
-    let Some(root) = root else {
-        let captured = session.capture()?;
-        return Ok(page_report(&captured, mode));
+/// Takes a new snapshot of the current tab and prints its page view. With
+/// `--root`, prints only that element's part of the page, with refs of the
+/// new snapshot; `--rows`, `--from` and `--full` pick the rows, the first
+/// line and whole lines.
+pub(crate) fn run(session: &mut Session, request: &ViewRequest) -> Result<Outcome, AppError> {
+    let scope = match &request.root {
+        Some(root) => {
+            let target = session.resolve_ref(root)?;
+            ViewScope::Element {
+                target_id: target.token.target_id.clone(),
+                backend_id: target.token.backend_node_id,
+            }
+        }
+        None => ViewScope::Page,
     };
-    let target = session.resolve_ref(root)?;
     let captured = session.capture()?;
-    let token = target.token.to_string();
-    let subtree = find_subtree(&captured.tree, &token).ok_or_else(|| {
-        AppError::stale_ref_because(format!("{} is no longer in the page", target.ref_id))
-            .with_details(serde_json::json!({ "kind": "cdp_node_gone" }))
-    })?;
-    Ok(subtree_report(&captured, subtree, mode))
-}
-
-fn find_subtree<'a>(node: &'a AccessibilityNode, token: &str) -> Option<&'a AccessibilityNode> {
-    if node.identity.retained_object.as_deref() == Some(token) {
-        return Some(node);
-    }
-    node.children
-        .iter()
-        .find_map(|child| find_subtree(child, token))
+    let options = request.snap_options(&captured.info.url)?;
+    snapshot_view(session, &captured, &options, &scope)
 }
