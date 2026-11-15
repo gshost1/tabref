@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use serde_json::json;
 use tabref_cdp::{
-    BrowserEndpoint, CdpConnection, PageSession, PageTarget, attach_to_target,
+    BrowserEndpoint, CdpConnection, PageSession, PageTarget, attach_to_target_with,
     create_background_tab, is_protocol_error, list_page_targets, target_gone,
 };
 use tabref_core::{AppError, Deadline, RefStore};
@@ -137,8 +137,9 @@ impl Session {
     }
 
     /// The flattened session for `target_id`, attached once per connection,
-    /// with page events on so navigations and dialogs are seen. A target the
-    /// browser no longer has is `WINDOW_NOT_FOUND` with kind
+    /// with page and lifecycle events on so navigations, loads and dialogs
+    /// are seen. Turning them on rides in the attach's own round trip. A
+    /// target the browser no longer has is `WINDOW_NOT_FOUND` with kind
     /// `cdp_target_gone`.
     pub(crate) fn attach(&mut self, target_id: &str) -> Result<PageSession, AppError> {
         self.scope.claim(target_id)?;
@@ -146,8 +147,12 @@ impl Session {
             return Ok(session.clone());
         }
         let deadline = self.scope.deadline;
-        let session =
-            attach_to_target(&mut self.connection, target_id, deadline).map_err(|error| {
+        let events = [
+            ("Page.enable", json!({})),
+            ("Page.setLifecycleEventsEnabled", json!({ "enabled": true })),
+        ];
+        let session = attach_to_target_with(&mut self.connection, target_id, &events, deadline)
+            .map_err(|error| {
                 if is_protocol_error(&error) {
                     let detail = error.platform_detail.clone().unwrap_or_default();
                     target_gone("Target.attachToTarget", detail)
@@ -155,12 +160,6 @@ impl Session {
                     error
                 }
             })?;
-        self.connection.call(
-            "Page.enable",
-            json!({}),
-            Some(&session.session_id),
-            deadline,
-        )?;
         self.attached.insert(target_id.to_owned(), session.clone());
         Ok(session)
     }

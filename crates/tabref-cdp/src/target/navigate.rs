@@ -20,15 +20,35 @@ pub fn navigate(
     url: &str,
     deadline: Deadline,
 ) -> Result<(), AppError> {
-    enable_load_events(connection, session, deadline)?;
+    navigate_by(connection, session, url, deadline, deadline)
+}
+
+/// [`navigate`] with its two waits bounded apart. `commit` bounds the wait
+/// for the browser to start the new document: `Page.navigate` answers only
+/// once the response arrives, which a slow server, or a browser that has
+/// just started and still loads its profile, holds back for seconds. `load`
+/// bounds the wait for the load after that; a commit later than `load`
+/// leaves the load wait until `commit`. A commit that misses `commit` is
+/// `TIMEOUT` with kind `cdp_navigation_pending`.
+pub fn navigate_by(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    url: &str,
+    commit: Deadline,
+    load: Deadline,
+) -> Result<(), AppError> {
+    enable_load_events(connection, session, commit)?;
     let session_id = session.session_id.as_str();
     connection.discard_events(|event| is_any_load(event, session_id));
-    let result = connection.call(
-        "Page.navigate",
-        json!({ "url": url }),
-        Some(session_id),
-        deadline,
-    )?;
+    let result = connection
+        .call(
+            "Page.navigate",
+            json!({ "url": url }),
+            Some(session_id),
+            commit,
+        )
+        .map_err(|error| commit_timeout(error, url))?;
+    let deadline = if load.is_expired() { commit } else { load };
     if let Some(error_text) = result
         .get("errorText")
         .and_then(Value::as_str)
@@ -148,6 +168,21 @@ fn navigation_failed(url: &str, error_text: &str) -> AppError {
     )
     .with_platform_detail(error_text)
     .with_details(json!({ "kind": "cdp_navigation_failed", "url": url }))
+    .with_disposition(DeliverySemantics::delivered_unverified())
+}
+
+fn commit_timeout(error: AppError, url: &str) -> AppError {
+    if !is_timeout(&error) {
+        return error;
+    }
+    AppError::timeout(format!(
+        "The browser did not start loading {url} before the deadline"
+    ))
+    .with_suggestion(
+        "A slow server, or a browser that has just started and is still loading its \
+             profile, holds a navigation back; repeat the same command, or pass a longer --timeout",
+    )
+    .with_details(json!({ "kind": "cdp_navigation_pending", "url": url, "retryable": true }))
     .with_disposition(DeliverySemantics::delivered_unverified())
 }
 

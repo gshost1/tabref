@@ -1,7 +1,7 @@
 use serde_json::json;
 use tabref_core::Deadline;
 
-use super::{attach_to_target, create_background_tab, list_page_targets};
+use super::{attach_to_target, attach_to_target_with, create_background_tab, list_page_targets};
 use crate::CdpConnection;
 use crate::ScriptedTransport;
 
@@ -48,6 +48,60 @@ fn attach_flattens_and_releases_a_paused_target() {
         json!({ "targetId": "P1", "flatten": true })
     );
     assert_eq!(sent[1]["sessionId"], "S9");
+}
+
+#[test]
+fn follow_ups_go_out_with_the_release_before_any_reply_is_awaited() {
+    let transport = ScriptedTransport::new()
+        .expect("Target.attachToTarget", json!({ "sessionId": "S9" }))
+        .expect_silence("Runtime.runIfWaitingForDebugger")
+        .expect("Page.enable", json!({}))
+        .expect("Page.setLifecycleEventsEnabled", json!({}));
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let follow_ups = [
+        ("Page.enable", json!({})),
+        ("Page.setLifecycleEventsEnabled", json!({ "enabled": true })),
+    ];
+    let error = attach_to_target_with(
+        &mut connection,
+        "P1",
+        &follow_ups,
+        Deadline::after(50).unwrap(),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, tabref_core::ErrorCode::Timeout);
+}
+
+#[test]
+fn follow_ups_answer_in_order_and_are_remembered() {
+    let transport = ScriptedTransport::new()
+        .expect("Target.attachToTarget", json!({ "sessionId": "S9" }))
+        .expect("Runtime.runIfWaitingForDebugger", json!({}))
+        .expect("Page.enable", json!({}));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let session = attach_to_target_with(
+        &mut connection,
+        "P1",
+        &[("Page.enable", json!({}))],
+        deadline(),
+    )
+    .unwrap();
+    connection
+        .call(
+            "Page.enable",
+            json!({}),
+            Some(&session.session_id),
+            deadline(),
+        )
+        .unwrap();
+
+    let sent = sent.lock().unwrap();
+    assert_eq!(sent.len(), 3);
+    assert_eq!(sent[2]["sessionId"], "S9");
 }
 
 #[test]

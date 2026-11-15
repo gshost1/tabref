@@ -26,11 +26,12 @@ pub use launch::launch_options::LaunchOptions;
 pub use launch::launched_browser::LaunchedBrowser;
 pub use target::frame_entry::FrameEntry;
 pub use target::frame_tree::{current_loader, list_frames, parse_frame_tree};
-pub use target::navigate::{navigate, wait_for_load};
+pub use target::navigate::{navigate, navigate_by, wait_for_load};
 pub use target::page_session::PageSession;
 pub use target::page_target::PageTarget;
 pub use target::targets::{
-    activate_target, attach_to_target, close_target, create_background_tab, list_page_targets,
+    activate_target, attach_to_target, attach_to_target_with, close_target, create_background_tab,
+    list_page_targets,
 };
 pub use transport::cdp_transport::CdpTransport;
 #[cfg(any(test, feature = "scripted"))]

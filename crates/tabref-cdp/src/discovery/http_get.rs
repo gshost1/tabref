@@ -6,6 +6,7 @@ use tabref_core::{AppError, Deadline};
 
 use super::connect_error::endpoint_unreachable;
 use super::http_response::{http_ok_body, read_http_response};
+use crate::transport::stalled_retry::retry_once_if_stalled;
 use crate::transport::transport_error::{transport_failed, transport_timeout};
 
 const MIN_IO_SLICE: Duration = Duration::from_millis(1);
@@ -13,12 +14,18 @@ const MIN_IO_SLICE: Duration = Duration::from_millis(1);
 /// Issues one `GET` to the loopback `address` and returns the body of its `200`
 /// response. The reader ends the read once Content-Length
 /// bytes of body arrive, because Chromium holds the connection open after
-/// answering; every step is bounded by what remains of `deadline`.
+/// answering; every step is bounded by what remains of `deadline`. A server
+/// that takes the connection and sends nothing is asked once more on a
+/// fresh connection (see `stalled_retry`).
 pub(crate) fn http_get_loopback(
     address: SocketAddr,
     path: &str,
     deadline: Deadline,
 ) -> Result<String, AppError> {
+    retry_once_if_stalled(deadline, |attempt| get_once(address, path, attempt))
+}
+
+fn get_once(address: SocketAddr, path: &str, deadline: Deadline) -> Result<String, AppError> {
     let port = address.port();
     let mut stream = TcpStream::connect_timeout(&address, slice(deadline)?)
         .map_err(|error| endpoint_unreachable(port, &error.to_string()))?;
@@ -45,3 +52,7 @@ fn slice(deadline: Deadline) -> Result<Duration, AppError> {
     }
     Ok(deadline.remaining().max(MIN_IO_SLICE))
 }
+
+#[cfg(test)]
+#[path = "http_get_tests.rs"]
+mod tests;

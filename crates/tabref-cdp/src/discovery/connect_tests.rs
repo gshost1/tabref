@@ -1,7 +1,11 @@
+use std::net::TcpListener;
+use std::thread;
+use std::time::{Duration, Instant};
+
 use serde_json::json;
 use tabref_core::{AppError, Deadline, ErrorCode};
 
-use super::verify_connection;
+use super::{connect, verify_connection};
 use crate::ScriptedTransport;
 use crate::{BrowserEndpoint, CdpConnection, EndpointSource, WebSocketUrl};
 
@@ -48,6 +52,61 @@ fn a_silent_active_port_browser_reports_pending_approval() {
     assert_eq!(details["kind"], "cdp_approval_pending");
     assert_eq!(details["port"], 9222);
     assert!(error.suggestion.unwrap().contains("Allow remote debugging"));
+}
+
+fn listening_endpoint(source: EndpointSource) -> (TcpListener, BrowserEndpoint) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let endpoint = BrowserEndpoint {
+        websocket_url: WebSocketUrl::loopback(port, "/devtools/browser/x").unwrap(),
+        source,
+        product: None,
+    };
+    (listener, endpoint)
+}
+
+#[test]
+fn an_upgrade_that_stalls_is_retried_on_a_fresh_connection() {
+    let (listener, endpoint) = listening_endpoint(EndpointSource::JsonVersion);
+    let server = thread::spawn(move || {
+        let (silent, _) = listener.accept().unwrap();
+        let (answering, _) = listener.accept().unwrap();
+        let mut socket = tungstenite::accept(answering).unwrap();
+        drop(silent);
+        while socket.read().is_ok() {}
+    });
+
+    let started = Instant::now();
+    let connection = connect(&endpoint, Deadline::after(4_000).unwrap());
+
+    assert!(connection.is_ok());
+    assert!(started.elapsed() < Duration::from_millis(3_500));
+    drop(connection);
+    server.join().unwrap();
+}
+
+#[test]
+fn an_upgrade_held_for_approval_is_never_asked_twice() {
+    let (listener, endpoint) = listening_endpoint(EndpointSource::DevToolsActivePort);
+    listener.set_nonblocking(true).unwrap();
+    let server = thread::spawn(move || {
+        let mut accepted = Vec::new();
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(2_800) {
+            if let Ok((stream, _)) = listener.accept() {
+                accepted.push(stream);
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        accepted.len()
+    });
+
+    let Err(error) = connect(&endpoint, Deadline::after(2_200).unwrap()) else {
+        panic!("a held upgrade connected");
+    };
+
+    assert_eq!(error.details.unwrap()["kind"], "cdp_approval_pending");
+    assert_eq!(server.join().unwrap(), 1);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use serde_json::json;
 use tabref_core::{Deadline, ErrorCode};
 
-use super::{navigate, wait_for_load};
+use super::{navigate, navigate_by, wait_for_load};
 use crate::ScriptedTransport;
 use crate::{CdpConnection, PageSession};
 
@@ -152,6 +152,46 @@ fn buffered_loads_of_an_earlier_document_do_not_end_the_wait() {
         wait_for_load(&mut connection, &session(), Deadline::after(50).unwrap()).unwrap_err();
 
     assert_eq!(error.code, ErrorCode::Timeout);
+}
+
+#[test]
+fn a_navigation_the_browser_never_starts_is_a_pending_navigation() {
+    let transport = enabled().expect_silence("Page.navigate");
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let error = navigate_by(
+        &mut connection,
+        &session(),
+        "http://127.0.0.1:1/",
+        Deadline::after(50).unwrap(),
+        Deadline::after(10).unwrap(),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::Timeout);
+    let details = error.details.unwrap();
+    assert_eq!(details["kind"], "cdp_navigation_pending");
+    assert_eq!(details["retryable"], true);
+}
+
+#[test]
+fn a_commit_after_the_load_bound_still_waits_for_its_document() {
+    let transport = enabled().expect_with_events(
+        "Page.navigate",
+        vec![json!({ "method": "Page.lifecycleEvent", "sessionId": "S",
+            "params": { "name": "DOMContentLoaded", "frameId": "F", "loaderId": "L2" } })],
+        json!({ "result": { "frameId": "F", "loaderId": "L2" } }),
+    );
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    navigate_by(
+        &mut connection,
+        &session(),
+        "https://a.test/",
+        Deadline::after(500).unwrap(),
+        Deadline::after(0).unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]
