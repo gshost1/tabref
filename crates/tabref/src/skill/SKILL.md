@@ -3,6 +3,8 @@
 Start: `tabref open <url>` loads the page and prints it (first call: `tabref skill && tabref open <url>`).
 Chrome is already connected (TABREF_CDP). Output is plain text sized to read whole: do not pipe it through
 grep, head or sed, and do not sleep; every command waits for the page itself.
+Only when the user asks for their own browser: `tabref connect --user-chrome` (opt-in; it drives their
+logged-in Chrome and its sessions; `tabref connect --off` stops).
 
 ## Reading
 One line per block in reading order; `#` lines are headings. Controls sit in brackets with their ref:

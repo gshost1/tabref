@@ -15,6 +15,8 @@ pub(crate) mod snapshot_capture;
 pub(crate) mod tab_choice;
 pub(crate) mod tab_claim;
 pub(crate) mod tab_order;
+pub(crate) mod user_chrome;
+pub(crate) mod user_chrome_record;
 
 use std::collections::HashMap;
 
@@ -31,6 +33,7 @@ use session_options::SessionOptions;
 use tab_choice::choose_tab;
 use tab_claim::TabClaim;
 use tab_order::{order_text, stable_order};
+use user_chrome_record::{choice_in_use, opt_in_guard};
 
 /// Everything one command runs against: the DevTools connection, the page
 /// sessions attached through it, the ref store and what the current command
@@ -45,6 +48,7 @@ pub(crate) struct Session {
     attached: HashMap<String, PageSession>,
     scope: CommandScope,
     warning: Option<String>,
+    choice: Option<String>,
 }
 
 impl Session {
@@ -60,9 +64,13 @@ impl Session {
     ) -> Result<Self, AppError> {
         let scope = CommandScope::new(options, claim)?;
         let store = RefStore::open()?;
-        let browser = connect_browser(options, &store, scope.deadline)?;
+        let in_use = choice_in_use(&store, options);
+        let record = in_use.as_ref().map(|(_, record)| record);
+        let browser = connect_browser(options, &store, record, scope.deadline)?;
+        let choice = in_use.map(|(text, _)| text);
         let mut connection = browser.connection;
         connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
+        connection.set_guard(choice.clone().map(|chosen| opt_in_guard(&store, chosen)));
         Ok(Self {
             connection,
             endpoint: browser.endpoint,
@@ -70,6 +78,7 @@ impl Session {
             attached: HashMap::new(),
             scope,
             warning: browser.warning,
+            choice,
         })
     }
 

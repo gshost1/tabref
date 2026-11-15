@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
 use super::cdp_event::CdpEvent;
-use super::connection_health::{ConnectionHealth, cancelled};
+use super::connection_health::{ConnectionGuard, ConnectionHealth};
 use super::connection_io::session_detached;
 use super::event_buffer::EventBuffer;
 use super::reply_stash::ReplyStash;
@@ -65,6 +65,13 @@ impl CdpConnection {
         self.health.cancel = cancel;
     }
 
+    /// Checks `guard` before every request and, while a reply or event is
+    /// awaited, every 50 ms: its error ends the request or wait at once. The
+    /// guard stays until it is replaced.
+    pub fn set_guard(&mut self, guard: Option<ConnectionGuard>) {
+        self.health.guard = guard;
+    }
+
     /// Sends `method` and waits for its reply. A flattened target session is
     /// addressed with `session_id`. A CDP error reply becomes an adapter
     /// error carrying the CDP message in `platform_detail`.
@@ -122,9 +129,7 @@ impl CdpConnection {
         session_id: Option<&str>,
         deadline: Deadline,
     ) -> Result<u64, AppError> {
-        if self.health.is_cancelled() {
-            return Err(cancelled());
-        }
+        self.health.check()?;
         if session_id.is_some_and(|session| self.ledger.is_detached(session)) {
             return Err(session_detached(method));
         }

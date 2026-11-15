@@ -37,7 +37,10 @@ pub fn connect_held(
     connect_with(endpoint, deadline, &|| held.confirm())
 }
 
-fn connect_with(
+/// [`connect`], running `before_upgrade` once the TCP connection is up and
+/// before anything is sent on it, for a caller with its own check that the
+/// port did not change hands (macOS: `lsof`).
+pub fn connect_with(
     endpoint: &BrowserEndpoint,
     deadline: Deadline,
     before_upgrade: &dyn Fn() -> Result<(), AppError>,

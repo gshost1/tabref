@@ -5,6 +5,7 @@ pub(crate) mod batch_step;
 pub(crate) mod check;
 pub(crate) mod click;
 pub(crate) mod close;
+pub(crate) mod connect;
 pub(crate) mod do_batch;
 pub(crate) mod do_expand;
 pub(crate) mod do_read_steps;
@@ -182,6 +183,9 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
         Command::Close { tab } => close::run(session, tab.as_deref()),
         Command::Skill => Ok(skill::run()),
         Command::Daemon { action } => crate::daemon::control::run_in_session(session, action),
+        Command::Connect { .. } => Err(AppError::invalid_args(
+            "'connect' is handled by the client, not inside a session",
+        )),
     }
 }
 

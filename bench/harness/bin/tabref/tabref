@@ -10,4 +10,17 @@ export TABREF_CDP="${HO_CDP_PORT:-$(cat "${HO_RUNS:-$H/runs}/web-current-port")}
 export TABREF_HOME="${HO_ARM_HOME:-$HOME/.ho-tabref}/tabref-home"
 export TABREF_AGENT_DESKTOP=/nonexistent
 unset ANTHROPIC_API_KEY AI_GATEWAY_API_KEY
+# `tabref connect` attaches to the operator's own browser (opt-in); the run's Chrome is the only browser here,
+# as the ab wrapper refuses --auto-connect.
+skip=0 cmd=""
+for a in "$@"; do
+  if (( skip )); then skip=0; continue; fi
+  case $a in
+    --cdp|--tab|--timeout) skip=1 ;;
+    --) break ;;
+    -*) ;;
+    *) cmd=$a; break ;;
+  esac
+done
+[[ $cmd == connect ]] && { echo "bench: tabref connect is disabled; the run's Chrome is already connected" >&2; exit 64; }
 exec "${HO_WRAP:-$H/heldout/linux/wrap.sh}" "$bin" "$@"

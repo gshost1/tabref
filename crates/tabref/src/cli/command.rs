@@ -170,6 +170,18 @@ pub(crate) enum Command {
     Tab { tab: String },
     /// Close a tab (the current one by default)
     Close { tab: Option<String> },
+    /// Opt in to driving your own, logged-in Chrome, or stop (--off)
+    Connect {
+        /// Attach to your own running browser, found through its remote-debugging file
+        #[arg(long, conflicts_with = "off")]
+        user_chrome: bool,
+        /// With --user-chrome: the browser's user-data directory, when several run
+        #[arg(long, value_name = "DIR", requires = "user_chrome")]
+        user_data_dir: Option<PathBuf>,
+        /// Stop using your browser; later commands go back to tabref's own
+        #[arg(long)]
+        off: bool,
+    },
     /// Print the agent guide
     Skill,
     /// Start, inspect or stop the background daemon that keeps the browser connection
@@ -203,6 +215,7 @@ impl Command {
             Self::Tabs => "tabs",
             Self::Tab { .. } => "tab",
             Self::Close { .. } => "close",
+            Self::Connect { .. } => "connect",
             Self::Skill => "skill",
             Self::Daemon { .. } => "daemon",
         }

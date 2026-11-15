@@ -253,6 +253,38 @@ fn a_chrome_of_this_user_on_9222_is_used_without_being_named() {
 }
 
 #[test]
+fn a_launched_browser_is_reused_by_the_next_command() {
+    if !live() {
+        return;
+    }
+    let home = harness_home("owner-reuse");
+    let opened = tabref(
+        &home,
+        &["open", "data:text/html,<h1>Reused</h1>", "--launch"],
+        true,
+    );
+    let next = tabref(&home, &["snap"], true);
+    let kept = home.join("launched.json").exists();
+    let record: serde_json::Value = std::fs::read_to_string(home.join("launched.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    if let Some(pid) = record["pid"].as_u64() {
+        kill_group(u32::try_from(pid).unwrap());
+    }
+    let _ = std::fs::remove_dir_all(record["profile_dir"].as_str().unwrap_or("/nonexistent"));
+    let _ = std::fs::remove_dir_all(&home);
+    assert!(opened.ok, "{}{}", opened.stdout, opened.stderr);
+    assert!(
+        next.ok && next.stdout.contains("Reused"),
+        "{}{}",
+        next.stdout,
+        next.stderr
+    );
+    assert!(kept, "the launch record of a running browser was forgotten");
+}
+
+#[test]
 fn a_launched_browser_whose_port_was_taken_over_is_forgotten_untouched() {
     if !live() {
         return;
