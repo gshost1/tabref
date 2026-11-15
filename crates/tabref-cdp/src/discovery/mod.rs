@@ -7,5 +7,8 @@ pub(crate) mod endpoint_spec;
 pub(crate) mod http_get;
 pub(crate) mod http_response;
 pub(crate) mod json_version;
+pub(crate) mod listener_owner;
+pub(crate) mod listener_verdict;
+pub(crate) mod process_view;
 pub(crate) mod user_data_dir;
 pub(crate) mod websocket_url;

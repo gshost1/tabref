@@ -2,7 +2,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use tabref_cdp::{
-    BrowserEndpoint, CdpConnection, EndpointSpec, LaunchOptions, connect, launch_chrome,
+    BrowserEndpoint, CdpConnection, EndpointSpec, LaunchOptions, ListenerVerdict, ProcessView,
+    check_listener, connect, is_chrome_family, launch_chrome,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 
@@ -13,12 +14,18 @@ const DEFAULT_PORT: u16 = 9222;
 const PROBE_BUDGET: Duration = Duration::from_millis(300);
 
 /// Finds the browser and opens the one DevTools connection the command
-/// uses. In order: the endpoint `--cdp`/`TABREF_CDP` names; the browser a
-/// previous `open --launch` started; a browser on port 9222; and, when the
-/// command allows it, a browser started now. A launch record is forgotten
-/// only when its browser is gone: the connection is refused or its process
-/// has exited. A launched browser that is slow to answer is busy, not gone,
-/// so the error is returned rather than a second browser started.
+/// uses. tabref attaches only to a browser it can vouch for, in order: the
+/// endpoint `--cdp`/`TABREF_CDP` names (the user chose it); the browser a
+/// previous `open --launch` started, while the port is still held by a
+/// process running that launch's profile; a Chrome of this user on port
+/// 9222, checked to own the port before anything is sent to it (Linux only;
+/// elsewhere the port must be passed with `--cdp`); and, when the command
+/// allows it, a browser started now. Something else on 9222 is refused with
+/// kind `cdp_endpoint_unverified`. A launch record is forgotten once its
+/// browser is gone: the port is free, held by something else, refuses the
+/// connection, or its process has exited. A launched browser that is slow
+/// to answer is busy, not gone, so the error is returned rather than a
+/// second browser started.
 pub(crate) fn connect_browser(
     options: &SessionOptions,
     store: &RefStore,
@@ -32,7 +39,7 @@ pub(crate) fn connect_browser(
     if let Some(found) = launched_browser(store, deadline)? {
         return Ok(found);
     }
-    if let Some(found) = default_port(deadline) {
+    if let Some(found) = default_port(deadline, options.launch.is_some())? {
         return Ok(found);
     }
     match &options.launch {
@@ -52,6 +59,14 @@ fn launched_browser(
         forget_launched(store);
         return Ok(None);
     };
+    let ours = launched_from(&record.profile_dir);
+    if matches!(
+        check_listener(record.port, &ours),
+        ListenerVerdict::Nothing | ListenerVerdict::Untrusted(_)
+    ) {
+        forget_launched(store);
+        return Ok(None);
+    }
     match connect(&endpoint, deadline) {
         Ok(connection) => Ok(Some((endpoint, connection))),
         Err(error) if browser_is_gone(&error, process_alive(record.pid)) => {
@@ -63,6 +78,13 @@ fn launched_browser(
         )),
         Err(error) => Err(error),
     }
+}
+
+/// Whether a process runs the browser `open --launch` started with
+/// `profile_dir`, as its command line names that profile.
+pub(crate) fn launched_from(profile_dir: &Path) -> impl Fn(&ProcessView) -> bool + use<> {
+    let flag = format!("--user-data-dir={}", profile_dir.display());
+    move |process: &ProcessView| process.cmdline.contains(&flag)
 }
 
 /// Whether a failed connection to a launched browser means it is gone: the
@@ -80,11 +102,46 @@ fn process_alive(pid: u32) -> Option<bool> {
         .then(|| proc_root.join(pid.to_string()).exists())
 }
 
-fn default_port(deadline: Deadline) -> Option<(BrowserEndpoint, CdpConnection)> {
+fn default_port(
+    deadline: Deadline,
+    can_launch: bool,
+) -> Result<Option<(BrowserEndpoint, CdpConnection)>, AppError> {
+    if !implicit_port(&check_listener(DEFAULT_PORT, &is_chrome_family), can_launch)? {
+        return Ok(None);
+    }
     let probe = deadline.capped(PROBE_BUDGET);
-    let endpoint = EndpointSpec::Port(DEFAULT_PORT).resolve(probe).ok()?;
-    let connection = connect(&endpoint, deadline).ok()?;
-    Some((endpoint, connection))
+    let Ok(endpoint) = EndpointSpec::Port(DEFAULT_PORT).resolve(probe) else {
+        return Ok(None);
+    };
+    Ok(connect(&endpoint, deadline)
+        .ok()
+        .map(|connection| (endpoint, connection)))
+}
+
+/// Whether port 9222 may be tried without being named: only when a Chrome
+/// of this user holds it. Anything else listening there is refused, unless
+/// the command may start a browser of its own instead.
+pub(crate) fn implicit_port(verdict: &ListenerVerdict, can_launch: bool) -> Result<bool, AppError> {
+    match verdict {
+        ListenerVerdict::Trusted => Ok(true),
+        ListenerVerdict::Nothing | ListenerVerdict::Unknown => Ok(false),
+        ListenerVerdict::Untrusted(_) if can_launch => Ok(false),
+        ListenerVerdict::Untrusted(reason) => Err(unverified_port(DEFAULT_PORT, reason)),
+    }
+}
+
+fn unverified_port(port: u16, reason: &str) -> AppError {
+    AppError::new(
+        ErrorCode::PermDenied,
+        format!("Port {port} is open, but not held by a Chrome of this user; tabref does not attach to it"),
+    )
+    .with_suggestion(format!(
+        "Pass --cdp {port} if you started that browser yourself, or run 'tabref open <url> --launch' \
+         for a browser of tabref's own"
+    ))
+    .with_platform_detail(reason)
+    .with_details(serde_json::json!({ "kind": "cdp_endpoint_unverified", "port": port }))
+    .with_disposition(DeliverySemantics::not_delivered())
 }
 
 fn start_browser(
@@ -106,7 +163,7 @@ fn no_browser() -> AppError {
     )
     .with_suggestion(
         "Run 'tabref open <url> --launch' to start one, or start Chrome with \
-             --remote-debugging-port=9222 (or pass --cdp <port>)",
+         --remote-debugging-port=<port> and pass --cdp <port>",
     )
     .with_details(serde_json::json!({ "kind": "cdp_no_browser" }))
     .with_disposition(DeliverySemantics::not_delivered())
