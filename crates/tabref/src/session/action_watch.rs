@@ -1,25 +1,28 @@
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tabref_cdp::{CdpEvent, wait_for_load};
+use tabref_cdp::{CdpEvent, is_protocol_error, is_target_gone, wait_for_load};
 use tabref_core::{AppError, Deadline};
 use tabref_page::{PageInfo, WatchedAction, follow_late_navigation};
 
 use super::Session;
 use super::action_effects::ActionEffects;
+use crate::commands::downloads;
 
 const NEW_TAB_LOAD: Duration = Duration::from_millis(3_000);
 const LATE_WINDOW: Duration = Duration::from_millis(60);
 
 impl Session {
     /// Starts watching `tab_id` for what the next action sets off: its
-    /// navigations, requests, dialogs and DOM changes, and tabs it opens.
+    /// navigations, requests, dialogs and DOM changes, tabs it opens, and
+    /// downloads it starts.
     pub(crate) fn watch_action(
         &mut self,
         tab_id: &str,
         deadline: Deadline,
     ) -> Result<WatchedAction, AppError> {
         let tab = self.attach(tab_id)?;
+        downloads::enable_for_action(self, deadline)?;
         let watched = WatchedAction::start(self.connection(), &tab, deadline)?;
         let connection = self.connection();
         connection.call(
@@ -34,7 +37,8 @@ impl Session {
 
     /// Waits for the watched action to settle and reports its effects. A
     /// tab the action opened becomes the current tab once it has loaded, or
-    /// three seconds have passed.
+    /// three seconds have passed; one already gone again, as a popup that
+    /// only downloads, is no new tab.
     pub(crate) fn finish_action(
         &mut self,
         watched: &WatchedAction,
@@ -42,7 +46,7 @@ impl Session {
     ) -> Result<ActionEffects, AppError> {
         let (settled, page) = watched.finish(self.connection(), deadline)?;
         let opener = watched.session.target_id.clone();
-        let new_tab = self
+        let opened = self
             .connection()
             .drain_events(|event| is_page_opened_by(event, &opener))
             .last()
@@ -50,17 +54,32 @@ impl Session {
             .and_then(Value::as_str)
             .map(str::to_owned);
         self.connection().discard_events(is_target_event);
-        if let Some(tab) = &new_tab {
-            self.use_tab(tab)?;
-            let page = self.attach(tab)?;
-            let _ = wait_for_load(self.connection(), &page, deadline.capped(NEW_TAB_LOAD));
-        }
+        let downloads = downloads::after_action(
+            self,
+            &watched.session,
+            opened.as_deref(),
+            deadline,
+            Duration::ZERO,
+        );
+        let new_tab = match opened {
+            Some(tab) => match self.attach(&tab) {
+                Ok(page) => {
+                    self.use_tab(&tab)?;
+                    let _ = wait_for_load(self.connection(), &page, deadline.capped(NEW_TAB_LOAD));
+                    Some(tab)
+                }
+                Err(error) if is_target_gone(&error) || is_protocol_error(&error) => None,
+                Err(error) => return Err(error),
+            },
+            None => None,
+        };
         Ok(ActionEffects {
             settled,
             new_tab,
             url_before: watched.mark.url.clone(),
             page,
             main_frame: watched.main_frame.clone(),
+            downloads,
         })
     }
 }

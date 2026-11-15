@@ -95,6 +95,14 @@ impl SettleTracker {
                     self.last_activity = Some(now);
                 }
             }
+            "Network.responseReceived" if is_attachment(params) => {
+                if self.pending.remove(&request_id(params)) {
+                    self.last_activity = Some(now);
+                }
+                if main && !self.committed {
+                    self.navigating = false;
+                }
+            }
             "Network.loadingFinished" | "Network.loadingFailed" => {
                 if self.pending.remove(&request_id(params)) {
                     self.last_activity = Some(now);
@@ -134,6 +142,27 @@ impl SettleTracker {
     pub(crate) fn saw_network(&self) -> bool {
         self.last_activity.is_some()
     }
+}
+
+/// Whether a document's response is an attachment, which the browser
+/// saves as a download instead of showing: its body can take as long as
+/// the file does, and says nothing about the page.
+fn is_attachment(params: &Value) -> bool {
+    params.get("type").and_then(Value::as_str) == Some("Document")
+        && params
+            .pointer("/response/headers")
+            .and_then(Value::as_object)
+            .is_some_and(|headers| {
+                headers.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("content-disposition")
+                        && value.as_str().is_some_and(|value| {
+                            value
+                                .trim_start()
+                                .to_ascii_lowercase()
+                                .starts_with("attachment")
+                        })
+                })
+            })
 }
 
 fn request_id(params: &Value) -> String {

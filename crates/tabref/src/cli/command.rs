@@ -19,6 +19,15 @@ pub(crate) enum Command {
         /// Open the address in a new tab, which becomes the current tab
         #[arg(long)]
         new_tab: bool,
+        /// Save this browser's downloads in DIR from now on
+        #[arg(long, value_name = "DIR", conflicts_with = "no_download_dir")]
+        download_dir: Option<PathBuf>,
+        /// Forget the folder --download-dir chose
+        #[arg(long)]
+        no_download_dir: bool,
+        /// Cancel a download past this many megabytes (default 500)
+        #[arg(long, value_name = "MB")]
+        download_max_mb: Option<u64>,
     },
     /// Print the page view: text in reading order, controls with refs
     Snap {
@@ -144,6 +153,9 @@ pub(crate) enum Command {
         /// Until the network has been quiet for 500 ms
         #[arg(long)]
         idle: bool,
+        /// Until a download finishes; prints its path, name, address, size and time
+        #[arg(long)]
+        download: bool,
     },
     /// Run several steps in one call, one per line, from STEPS or stdin
     Do {

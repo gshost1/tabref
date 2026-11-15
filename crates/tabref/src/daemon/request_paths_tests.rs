@@ -10,28 +10,57 @@ fn open(url: &str) -> Command {
         headed: false,
         profile: None,
         new_tab: false,
+        download_dir: None,
+        no_download_dir: false,
+        download_max_mb: None,
     }
 }
 
 #[test]
 fn a_relative_launch_profile_reaches_the_daemon_as_the_clients_directory() {
     let here = std::env::current_dir().unwrap();
-    let asked = Command::Open {
-        url: "example.com".into(),
-        launch: true,
-        headed: false,
-        profile: Some(PathBuf::from("profiles/work")),
-        new_tab: false,
-    };
+    let mut asked = open("example.com");
+    if let Command::Open { profile, .. } = &mut asked {
+        *profile = Some(PathBuf::from("profiles/work"));
+    }
     let paths = resolved_paths(&asked).unwrap();
-    assert_eq!(paths[1], here.join("profiles/work").to_string_lossy());
 
     let mut command = open("example.com");
     apply_paths(&mut command, Some(paths));
-    let Command::Open { profile, .. } = command else {
+    let Command::Open {
+        profile,
+        download_dir,
+        ..
+    } = command
+    else {
         unreachable!()
     };
     assert_eq!(profile, Some(here.join("profiles/work")));
+    assert_eq!(
+        download_dir, None,
+        "the profile was taken for the download folder"
+    );
+}
+
+#[test]
+fn a_relative_download_folder_is_sent_as_the_one_where_the_command_was_typed() {
+    let here = std::env::current_dir().unwrap();
+    let mut typed = open("example.com");
+    if let Command::Open { download_dir, .. } = &mut typed {
+        *download_dir = Some(PathBuf::from("dl"));
+    }
+    let paths = resolved_paths(&typed).unwrap();
+    assert_eq!(paths[1], here.join("dl").to_string_lossy());
+
+    let mut parsed = typed;
+    if let Command::Open { download_dir, .. } = &mut parsed {
+        *download_dir = Some(PathBuf::from("/dl"));
+    }
+    apply_paths(&mut parsed, Some(paths));
+    let Command::Open { download_dir, .. } = parsed else {
+        unreachable!()
+    };
+    assert_eq!(download_dir, Some(here.join("dl")));
 }
 
 #[test]

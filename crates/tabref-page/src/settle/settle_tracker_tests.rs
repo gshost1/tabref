@@ -139,3 +139,30 @@ fn requests_to_other_sites_or_from_blank_frames_do_not_hold_the_settle() {
     );
     assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Network);
 }
+
+#[test]
+fn a_document_answered_as_an_attachment_stops_holding_the_settle() {
+    let now = Instant::now();
+    let mut tracker = SettleTracker::new("F");
+    tracker.absorb(
+        &event("Page.frameStartedLoading", json!({ "frameId": "F" })),
+        now,
+    );
+    tracker.absorb(
+        &event(
+            "Network.requestWillBeSent",
+            json!({ "requestId": "d", "type": "Document" }),
+        ),
+        now,
+    );
+    tracker.absorb(
+        &event(
+            "Network.responseReceived",
+            json!({ "requestId": "d", "type": "Document", "frameId": "F", "response": {
+                "headers": { "Content-Disposition": "attachment; filename=\"slow.bin\"" }
+            } }),
+        ),
+        now,
+    );
+    assert_eq!(tracker.next_wait(now + QUIET, QUIET), SettleWait::Done);
+}

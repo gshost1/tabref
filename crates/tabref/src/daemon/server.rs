@@ -87,6 +87,7 @@ fn watch_idle(state: Arc<ServerState>, address: DaemonAddress, timeout: Duration
     thread::spawn(move || {
         loop {
             thread::sleep(IDLE_CHECK.min(timeout));
+            state.tend_downloads();
             let orphaned = !address.state_root.exists() && state.activity.idle() > IDLE_CHECK;
             if orphaned || state.activity.idle() >= timeout {
                 if orphaned {
@@ -103,6 +104,7 @@ fn watch_idle(state: Arc<ServerState>, address: DaemonAddress, timeout: Duration
 /// socket went away.
 fn retire(state: &ServerState, address: &DaemonAddress) {
     let _ = std::fs::remove_file(address.socket());
+    state.retire_downloads();
     let mut quiet = 0;
     while quiet < 2 {
         thread::sleep(RETIRE_POLL);

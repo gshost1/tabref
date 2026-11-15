@@ -1,5 +1,8 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+pub mod exports;
+pub mod own_chrome;
+
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -64,6 +67,19 @@ pub fn harness(name: &str) -> Harness {
         browser,
         home: harness_home(name),
     }
+}
+
+/// A directory outside any state directory, removed when dropped.
+pub struct Scratch(pub PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+pub fn scratch(name: &str) -> Scratch {
+    Scratch(harness_home(&format!("scratch-{name}")))
 }
 
 /// A fresh private state directory for one test.
