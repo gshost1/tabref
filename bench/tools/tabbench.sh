@@ -80,7 +80,7 @@ parse_set() {
 fresh_out() { as_user bash -c 'rm -rf "$HOME/fresh" "$HOME/fresh.new"' || true; }
 fresh_in() {
   python3 -I -B "$here/harness/fresh.py" verify "$FRESH_SRC"
-  trap fresh_out EXIT
+  trap fresh_out EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
   tar -C "$FRESH_SRC" -cf - . \
     | as_user bash -c 'set -e; rm -rf "$HOME/fresh.new" "$HOME/fresh"; mkdir -m 700 "$HOME/fresh.new"
         tar -C "$HOME/fresh.new" --no-same-owner -xf -; mv "$HOME/fresh.new" "$HOME/fresh"'

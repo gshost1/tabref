@@ -119,6 +119,17 @@ class SealedRows(unittest.TestCase):
         self.assertEqual((detail["answer"], detail["verify"]), ("secret answer", "secret why"))
 
 
+class Peeking(unittest.TestCase):
+    def test_a_command_naming_the_sealed_folder_is_caught(self):
+        ev = {"type": "assistant", "message": {"id": "m", "content": [
+            {"type": "tool_use", "id": "a", "input": {"command": "tabref open http://127.0.0.1:8793/"}},
+            {"type": "tool_use", "id": "b", "input": {"command": "cat ~/fresh/web/server.py"}}]}}
+        cmds = run_web.tool_commands([json.dumps(ev), "not json"])
+        self.assertEqual(len(cmds), 2)
+        self.assertTrue(run_web.reads_sealed(cmds, "/home/tabbench/fresh"))
+        self.assertFalse(run_web.reads_sealed(cmds[:1], "/home/tabbench/fresh"))
+
+
 class PerSetReport(unittest.TestCase):
     def raw(self, ts, task, ok, why):
         r = {"suite": "web", "arm": "tabref", "task": task, "model": "m", "success": ok, "cli_s": 1, "wall_s": 5,

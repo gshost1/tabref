@@ -174,6 +174,28 @@ def assistant_usage(lines):
     return total
 
 
+def tool_commands(lines):
+    """Every Bash command the model asked for in a stream."""
+    out = []
+    for line in lines:
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        msg = ev.get("message") if isinstance(ev, dict) and ev.get("type") == "assistant" else None
+        for c in (msg.get("content") or []) if isinstance(msg, dict) else []:
+            if isinstance(c, dict) and c.get("type") == "tool_use":
+                out.append(str((c.get("input") or {}).get("command", "")))
+    return out
+
+
+def reads_sealed(commands, sealed_dir):
+    """A fresh run fails when a tool call names the sealed folder (the arms allow cat, and the copy sits in the bench
+    user's home): its path, ~/fresh, $HOME/fresh, or the task module's name."""
+    marks = [str(sealed_dir), "~/fresh", "$HOME/fresh", "${HOME}/fresh", "tasks_fresh", "SHA256SUMS"]
+    return any(m in cmd for cmd in commands for m in marks)
+
+
 def summarize_stream(lines):
     """browser bench run.py summarize_stream, unchanged."""
     turns, tool_calls, tool_chars, snap_chars, snap_calls = 0, 0, 0, 0, 0
@@ -319,6 +341,9 @@ class Runner:
             ok, why = False, f"dialog left on screen: {left}; " + why
         if timed_out:
             ok, why = False, f"timed out at the {a.timeout} s cap; {why}"
+        peeked = ts.sealed and reads_sealed(tool_commands((stdout or "").splitlines()), ts.sealed_dir)
+        if peeked:
+            ok, why = False, f"a tool call named the sealed task folder; {why}"
         chrome_alive = bool(core.profile_processes(profile))
         core.stop_chrome(chrome, profile)
         core.stop_arm_daemons(arm, env)
@@ -335,7 +360,7 @@ class Runner:
                   "tool_calls": s["tool_calls"], "snapshot_tokens_est": s["snapshot_tokens_est"],
                   "tool_result_tokens_est": s["tool_result_tokens_est"],
                   "cost_usd_list": final.get("total_cost_usd"), "duration_api_ms": final.get("duration_api_ms"),
-                  "timed_out": timed_out, "chrome_alive_at_end": chrome_alive, "answer": answer[:500], "strays": strays,
+                  "timed_out": timed_out, "read_sealed": bool(peeked), "chrome_alive_at_end": chrome_alive, "answer": answer[:500], "strays": strays,
                   "valid": True, "disk_free_gb": round(shutil.disk_usage(str(self.runs)).free / 1024 ** 3, 2)}
         if not final and not timed_out:
             record.update({"valid": False, "invalid_reason": f"no result event from claude: {(stderr or '')[-300:]}"})
