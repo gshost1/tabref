@@ -20,4 +20,23 @@ impl ProcessView {
             .unwrap_or_default();
         name.strip_suffix(" (deleted)").unwrap_or(&name).to_owned()
     }
+
+    /// The command line as arguments. A process that rewrote its title
+    /// (headless Chrome does) shows its whole command line as one string;
+    /// that string is split before each ` --`, so its flags read as they
+    /// were passed. Arguments that arrived separately are kept whole, spaces
+    /// and all.
+    pub fn args(&self) -> Vec<String> {
+        if self.cmdline.len() != 1 {
+            return self.cmdline.clone();
+        }
+        let mut parts = self.cmdline[0].split(" --");
+        let mut args: Vec<String> = parts.next().map(str::to_owned).into_iter().collect();
+        args.extend(parts.map(|part| format!("--{part}")));
+        args
+    }
 }
+
+#[cfg(test)]
+#[path = "process_view_tests.rs"]
+mod tests;

@@ -27,6 +27,11 @@ fn main() -> ExitCode {
     let name = cli.command.name();
     let result = match &cli.command {
         Command::Daemon { action } => daemon::control::run(&cli, action),
+        Command::Connect {
+            user_chrome,
+            user_data_dir,
+            off,
+        } => commands::connect::run(&cli, *user_chrome, user_data_dir.as_deref(), *off),
         Command::Skill => commands::run(&cli),
         _ => daemon::run_through_daemon(&cli).unwrap_or_else(|| commands::run(&cli)),
     };

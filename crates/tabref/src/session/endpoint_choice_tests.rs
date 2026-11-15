@@ -101,6 +101,13 @@ fn a_launch_record_is_recognised_by_its_own_profile() {
         "--user-data-dir=/tmp/tabref-profile-ab"
     ])));
     assert!(!ours(&process(&["chrome"])));
+    assert!(ours(&process(&[
+        "/opt/google/chrome/chrome --user-data-dir=/tmp/tabref-profile-a --remote-debugging-port=0 \
+         --headless=new about:blank"
+    ])));
+    assert!(!ours(&process(&[
+        "/opt/google/chrome/chrome --user-data-dir=/tmp/tabref-profile-ab --headless=new"
+    ])));
 }
 
 fn refused() -> AppError {

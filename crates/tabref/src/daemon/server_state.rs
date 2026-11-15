@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use serde_json::json;
 use tabref_core::AppError;
@@ -14,9 +14,10 @@ const MAX_IDLE_SESSIONS: usize = 4;
 
 /// What one daemon process keeps between requests: its build and endpoint,
 /// the browser connections not in use right now (each with its attached
-/// page sessions), the tab locks, and its activity clock. A request takes a
-/// connection out of the pool for as long as it runs, so requests on
-/// different tabs run side by side on their own connections.
+/// page sessions), the tab locks, its activity clock, and the cancel flags
+/// of the requests running now (`None` once it is stopping). A request
+/// takes a connection out of the pool for as long as it runs, so requests
+/// on different tabs run side by side on their own connections.
 pub(crate) struct ServerState {
     pub(crate) build: String,
     pub(crate) cdp: Option<String>,
@@ -24,6 +25,7 @@ pub(crate) struct ServerState {
     pool: Mutex<Vec<Session>>,
     locks: Arc<TabLocks>,
     next_owner: AtomicU64,
+    running: Mutex<Option<Vec<Weak<AtomicBool>>>>,
 }
 
 impl ServerState {
@@ -35,7 +37,48 @@ impl ServerState {
             pool: Mutex::new(Vec::new()),
             locks: Arc::new(TabLocks::default()),
             next_owner: AtomicU64::new(1),
+            running: Mutex::new(Some(Vec::new())),
         }
+    }
+
+    /// Notes a request's cancel flag, so a stop can end it. A request that
+    /// arrives while the daemon stops is cancelled at once.
+    pub(crate) fn track(&self, cancel: &Arc<AtomicBool>) {
+        let Ok(mut running) = self.running.lock() else {
+            cancel.store(true, Ordering::SeqCst);
+            return;
+        };
+        match running.as_mut() {
+            Some(flags) => {
+                flags.retain(|flag| flag.strong_count() > 0);
+                flags.push(Arc::downgrade(cancel));
+            }
+            None => cancel.store(true, Ordering::SeqCst),
+        }
+    }
+
+    /// Stops everything the daemon does with a browser: every running
+    /// request is cancelled (its next request or wait slice fails), and the
+    /// kept connections are closed. Nothing is kept from then on.
+    pub(crate) fn shut_down(&self) {
+        let flags = self
+            .running
+            .lock()
+            .map_or_else(|_| None, |mut running| running.take());
+        for flag in flags.into_iter().flatten() {
+            if let Some(flag) = flag.upgrade() {
+                flag.store(true, Ordering::SeqCst);
+            }
+        }
+        if let Ok(mut pool) = self.pool.lock() {
+            pool.clear();
+        }
+    }
+
+    fn stopping(&self) -> bool {
+        self.running
+            .lock()
+            .map_or(true, |running| running.is_none())
     }
 
     /// A session ready for the next command: a kept one whose connection
@@ -60,7 +103,7 @@ impl ServerState {
     /// Returns a session after its command, unless its connection broke.
     pub(crate) fn checkin(&self, mut session: Session) {
         session.end();
-        if session.is_broken() {
+        if session.is_broken() || self.stopping() {
             return;
         }
         if let Ok(mut pool) = self.pool.lock() {
@@ -97,3 +140,7 @@ impl ServerState {
         self.pool.lock().ok()?.pop()
     }
 }
+
+#[cfg(test)]
+#[path = "server_state_tests.rs"]
+mod tests;
