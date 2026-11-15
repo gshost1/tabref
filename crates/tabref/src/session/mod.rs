@@ -19,6 +19,7 @@ pub(crate) mod tab_claim;
 pub(crate) mod tab_order;
 pub(crate) mod user_chrome;
 pub(crate) mod user_chrome_record;
+pub(crate) mod visible_tab;
 
 use std::collections::HashMap;
 
@@ -37,6 +38,7 @@ use tab_choice::choose_tab;
 use tab_claim::TabClaim;
 use tab_order::{order_text, stable_order};
 use user_chrome_record::{choice_in_use, opt_in_guard};
+use visible_tab::visible_tab;
 
 /// Everything one command runs against: the DevTools connection, the page
 /// sessions attached through it, the ref store and what the current command
@@ -122,7 +124,14 @@ impl Session {
         }
         let tabs = self.tabs()?;
         let remembered = self.store.read_state(&self.tab_state_name());
-        let chosen = choose_tab(&tabs, self.scope.tab_hint.as_deref(), remembered.as_deref())?;
+        let deadline = self.scope.deadline;
+        let connection = &mut self.connection;
+        let chosen = choose_tab(
+            &tabs,
+            self.scope.tab_hint.as_deref(),
+            remembered.as_deref(),
+            || visible_tab(connection, &tabs, deadline),
+        )?;
         let tab = match chosen {
             Some(tab) => tab,
             None => {

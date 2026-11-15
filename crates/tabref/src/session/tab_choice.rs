@@ -2,6 +2,7 @@ use tabref_cdp::PageTarget;
 use tabref_core::{AppError, DeliverySemantics, ErrorCode};
 
 use super::Session;
+use super::visible_tab::visible_tab;
 
 impl Session {
     /// The address of the tab this command would work in, read from the tab
@@ -20,7 +21,14 @@ impl Session {
             Some(tab) => Some(tab.clone()),
             None => {
                 let remembered = self.store.read_state(&self.tab_state_name());
-                choose_tab(&tabs, self.scope.tab_hint.as_deref(), remembered.as_deref())?
+                let deadline = self.scope.deadline;
+                let connection = &mut self.connection;
+                choose_tab(
+                    &tabs,
+                    self.scope.tab_hint.as_deref(),
+                    remembered.as_deref(),
+                    || visible_tab(connection, &tabs, deadline),
+                )?
             }
         };
         Ok(chosen.and_then(|id| tabs.into_iter().find(|tab| tab.target_id == id)))
@@ -29,18 +37,25 @@ impl Session {
 
 /// Picks the tab a command works in. `hint` (`--tab`, or `tab <n>`) is an
 /// index into `tabs` or a target id or unique id prefix; without one, the
-/// tab the last command used when it is still open, otherwise the first tab.
-/// `None` means the browser has no tab at all.
+/// tab the last command used when it is still open; otherwise, among more
+/// than one tab, the one `visible` names (the tab the user is looking at,
+/// asked only then), and the first tab when it names none of them. `None`
+/// means the browser has no tab at all.
 pub(crate) fn choose_tab(
     tabs: &[PageTarget],
     hint: Option<&str>,
     remembered: Option<&str>,
+    visible: impl FnOnce() -> Option<String>,
 ) -> Result<Option<String>, AppError> {
     if let Some(hint) = hint {
         return find_tab(tabs, hint).map(Some);
     }
-    let kept = remembered.and_then(|id| tabs.iter().find(|tab| tab.target_id == id));
-    Ok(kept
+    if let Some(kept) = remembered.and_then(|id| tabs.iter().find(|tab| tab.target_id == id)) {
+        return Ok(Some(kept.target_id.clone()));
+    }
+    let seen = if tabs.len() > 1 { visible() } else { None };
+    let shown = seen.and_then(|id| tabs.iter().find(|tab| tab.target_id == id));
+    Ok(shown
         .or_else(|| tabs.first())
         .map(|tab| tab.target_id.clone()))
 }
