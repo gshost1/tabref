@@ -8,6 +8,9 @@ per-round task rotation, and the row fields. Arms rotate per round too, like orc
 Changed: paths (core.py), a clean environment and a bench-only HOME for claude and the tools, the display mode,
 Claude Code 2.1.322 from $BENCH_TOOLS (override: BENCH_CLAUDE), and the key: ANTHROPIC_API_KEY must already be in
 this process's environment; the runner never looks for one and never writes it anywhere.
+Warm-up: before the timer and the model's first call, every arm's fresh Chrome loads one throwaway page through its
+DevTools HTTP endpoint (core.warm_up), so a just-started browser's slow first load lands on no arm; each row logs
+warmup_s and warmup_committed.
 Isolation: a model pass runs only on a VM or as the dedicated unprivileged user (core.isolation_problem;
 bench/tools/tabbench.sh sets that user up on a laptop and hands it the key on stdin).
 Spend: Claude Code's total_cost_usd per run; a run that hit the cap has no result event, so it is charged the
@@ -357,6 +360,11 @@ class Runner:
             env["HO_CDP_PORT"] = str(cdp_port or "")
         if cdp_port:
             (self.runs / "web-current-port").write_text(str(cdp_port))
+        warm = core.warm_up(cdp_port, a.base) if cdp_port else {"warmup_s": None, "warmup_committed": False,
+                                                                 "warmup_error": "no DevTools port"}
+        base_row.update(warm)
+        self.say(f"{run_id} {arm:6} warm-up {warm['warmup_s']} s committed={warm['warmup_committed']}",
+                 why=f" {warm.get('warmup_error', '')}")
         ctx = {"base": a.base, "work": str(work), "downloads": str(downloads), "exp": exp, "ad": str(core.ad_bin()),
                "cdp_port": cdp_port}
         prompt = task["prompt"].format(**ctx)
