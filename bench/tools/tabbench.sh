@@ -57,7 +57,7 @@ untar_to() {
 def keep(m, path):
     return tarfile.data_filter(m, path) if m.isfile() or m.isdir() else None
 with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
-    t.extractall(sys.argv[1], filter=keep)' "$1"
+    t.extractall(sys.argv[1], filter=keep)' "$1" || return 1
   find "$1" ! -type f ! -type d -delete
 }
 stop_all() { as_user bash -c 'kill -9 -1' 2>/dev/null || true; }
@@ -127,7 +127,7 @@ fresh_finish() {
   else echo "fresh seal BROKEN after the pass (original folder): this pass's rows are discarded" >&2; fi
   as_user python3 -I -B "$H/tabref/bench/harness/fresh.py" "$verdict" "$H/runs" "$PASS_ID" || verdict=failed
   mkdir -p "$out"; chmod 700 "$out"; rm -rf "$out/$PASS_ID.part"; mkdir "$out/$PASS_ID.part"
-  if as_user bash -c 'd="$HOME/runs/fresh-staged/$1/sealed"; [[ ! -d $d ]] || tar -C "$d" -cf - .' _ "$PASS_ID" \
+  if as_user bash -c 'd="$HOME/runs/fresh-staged/$1/sealed"; mkdir -p "$d"; tar -C "$d" -cf - .' _ "$PASS_ID" \
       | untar_to "$out/$PASS_ID.part"; then
     mv "$out/$PASS_ID.part" "$out/$PASS_ID"; echo "fresh sealed output: $out/$PASS_ID (not for tuners)"
   else echo "could not move the sealed output out of $H; it is removed with the staging" >&2; fi
