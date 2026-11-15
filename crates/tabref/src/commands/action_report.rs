@@ -10,6 +10,7 @@ use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
 use crate::view::node_line::{node_line, quote_text};
+use crate::view::ref_style::RefStyle;
 
 const CHANGE_BUDGET: usize = 600;
 const NOTHING_SEEN: &str = " (no visible change)";
@@ -185,7 +186,7 @@ fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut V
             .as_ref()
             .is_some_and(|token| !known.contains(token))
     {
-        found.push(node_line(node, NEW_LINE_CHARS));
+        found.push(styled(&node_line(node, NEW_LINE_CHARS)));
     }
     for child in &node.children {
         new_controls(child, known, found);
@@ -223,5 +224,16 @@ pub(crate) fn merge(data: &mut Value, more: Value) {
 pub(crate) fn set(data: &mut Value, key: &str, value: Value) {
     if let Some(object) = data.as_object_mut() {
         object.insert(key.to_owned(), value);
+    }
+}
+
+/// A node line with its leading ref printed in the agent's ref style, so
+/// `@s8f3k2p9:e31 textfield` reads `e31 textfield` under short refs.
+pub(crate) fn styled(line: &str) -> String {
+    match line.split_once(' ') {
+        Some((ref_id, rest)) if ref_id.starts_with('@') => {
+            format!("{} {rest}", RefStyle::from_env().print(ref_id))
+        }
+        _ => line.to_owned(),
     }
 }

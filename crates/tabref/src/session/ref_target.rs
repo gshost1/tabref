@@ -6,6 +6,7 @@ use tabref_core::{AccessibilityNode, AppError, ErrorCode, RefEntry, RefId, RefMa
 use tabref_page::{ElementToken, read_node_identity};
 
 use super::Session;
+use crate::commands::action_report::styled;
 use crate::view::node_line::node_line;
 
 const NEXT_NUMBER: &str = "refs-next";
@@ -224,7 +225,7 @@ fn same_identity(node: &AccessibilityNode, entry: &RefEntry, found: &mut Vec<Str
         && node.role == entry.role
         && node.identity_name().map(str::to_owned) == entry.name
     {
-        found.push(node_line(node, 80));
+        found.push(styled(&node_line(node, 80)));
     }
     for child in &node.children {
         same_identity(child, entry, found);

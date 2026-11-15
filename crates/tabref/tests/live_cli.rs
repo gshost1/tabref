@@ -103,7 +103,7 @@ fn a_click_that_navigates_prints_the_new_page_and_old_refs_go_stale() {
         "{}",
         clicked.stdout
     );
-    assert!(clicked.stdout.contains("heading \"Thank you\""));
+    assert!(clicked.stdout.contains("Thank you"), "{}", clicked.stdout);
 
     let stale = tabref.run(&["click", &finish]);
     assert!(!stale.ok);

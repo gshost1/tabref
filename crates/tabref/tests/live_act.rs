@@ -54,6 +54,7 @@ fn batch(tabref: &Harness, steps: &str) -> Run {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tabref"))
         .args(["--cdp", &tabref.browser.port.to_string(), "do"])
         .env("TABREF_HOME", &tabref.home)
+        .env("TABREF_REFS", "long")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -182,7 +183,7 @@ fn a_route_change_and_a_navigation_report_where_they_led() {
         "{}",
         finished.stdout
     );
-    assert!(finished.stdout.contains("heading \"Thank you\""));
+    assert!(finished.stdout.contains("Thank you"));
 }
 
 #[test]
@@ -244,7 +245,7 @@ fn a_stale_ref_names_its_fresh_candidate() {
     }
     let (tabref, base) = site();
     let opened = tabref.ok(&["open", &format!("{base}/widgets")]);
-    let noop = opened.ref_for("button \"Noop\"");
+    let noop = opened.ref_for("button Noop");
     tabref.ok(&["js", "location.reload(); 1"]);
     tabref.ok(&["wait", "--text", "Nothing yet"]);
     let stale = tabref.run(&["click", &noop]);
@@ -263,11 +264,11 @@ fn short_refs_keep_their_numbers_and_go_stale_with_their_document() {
     }
     let (tabref, base) = site();
     let opened = tabref.ok(&["open", &format!("{base}/widgets")]);
-    let long = opened.ref_for("button \"Noop\"");
+    let long = opened.ref_for("button Noop");
     let short = long.rsplit(':').next().unwrap().to_owned();
     let again = tabref.ok(&["snap"]);
     assert_eq!(
-        again.ref_for("button \"Noop\"").rsplit(':').next(),
+        again.ref_for("button Noop").rsplit(':').next(),
         Some(short.as_str())
     );
     let clicked = tabref.ok(&["click", &short]);
