@@ -3,11 +3,15 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tabref_cdp::{PageSession, is_timeout};
-use tabref_core::{AppError, Deadline, DeliverySemantics};
-use tabref_page::{wait_for_text, wait_for_url};
+use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
+use tabref_page::{
+    ElementState, ElementToken, LocateIntent, wait_for_state, wait_for_text, wait_for_url,
+};
 
+use super::act_target::resolve_target;
 use super::download_lines::{download_json, download_line};
 use super::download_wait::wait_download;
+use super::target_spec::TargetSpec;
 use super::wait_condition::Condition;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -74,6 +78,20 @@ pub(crate) fn wait_for(
             let page = session.page()?;
             wait_idle(session, &page, condition, deadline)?;
             Ok((String::new(), Value::Null))
+        }
+        Condition::Element { target, state, .. } => {
+            let Some((page, token)) = element_target(session, target, state, deadline)? else {
+                return Ok((String::new(), json!({ "now": state.describe() })));
+            };
+            let waited = wait_for_state(session.connection(), &page, &token, state, deadline)?;
+            if !waited.held {
+                return Err(timed_out(condition, deadline).with_details(json!({
+                    "kind": "wait_timeout",
+                    "state": state.describe(),
+                    "now": waited.now,
+                })));
+            }
+            Ok((String::new(), json!({ "now": waited.now })))
         }
         Condition::Download => {
             let download = wait_download(session, deadline)?;
@@ -142,6 +160,36 @@ fn wait_idle(
             }
             _ => {}
         }
+    }
+}
+
+/// The element `target` names, for a wait on `state`: a ref even while it
+/// is hidden, a name as the page shows it. `None` when it is already not
+/// there and the state asks for that (`gone`, or `hidden` for a name the
+/// page no longer shows).
+fn element_target(
+    session: &mut Session,
+    target: &TargetSpec,
+    state: &ElementState,
+    deadline: Deadline,
+) -> Result<Option<(PageSession, ElementToken)>, AppError> {
+    let absent_is_enough = matches!(state, ElementState::Gone | ElementState::Hidden);
+    let found = match target {
+        TargetSpec::Ref(text) => session
+            .resolve_ref_or_hidden(text)
+            .map(|(found, _)| (found.session, found.token)),
+        TargetSpec::Find(_) => resolve_target(session, target, LocateIntent::Read, deadline)
+            .map(|found| (found.session, found.token)),
+    };
+    match found {
+        Ok(found) => Ok(Some(found)),
+        Err(error)
+            if absent_is_enough
+                && matches!(error.code, ErrorCode::StaleRef | ErrorCode::ElementNotFound) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
     }
 }
 

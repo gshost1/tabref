@@ -1,6 +1,7 @@
 use tabref_core::AppError;
-use tabref_page::Word;
+use tabref_page::{ElementState, Word};
 
+use super::target_spec::TargetSpec;
 use super::wait_flags::WaitFlags;
 
 /// What `wait` waits for, and what a `do` batch's `expect` checks.
@@ -11,6 +12,11 @@ pub(crate) enum Condition {
     Url(String),
     Idle,
     Download,
+    Element {
+        target: TargetSpec,
+        label: String,
+        state: ElementState,
+    },
 }
 
 impl Condition {
@@ -27,10 +33,23 @@ impl Condition {
         if flags.download {
             named.push(Self::Download);
         }
+        match (flags.target, flags.state) {
+            (Some(target), Some(state)) => named.push(Self::element(
+                TargetSpec::from_arg(target)?,
+                target.to_owned(),
+                state,
+            )?),
+            (None, None) => {}
+            _ => {
+                return Err(AppError::invalid_args(
+                    "--ref and --state go together, as in: wait --ref \"Save\" --state enabled",
+                ));
+            }
+        }
         match named.len() {
             1 => Ok(named.remove(0)),
             _ => Err(AppError::invalid_args(
-                "Name exactly one of --text, --gone, --url, --idle or --download",
+                "Name exactly one of --text, --gone, --url, --idle, --download or --ref with --state",
             )),
         }
     }
@@ -44,6 +63,23 @@ impl Condition {
                 .collect::<Vec<_>>()
                 .join(" ")
         };
+        if let [target @ .., is, state] = words
+            && !target.is_empty()
+            && is.is_keyword("is")
+        {
+            let label = target
+                .iter()
+                .map(|word| {
+                    if word.quoted {
+                        format!("{:?}", word.text)
+                    } else {
+                        word.text.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            return Self::element(TargetSpec::from_words(target)?, label, &state.text);
+        }
         let condition = match words {
             [first, rest @ ..] if first.is_keyword("text") => Self::Text(joined(rest)),
             [first, rest @ ..] if first.is_keyword("gone") => Self::Gone(joined(rest)),
@@ -69,7 +105,23 @@ impl Condition {
             Self::Url(url) => format!("the address to contain {url:?}"),
             Self::Idle => "the network to go quiet".to_owned(),
             Self::Download => "a download to finish".to_owned(),
+            Self::Element { label, state, .. } => format!("{label} to be {}", state.describe()),
         }
+    }
+}
+
+impl Condition {
+    fn element(target: TargetSpec, label: String, state: &str) -> Result<Self, AppError> {
+        let state = ElementState::parse(state).ok_or_else(|| {
+            AppError::invalid_args(format!(
+                "'{state}' is not a state; give enabled, visible, hidden, gone or value=X"
+            ))
+        })?;
+        Ok(Self::Element {
+            target,
+            label,
+            state,
+        })
     }
 }
 
