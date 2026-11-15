@@ -5,7 +5,7 @@ use serde_json::Value;
 use super::frame_skip_reason::FrameSkipReason;
 
 const FRAME_ELEMENTS: &[&str] = &["IFRAME", "FRAME"];
-const TINY_EDGE: f64 = 2.0;
+const TINY_EDGE: f64 = 5.0;
 
 /// Where a DOM capture laid out a frame's owner element, in document
 /// coordinates, and whether its computed `visibility` lets it show.

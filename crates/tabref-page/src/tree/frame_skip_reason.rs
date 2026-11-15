@@ -2,7 +2,7 @@ use serde::Serialize;
 
 /// Why a frame is not in a snapshot's tree. The first five say the frame
 /// could hold nothing worth showing: its element is not laid out or hidden,
-/// has no area, is a 1x1 or 2x2 pixel, lies wholly above or left of the
+/// has no area, is a pixel (at most 5x5 with its border), lies wholly above or left of the
 /// page, or the frame was read and holds no text and no control. The last
 /// two say the frame may hold something but was not read: it missed the
 /// iframe budget, or the browser refused or lost it.
