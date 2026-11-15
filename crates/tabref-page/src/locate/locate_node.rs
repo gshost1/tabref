@@ -4,11 +4,12 @@ use super::closest::closest;
 use super::indexed_node::{IndexedNode, deepest, index_tree};
 use super::locate_errors::{ambiguous, no_scope, not_found, past_last};
 use super::locate_intent::LocateIntent;
-use super::locate_scope::{anchors, near_anchors};
+use super::locate_scope::{anchors, beside_anchors, near_anchors};
 use super::located::Located;
 use super::locator::Locator;
 use super::name_match::{NAME_WORDS, RANKS, normalize, rank};
 use super::role_words::role_word;
+use super::scope_kind::ScopeKind;
 use crate::ElementToken;
 
 const CONTEXT_CHARS: usize = 40;
@@ -47,8 +48,14 @@ pub fn locate(
     for tier in tiers(&nodes, (&actionable, &acting), locator, intent) {
         let tier = deepest(&nodes, &tier);
         let picked = match &scope_anchors {
-            Some(found) => near_anchors(&nodes, &tier, found, locator.nth)
-                .ok_or_else(|| past_last(locator, tier.len()))?,
+            Some(found) if locator.scope_kind == ScopeKind::Within => {
+                near_anchors(&nodes, &tier, found, locator.nth)
+                    .ok_or_else(|| past_last(locator, tier.len()))?
+            }
+            Some(found) => {
+                let after = locator.scope_kind == ScopeKind::After;
+                beside_anchors(&nodes, &tier, found, (after, locator.nth))
+            }
             None => match locator.nth {
                 Some(n) => vec![
                     *tier
@@ -64,8 +71,11 @@ pub fn locate(
             many => return Err(ambiguous(locator, &labels(&nodes, many), many.len())),
         }
     }
-    let pool: Vec<(usize, String)> = (0..nodes.len())
+    let reachable: Vec<usize> = (0..nodes.len())
         .filter(|&index| acts(nodes[index].node, intent, None))
+        .collect();
+    let pool: Vec<(usize, String)> = deepest(&nodes, &reachable)
+        .into_iter()
         .filter_map(|index| {
             let name = nodes[index].node.display_name()?;
             Some((index, name.to_owned()))

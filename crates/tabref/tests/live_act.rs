@@ -25,7 +25,7 @@ const EDIT: &str = r#"<!doctype html><title>Edit product</title>
 <input type=hidden name=saved value=1><button>Save</button></form>"#;
 
 const WIDGETS: &str = r#"<!doctype html><title>Widgets</title>
-<table><tr><td><button title="Upvote" onclick="const s=this.nextElementSibling; s.textContent=String(Number(s.textContent)+1)">▲</button><span>3</span></td><td>Books set in winter</td></tr>
+<table><tr><th>Votes</th><th>Title</th></tr><tr><td><button title="Upvote" onclick="const s=this.nextElementSibling; s.textContent=String(Number(s.textContent)+1)">▲</button><span>3</span></td><td>Books set in winter</td></tr>
 <tr><td><button title="Upvote" onclick="const s=this.nextElementSibling; s.textContent=String(Number(s.textContent)+1)">▲</button><span>9</span></td><td>Long series</td></tr></table>
 <button>Noop</button>
 <button onclick="document.getElementById('modal').hidden=false">New issue</button>

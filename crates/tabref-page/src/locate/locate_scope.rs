@@ -3,9 +3,9 @@
 //! ancestor that holds a match, never past a table, list, menu or landmark,
 //! so a row without the control finds nothing instead of a neighbour's.
 //! Within that ancestor the match nearest the text wins, and on a tie the
-//! first one after it. Text that sits in no row at all, as in a page of
-//! comments laid out as plain paragraphs, leads to the first match after
-//! it in reading order, within the same table, list or landmark.
+//! first one after it. `after` and `before` take the nearest match on that
+//! side of the text in reading order instead, for records laid out as
+//! plain paragraphs, where no row says which control is whose.
 
 use super::indexed_node::{IndexedNode, deepest, distance, within};
 use super::name_match::shows_text;
@@ -27,8 +27,6 @@ const BOUNDARY_ROLES: &[&str] = &[
     "document",
 ];
 
-const ROW_ROLES: &[&str] = &["row", "article", "cell", "option", "treeitem"];
-
 /// The nodes that show the normalized `scope` text, deepest only.
 pub(crate) fn anchors(nodes: &[IndexedNode<'_>], scope: &str) -> Vec<usize> {
     let showing: Vec<usize> = (0..nodes.len())
@@ -48,9 +46,7 @@ pub(crate) fn near_anchors(
 ) -> Option<Vec<usize>> {
     let mut picks = Vec::new();
     for &anchor in anchors {
-        let Some(inside) = holder_matches(nodes, candidates, anchor)
-            .or_else(|| following(nodes, candidates, anchor))
-        else {
+        let Some(inside) = holder_matches(nodes, candidates, anchor) else {
             continue;
         };
         let chosen = match nth {
@@ -66,26 +62,38 @@ pub(crate) fn near_anchors(
     Some(picks)
 }
 
-fn following(nodes: &[IndexedNode<'_>], candidates: &[usize], anchor: usize) -> Option<Vec<usize>> {
-    let mut at = nodes[anchor].parent;
-    let mut container = None;
-    while let Some(parent) = at {
-        let role = nodes[parent].node.role.as_str();
-        if ROW_ROLES.contains(&role) {
-            return None;
+/// The candidate nearest each anchor on one side in reading order: the
+/// first that starts after the anchor's subtree, or the last that ends
+/// before the anchor. With `nth`, the nth one counting away from the anchor.
+pub(crate) fn beside_anchors(
+    nodes: &[IndexedNode<'_>],
+    candidates: &[usize],
+    anchors: &[usize],
+    (after, nth): (bool, Option<usize>),
+) -> Vec<usize> {
+    let mut picks = Vec::new();
+    for &anchor in anchors {
+        let mut side: Vec<usize> = candidates
+            .iter()
+            .copied()
+            .filter(|&candidate| {
+                if after {
+                    candidate >= nodes[anchor].end
+                } else {
+                    nodes[candidate].end <= anchor
+                }
+            })
+            .collect();
+        if !after {
+            side.reverse();
         }
-        if BOUNDARY_ROLES.contains(&role) {
-            container = Some(parent);
-            break;
+        if let Some(&pick) = side.get(nth.unwrap_or(1) - 1)
+            && !picks.contains(&pick)
+        {
+            picks.push(pick);
         }
-        at = nodes[parent].parent;
     }
-    let end = container.map_or(nodes.len(), |container| nodes[container].end);
-    candidates
-        .iter()
-        .copied()
-        .find(|&candidate| candidate > anchor && candidate < end)
-        .map(|candidate| vec![candidate])
+    picks
 }
 
 fn holder_matches(

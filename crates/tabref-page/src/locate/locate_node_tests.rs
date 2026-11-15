@@ -279,7 +279,7 @@ fn a_role_alone_finds_the_only_control_of_that_role() {
 }
 
 #[test]
-fn text_in_no_row_leads_to_the_first_match_after_it() {
+fn after_and_before_take_the_nearest_match_on_that_side() {
     let tree = node(
         "webarea",
         "",
@@ -292,9 +292,39 @@ fn text_in_no_row_leads_to_the_first_match_after_it() {
             control("button", "Reply"),
         ],
     );
-    let words = [Word::quoted("Reply"), Word::bare("in"), Word::quoted("I run this site")];
-    let found = locate(&tree, &Locator::from_words(&words).unwrap(), LocateIntent::Click).unwrap();
-    let nth = [Word::quoted("Reply"), Word::bare("nth"), Word::bare("2")];
-    let second = locate(&tree, &Locator::from_words(&nth).unwrap(), LocateIntent::Click).unwrap();
-    assert_eq!(found.token, second.token);
+    let resolve = |words: &[Word]| {
+        locate(
+            &tree,
+            &Locator::from_words(words).unwrap(),
+            LocateIntent::Click,
+        )
+        .unwrap()
+    };
+    let after = resolve(&[
+        Word::quoted("Reply"),
+        Word::bare("after"),
+        Word::quoted("I run this site"),
+    ]);
+    let before = resolve(&[
+        Word::quoted("Reply"),
+        Word::bare("before"),
+        Word::quoted("I run this site"),
+    ]);
+    let second = resolve(&[Word::quoted("Reply"), Word::bare("nth"), Word::bare("2")]);
+    let first = resolve(&[Word::quoted("Reply"), Word::bare("nth"), Word::bare("1")]);
+    assert_eq!(after.token, second.token);
+    assert_eq!(before.token, first.token);
+    let within = [
+        Word::quoted("Reply"),
+        Word::bare("in"),
+        Word::quoted("I run this site"),
+    ];
+    assert!(
+        locate(
+            &tree,
+            &Locator::from_words(&within).unwrap(),
+            LocateIntent::Click
+        )
+        .is_err()
+    );
 }

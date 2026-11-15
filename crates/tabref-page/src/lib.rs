@@ -38,6 +38,7 @@ pub use locate::locate_intent::LocateIntent;
 pub use locate::locate_node::locate;
 pub use locate::located::Located;
 pub use locate::locator::Locator;
+pub use locate::scope_kind::ScopeKind;
 pub use locate::word::Word;
 pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
