@@ -28,8 +28,20 @@ impl WebSocketTransport {
     /// `deadline`. A server that holds the upgrade (a browser waiting on its
     /// user's approval) costs at most the remaining deadline.
     pub fn connect(url: &WebSocketUrl, deadline: Deadline) -> Result<Self, AppError> {
+        Self::connect_checked(url, deadline, &|| Ok(()))
+    }
+
+    /// [`connect`](Self::connect), running `before_upgrade` once the TCP
+    /// connection is up and before a single byte is sent on it; its error
+    /// drops the connection unused.
+    pub fn connect_checked(
+        url: &WebSocketUrl,
+        deadline: Deadline,
+        before_upgrade: &dyn Fn() -> Result<(), AppError>,
+    ) -> Result<Self, AppError> {
         let stream = TcpStream::connect_timeout(&url.socket_addr(), io_slice(deadline)?)
             .map_err(|error| connect_failed(url, &error))?;
+        before_upgrade()?;
         stream
             .set_nodelay(true)
             .map_err(|error| transport_failed("connect", error.to_string()))?;

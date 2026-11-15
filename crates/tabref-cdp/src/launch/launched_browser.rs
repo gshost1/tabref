@@ -6,7 +6,9 @@ use tabref_core::AppError;
 use crate::{BrowserEndpoint, EndpointSource, WebSocketUrl};
 
 /// A browser tabref started, as it records it so later invocations reach
-/// the same browser without being told where it listens.
+/// the same browser without being told where it listens. `started` names
+/// when its process started (see `process_start`), so a later process that
+/// reuses the pid is never taken for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchedBrowser {
     pub pid: u32,
@@ -14,6 +16,8 @@ pub struct LaunchedBrowser {
     pub websocket_path: String,
     pub profile_dir: PathBuf,
     pub headless: bool,
+    #[serde(default)]
+    pub started: Option<String>,
 }
 
 impl LaunchedBrowser {

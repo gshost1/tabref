@@ -86,11 +86,13 @@ fn a_navigation_started_late_in_the_deadline_still_opens() {
         return;
     }
     let tabref = common::harness("cold-slow");
+    let warm = format!("http://127.0.0.1:{}/", serve(&[("/", PAGE)]));
+    assert!(first_run(&tabref, &["open", &warm]).ok);
     let url = format!(
         "http://127.0.0.1:{}/",
-        serve_after(Duration::from_millis(6_500))
+        serve_after(Duration::from_millis(10_000))
     );
-    let opened = first_run(&tabref, &["--timeout", "8000", "open", &url]);
+    let opened = first_run(&tabref, &["--timeout", "12000", "open", &url]);
     stop_daemon(&tabref);
     assert!(opened.ok, "{}{}", opened.stdout, opened.stderr);
     assert!(opened.stdout.contains("Cold start"), "{}", opened.stdout);

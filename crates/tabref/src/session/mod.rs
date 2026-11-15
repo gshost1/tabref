@@ -3,7 +3,10 @@ pub(crate) mod action_watch;
 pub(crate) mod captured_snapshot;
 pub(crate) mod command_input;
 pub(crate) mod command_scope;
+pub(crate) mod connected_browser;
+pub(crate) mod connection_warning;
 pub(crate) mod endpoint_choice;
+pub(crate) mod endpoint_refusal;
 pub(crate) mod kept_session;
 pub(crate) mod launch_record;
 pub(crate) mod ref_target;
@@ -41,6 +44,7 @@ pub(crate) struct Session {
     store: RefStore,
     attached: HashMap<String, PageSession>,
     scope: CommandScope,
+    warning: Option<String>,
 }
 
 impl Session {
@@ -56,14 +60,16 @@ impl Session {
     ) -> Result<Self, AppError> {
         let scope = CommandScope::new(options, claim)?;
         let store = RefStore::open()?;
-        let (endpoint, mut connection) = connect_browser(options, &store, scope.deadline)?;
+        let browser = connect_browser(options, &store, scope.deadline)?;
+        let mut connection = browser.connection;
         connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
         Ok(Self {
             connection,
-            endpoint,
+            endpoint: browser.endpoint,
             store,
             attached: HashMap::new(),
             scope,
+            warning: browser.warning,
         })
     }
 
