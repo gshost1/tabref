@@ -36,7 +36,9 @@ pub(crate) fn requested_profile(options: &SessionOptions) -> Option<&Path> {
 
 /// `dir` as one absolute spelling: its deepest existing ancestor with
 /// symlinks and `..` resolved, the rest appended as written. A `..` past a
-/// directory that does not exist cannot be resolved, so it is refused.
+/// directory that does not exist cannot be resolved, so it is refused. On
+/// Windows `std::path::absolute` already folds `..` by text, so such a path
+/// arrives resolved and every check runs on the folded path.
 pub(crate) fn normalize(dir: &Path) -> Result<PathBuf, AppError> {
     let absolute = std::path::absolute(dir)?;
     let mut resolved = PathBuf::new();
