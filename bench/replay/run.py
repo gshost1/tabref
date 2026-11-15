@@ -34,6 +34,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "harness"))
 import core  # noqa: E402
 import arms  # noqa: E402
+import warmup  # noqa: E402
 
 sys.path.insert(0, str(core.HELDOUT))
 sys.path.insert(0, str(core.BENCH))
@@ -101,6 +102,7 @@ class Replay:
 
     def start_run(self, arm, tid, rnd):
         self.timeout_s = 0.0
+        self.warm = {}
         seed = th.web_seed(tid, rnd)
         exp = self.site.reset(seed)
         exp.update(th.web_expectations(tid))
@@ -117,6 +119,11 @@ class Replay:
         else:
             chrome = core.launch_chrome(work / "profile", port, work / "downloads", self.display, env, self.a.chrome)
         time.sleep(self.a.settle)
+        self.warm = warmup.warm_up(port)
+        cold = warmup.verdict(self.warm)
+        if cold:
+            self.finish(arm, work, env, chrome)
+            raise RuntimeError(cold)
         ctx = {"base": self.site.base, "work": str(work), "downloads": str(work / "downloads"), "exp": exp,
                "ad": str(core.ad_bin()), "cdp_port": port}
         return seed, exp, work, port, env, chrome, ctx
@@ -144,6 +151,7 @@ class Replay:
             return False, f"verify error {e}"
 
     def write(self, row):
+        row = {**row, **getattr(self, "warm", {})}
         with open(self.rows_path, "a") as fh:
             fh.write(core.scrub(json.dumps(row)) + "\n")
         print(f"{row['arm']:6} {row['task']} r{row['round']} {row['mode']:8} ok={row['success']!s:5} "

@@ -138,6 +138,15 @@ class VaultRows(unittest.TestCase):
         detail = json.loads((v.dir / "sealed" / "detail.jsonl").read_text())
         self.assertEqual((detail["answer"], detail["verify"]), ("secret answer", "secret why"))
 
+    def test_a_warm_up_error_is_held_with_the_other_free_text(self):
+        v = fresh.Vault(self.runs, "p1")
+        row = fresh.seal_record({**self.record(), "warmup_reached": False, "warmup_error": "secret warm text"}, v)
+        self.assertNotIn("warmup_error", row)
+        self.assertFalse(row["warmup_reached"])
+        v.flush()
+        detail = json.loads((v.dir / "sealed" / "detail.jsonl").read_text())
+        self.assertEqual(detail["warmup_error"], "secret warm text")
+
     def test_rows_count_only_after_commit(self):
         v = fresh.Vault(self.runs, "p1")
         v.stage_row({"task": "t1"})

@@ -8,6 +8,10 @@ per-round task rotation, and the row fields. Arms rotate per round too, like orc
 Changed: paths (core.py), a clean environment and a bench-only HOME for claude and the tools, the display mode,
 Claude Code 2.1.322 from $BENCH_TOOLS (override: BENCH_CLAUDE), and the key: ANTHROPIC_API_KEY must already be in
 this process's environment; the runner never looks for one and never writes it anywhere.
+Warm-up: before the timer and the model's first call, every arm's fresh Chrome loads one throwaway page from the
+harness's own server (harness/warmup.py), so a just-started browser's slow first load lands on no arm. Rows carry
+warmup (its version), warmup_s, warmup_reached and warmup_tab_left; a failed warm-up or a warm tab left open makes
+the row invalid, so no cold row passes as a warm one.
 Isolation: a model pass runs only on a VM or as the dedicated unprivileged user (core.isolation_problem;
 bench/tools/tabbench.sh sets that user up on a laptop and hands it the key on stdin).
 Spend: Claude Code's total_cost_usd per run; a run that hit the cap has no result event, so it is charged the
@@ -52,6 +56,7 @@ sys.path.insert(0, str(HERE))
 import core  # noqa: E402
 import arms  # noqa: E402
 import fresh  # noqa: E402
+import warmup  # noqa: E402
 
 sys.path.insert(0, str(core.HELDOUT))
 sys.path.insert(0, str(core.BENCH))
@@ -357,6 +362,19 @@ class Runner:
             env["HO_CDP_PORT"] = str(cdp_port or "")
         if cdp_port:
             (self.runs / "web-current-port").write_text(str(cdp_port))
+        warm = warmup.warm_up(cdp_port)
+        base_row.update(warm)
+        self.say(f"{run_id} {arm:6} warm-up {warm['warmup_s']} s reached={warm['warmup_reached']}",
+                 why=f" {warm.get('warmup_error', '')}")
+        cold = warmup.verdict(warm)
+        if cold:
+            core.stop_chrome(chrome, profile)
+            core.stop_arm_daemons(arm, env)
+            self.write_row({**base_row, "success": False, "verify": cold, "valid": False, "invalid_reason": cold})
+            self.say(f"{tid} {arm} INVALID {cold.split(':', 1)[0]}", why=f": {cold}")
+            if ts.sealed:
+                self.wipe(work)
+            return
         ctx = {"base": a.base, "work": str(work), "downloads": str(downloads), "exp": exp, "ad": str(core.ad_bin()),
                "cdp_port": cdp_port}
         prompt = task["prompt"].format(**ctx)
