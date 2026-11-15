@@ -9,7 +9,8 @@ use serde_json::{Value, json};
 use tabref_cdp::{CdpConnection, PageSession, wait_for_load};
 use tabref_core::ErrorCode;
 use tabref_page::{
-    click, fill, read_element, select_option, set_checked, snapshot_page, upload_files,
+    FrameSkipReason, click, fill, read_element, select_option, set_checked, snapshot_page,
+    snapshot_page_within_budget, upload_files,
 };
 
 use common::{connect_to, deadline, find, launch, live, open_tab, serve};
@@ -204,4 +205,47 @@ fn a_cross_site_iframe_is_grafted_under_its_owner_and_clickable() {
     click(&mut connection, &frame_session, &inner_button, deadline()).unwrap();
     let after = snapshot_page(&mut connection, &page, deadline()).unwrap();
     find(&after, "button", "Inner done");
+}
+
+#[test]
+fn a_busy_cross_site_iframe_and_a_pixel_tracker_never_hold_the_snapshot() {
+    if !live() {
+        return;
+    }
+    let inner = serve(&[
+        (
+            "/busy",
+            r#"<!doctype html><title>Busy</title><button>Busy go</button><script>setTimeout(() => { for (;;) {} }, 200)</script>"#,
+        ),
+        (
+            "/pixel",
+            r#"<!doctype html><title>Pixel</title><button>Track</button>"#,
+        ),
+    ]);
+    let outer_html = format!(
+        r#"<!doctype html><title>Outer</title><button>Outer go</button>
+<iframe title="Busy" src="http://localhost:{inner}/busy" width="300" height="200"></iframe>
+<iframe title="Pixel" src="http://localhost:{inner}/pixel" width="1" height="1"></iframe>"#
+    );
+    let outer = serve(&[("/", outer_html.as_str())]);
+    let chrome = launch();
+    let mut connection = connect_to(&chrome);
+    let page = open_tab(&mut connection, &format!("http://127.0.0.1:{outer}/"));
+    std::thread::sleep(std::time::Duration::from_millis(600));
+
+    let started = std::time::Instant::now();
+    let snapshot = snapshot_page_within_budget(&mut connection, &page, deadline()).unwrap();
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(2_000),
+        "{:?}",
+        started.elapsed()
+    );
+    find(&snapshot, "button", "Outer go");
+    let reasons: Vec<FrameSkipReason> = snapshot
+        .skipped_frames
+        .iter()
+        .map(|frame| frame.reason)
+        .collect();
+    assert!(reasons.contains(&FrameSkipReason::Tiny), "{reasons:?}");
 }

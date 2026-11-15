@@ -1,85 +1,50 @@
+//! Out-of-process iframes are their own targets. Turning auto-attach on for a
+//! target's session makes the browser attach a flattened session to every
+//! iframe target directly beneath it and report each one before it answers;
+//! turning it off again detaches them.
+
 use serde_json::{Value, json};
-use tabref_core::{AppError, Deadline};
 
 use super::child_target::ChildTarget;
 use crate::{CdpConnection, CdpEvent, PageSession};
 
 const ATTACHED: &str = "Target.attachedToTarget";
 const DETACHED: &str = "Target.detachedFromTarget";
+pub(crate) const AUTO_ATTACH: &str = "Target.setAutoAttach";
 
-/// Attaches a flattened session to every out-of-process iframe directly
-/// beneath `session`'s target. Auto-attach reports the iframe targets that
-/// already exist before it replies, and a target paused for a debugger is
-/// released.
-pub(crate) fn attach_child_targets(
-    connection: &mut CdpConnection,
-    session: &PageSession,
-    deadline: Deadline,
-) -> Result<Vec<ChildTarget>, AppError> {
-    set_auto_attach(connection, session, true, deadline)?;
-    let parent = session.session_id.as_str();
-    let attached = connection.drain_events(|event| {
-        event.method == ATTACHED
-            && event.session_id.as_deref() == Some(parent)
-            && event
-                .params
-                .pointer("/targetInfo/type")
-                .and_then(Value::as_str)
-                == Some("iframe")
-    });
-    let mut children = Vec::with_capacity(attached.len());
-    for event in attached {
-        let Some(child) = child_target(&event) else {
-            continue;
-        };
-        if event
-            .params
-            .get("waitingForDebugger")
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            connection.call(
-                "Runtime.runIfWaitingForDebugger",
-                json!({}),
-                Some(&child.session.session_id),
-                deadline,
-            )?;
-        }
-        children.push(child);
-    }
-    Ok(children)
+pub(crate) fn auto_attach_params(enabled: bool) -> Value {
+    json!({ "autoAttach": enabled, "waitForDebuggerOnStart": false, "flatten": true })
 }
 
-/// Turns auto-attach back off for `session`, which detaches the iframe
-/// sessions it attached, and drops the attach bookkeeping events. Best
-/// effort: the snapshot is already read.
-pub(crate) fn stop_child_targets(
+/// Takes the iframe targets the browser reported as attached beneath
+/// `parent`, in the order it reported them.
+pub(crate) fn take_attached_children(
     connection: &mut CdpConnection,
-    session: &PageSession,
-    deadline: Deadline,
-) {
-    let _ = set_auto_attach(connection, session, false, deadline);
-    let parent = session.session_id.as_str();
+    parent: &PageSession,
+) -> Vec<ChildTarget> {
+    let parent = parent.session_id.as_str();
+    connection
+        .drain_events(|event| {
+            event.method == ATTACHED
+                && event.session_id.as_deref() == Some(parent)
+                && event
+                    .params
+                    .pointer("/targetInfo/type")
+                    .and_then(Value::as_str)
+                    == Some("iframe")
+        })
+        .iter()
+        .filter_map(child_target)
+        .collect()
+}
+
+/// Drops the attach bookkeeping events of `parent`'s children.
+pub(crate) fn discard_attach_events(connection: &mut CdpConnection, parent: &PageSession) {
+    let parent = parent.session_id.as_str();
     connection.discard_events(|event| {
         matches!(event.method.as_str(), ATTACHED | DETACHED)
             && event.session_id.as_deref() == Some(parent)
     });
-}
-
-fn set_auto_attach(
-    connection: &mut CdpConnection,
-    session: &PageSession,
-    enabled: bool,
-    deadline: Deadline,
-) -> Result<(), AppError> {
-    connection
-        .call(
-            "Target.setAutoAttach",
-            json!({ "autoAttach": enabled, "waitForDebuggerOnStart": false, "flatten": true }),
-            Some(&session.session_id),
-            deadline,
-        )
-        .map(|_| ())
 }
 
 fn child_target(event: &CdpEvent) -> Option<ChildTarget> {
@@ -97,5 +62,11 @@ fn child_target(event: &CdpEvent) -> Option<ChildTarget> {
             session_id: text("/sessionId")?,
         },
         parent_frame_id: text("/targetInfo/parentFrameId"),
+        url: text("/targetInfo/url").unwrap_or_default(),
+        waiting: event
+            .params
+            .get("waitingForDebugger")
+            .and_then(Value::as_bool)
+            == Some(true),
     })
 }

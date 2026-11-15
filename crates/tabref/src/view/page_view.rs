@@ -76,7 +76,7 @@ pub(crate) fn page_view(
         text.push('\n');
         text.push_str(&line.printed());
     }
-    if let Some(frames) = frames_line(&outline, subject.unreadable_frames) {
+    if let Some(frames) = frames_line(&outline, subject.skipped_frames) {
         text.push('\n');
         text.push_str(&frames);
     }
@@ -110,7 +110,12 @@ fn data(
         "url": subject.info.url,
         "title": subject.info.title,
         "ref_count": subject.ref_count,
-        "unreadable_frames": subject.unreadable_frames,
+        "unreadable_frames": subject
+            .skipped_frames
+            .iter()
+            .filter(|frame| frame.reason.is_unread())
+            .count(),
+        "skipped_frames": subject.skipped_frames,
         "lines": kept.iter().map(ViewLine::printed).collect::<Vec<_>>(),
         "complete": report.is_complete(),
         "lines_total": report.lines_total,

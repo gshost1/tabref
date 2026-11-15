@@ -19,6 +19,12 @@ pub fn list_frames(
         Some(&session.session_id),
         deadline,
     )?;
+    parse_frame_tree(&result)
+}
+
+/// The frames of a `Page.getFrameTree` reply, in the order [`list_frames`]
+/// gives them, for a caller that sent the request itself.
+pub fn parse_frame_tree(result: &Value) -> Result<Vec<FrameEntry>, AppError> {
     let root = result
         .get("frameTree")
         .ok_or_else(|| transport_failed("Page.getFrameTree", "reply has no frameTree"))?;
@@ -39,6 +45,7 @@ pub fn list_frames(
         }
         frames.push(FrameEntry {
             loader_id: text(tree, "/frame/loaderId").unwrap_or_default(),
+            url: text(tree, "/frame/url").unwrap_or_default(),
             frame_id,
             parent_id,
         });

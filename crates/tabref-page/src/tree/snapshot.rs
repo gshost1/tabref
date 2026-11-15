@@ -1,23 +1,22 @@
-use std::collections::VecDeque;
-
 use serde_json::json;
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
-use super::child_target::ChildTarget;
-use super::child_targets::{attach_child_targets, stop_child_targets};
 use super::flatten::flatten;
 use super::frame_budget::FrameBudget;
-use super::frame_graft::{FrameNodes, graft_frames};
-use super::target_read::{TargetReads, frame_owner, read_target};
+use super::frame_graft::graft_frames;
+use super::frame_reader::FrameReader;
+use super::frame_skip_reason::FrameSkipReason;
+use super::skipped_frame::SkippedFrame;
 use crate::{CdpConnection, PageSession, WebSnapshot};
-use tabref_cdp::{is_protocol_error, is_target_gone};
 
 /// Reads the full accessibility tree of every frame in the page, including
-/// out-of-process iframes, which are attached as their own targets, grafts
-/// each child frame beneath its owner element, and returns it in core form.
-/// Frames that cannot be read, and frames lost because an ancestor frame
-/// could not be read, are listed in `unreadable_frames`. Every iframe is read
-/// within `deadline`, and one that misses it fails the snapshot.
+/// out-of-process iframes, which are attached as their own targets and read
+/// in parallel, grafts each child frame beneath its owner element, and
+/// returns it in core form. Frames whose owner element cannot show anything
+/// (hidden, no area, a pixel, off the page), frames that hold no text or
+/// control, and frames that cannot be read are left out and listed in
+/// `skipped_frames`. Every iframe is read within `deadline`, and one that
+/// misses it fails the snapshot.
 pub fn snapshot_page(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -26,10 +25,10 @@ pub fn snapshot_page(
     snapshot_with(connection, session, FrameBudget::whole(deadline))
 }
 
-/// Reads the page as [`snapshot_page`] does, but stops reading iframes a
-/// reserve short of `deadline`, so a slow iframe cannot cost the page. An
-/// iframe that misses that budget is listed in `unreadable_frames`, and the
-/// child frames of an iframe reached after it are not looked for.
+/// Reads the page as [`snapshot_page`] does, but waits for iframes only a
+/// short while after the page itself is read (see [`FrameBudget`]), so a
+/// slow or stalled iframe cannot cost the page. An iframe that misses the
+/// budget is listed as timed out.
 pub fn snapshot_page_within_budget(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -43,104 +42,34 @@ fn snapshot_with(
     session: &PageSession,
     budget: FrameBudget,
 ) -> Result<WebSnapshot, AppError> {
-    let mut auto_attached = Vec::new();
-    let read = read_page(connection, session, budget, &mut auto_attached);
-    for parent in auto_attached.iter().rev() {
-        stop_child_targets(connection, parent, budget.snapshot());
-    }
-    let (frames, mut unreadable_frames) = read?;
+    let mut reader = FrameReader::new(session, budget);
+    let read = reader.run(connection);
+    reader.release(connection);
+    read?;
+    let frames = reader.assemble();
     let (roots, dropped) = graft_frames(frames);
-    unreadable_frames.extend(dropped);
+    for frame_id in dropped {
+        reader.leave_out(&frame_id, String::new(), FrameSkipReason::Unreadable);
+    }
+    let dom_captures = reader.finish();
     let mut roots = roots.into_iter();
     let (Some(root), None) = (roots.next(), roots.next()) else {
         return Err(no_tree(&session.target_id));
     };
     let mut origins = Vec::new();
     let tree = flatten(root, &mut origins);
+    let skipped_frames: Vec<SkippedFrame> = reader.left_out;
     Ok(WebSnapshot {
         tree,
         origins,
-        unreadable_frames,
+        unreadable_frames: skipped_frames
+            .iter()
+            .filter(|frame| frame.reason.is_unread())
+            .map(|frame| frame.frame_id.clone())
+            .collect(),
+        skipped_frames,
+        dom_captures,
     })
-}
-
-fn read_page(
-    connection: &mut CdpConnection,
-    session: &PageSession,
-    budget: FrameBudget,
-    auto_attached: &mut Vec<PageSession>,
-) -> Result<(Vec<FrameNodes>, Vec<String>), AppError> {
-    let page_reads = TargetReads {
-        budget,
-        is_page: true,
-    };
-    let (mut frames, mut unreadable) = read_target(connection, session, page_reads)?;
-    let mut parents = VecDeque::from([session.clone()]);
-    while let Some(parent) = parents.pop_front() {
-        let is_page = parent == *session;
-        if !is_page && budget.is_spent() {
-            continue;
-        }
-        let attach_deadline = if is_page {
-            budget.snapshot()
-        } else {
-            budget.iframes()
-        };
-        let children = match attach_child_targets(connection, &parent, attach_deadline) {
-            Ok(children) => children,
-            Err(error) if !is_page && is_target_gone(&error) => continue,
-            Err(error) if !is_page && budget.missed(&error) => {
-                auto_attached.push(parent.clone());
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
-        auto_attached.push(parent.clone());
-        for child in children {
-            if budget.is_spent() {
-                unreadable.push(child.session.target_id.clone());
-                continue;
-            }
-            match read_child(connection, &parent, &child, budget) {
-                Ok((child_frames, child_unreadable)) => {
-                    frames.extend(child_frames);
-                    unreadable.extend(child_unreadable);
-                }
-                Err(error)
-                    if is_protocol_error(&error)
-                        || is_target_gone(&error)
-                        || budget.missed(&error) =>
-                {
-                    unreadable.push(child.session.target_id.clone());
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-            parents.push_back(child.session);
-        }
-    }
-    Ok((frames, unreadable))
-}
-
-fn read_child(
-    connection: &mut CdpConnection,
-    parent: &PageSession,
-    child: &ChildTarget,
-    budget: FrameBudget,
-) -> Result<(Vec<FrameNodes>, Vec<String>), AppError> {
-    let iframe_reads = TargetReads {
-        budget,
-        is_page: false,
-    };
-    let deadline = budget.iframes();
-    let (mut frames, unreadable) = read_target(connection, &child.session, iframe_reads)?;
-    if let Some(root) = frames.first_mut() {
-        if root.parent_id.is_none() {
-            root.parent_id.clone_from(&child.parent_frame_id);
-        }
-        root.owner_backend_node_id = frame_owner(connection, parent, &root.frame_id, deadline)?;
-    }
-    Ok((frames, unreadable))
 }
 
 fn no_tree(target_id: &str) -> AppError {

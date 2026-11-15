@@ -13,6 +13,13 @@ use super::launched_browser::LaunchedBrowser;
 use crate::read_active_port;
 
 const POLL: Duration = Duration::from_millis(25);
+/// Variables that mark the launching process (a tabref daemon) and must not
+/// reach the browser or anything it starts.
+const INHERITED_NOT: &[&str] = &[
+    "TABREF_DAEMON",
+    "TABREF_DAEMON_CDP",
+    "TABREF_DAEMON_IDLE_MS",
+];
 const WINDOW_SIZE: &str = "--window-size=1280,900";
 
 /// Starts a browser with a fresh throwaway profile and remote debugging on a
@@ -34,6 +41,9 @@ pub fn launch_chrome(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    for name in INHERITED_NOT {
+        command.env_remove(name);
+    }
     detach(&mut command);
     let mut child = command.spawn().map_err(|error| {
         AppError::new(
@@ -45,8 +55,10 @@ pub fn launch_chrome(
         .with_disposition(DeliverySemantics::not_delivered())
     })?;
     let active = wait_for_port(&mut child, &profile_dir, deadline)?;
+    let pid = child.id();
+    std::thread::spawn(move || child.wait());
     Ok(LaunchedBrowser {
-        pid: child.id(),
+        pid,
         port: active.port,
         websocket_path: active.websocket_path,
         profile_dir,
