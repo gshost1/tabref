@@ -516,10 +516,12 @@ def tool_log_totals(path):
 
 
 class Site:
-    """heldout/web/server.py (frozen), started by this run on 127.0.0.1:<port>; a port in use is an error."""
+    """A task set's site, started by this run on 127.0.0.1:<port>; a port in use is an error. The default script is
+    heldout/web/server.py (frozen); the fresh set passes its sealed server. -B: no bytecode next to either."""
 
-    def __init__(self, base="http://127.0.0.1:8792", log=None):
+    def __init__(self, base="http://127.0.0.1:8792", log=None, script=None):
         self.base, self.log, self.proc = base, log, None
+        self.script = Path(script) if script else HELDOUT / "web" / "server.py"
 
     def start(self):
         port = int(self.base.rsplit(":", 1)[1])
@@ -532,17 +534,17 @@ class Site:
         if self.log:
             Path(self.log).parent.mkdir(parents=True, exist_ok=True)
         fh = open(self.log, "a") if self.log else subprocess.DEVNULL
-        self.proc = subprocess.Popen([sys.executable, "-I", str(HELDOUT / "web" / "server.py"), self.base.rsplit(":", 1)[1]],
+        self.proc = subprocess.Popen([sys.executable, "-I", "-B", str(self.script), self.base.rsplit(":", 1)[1]],
                                      stdout=fh, stderr=fh, start_new_session=True)
         for _ in range(50):
             if self.proc.poll() is not None:
-                raise SystemExit("web/server.py exited at start")
+                raise SystemExit(f"{self.script.name} exited at start")
             try:
                 http_json(f"{self.base}/__state")
                 return self
             except Exception:
                 time.sleep(0.2)
-        raise SystemExit("web/server.py did not come up")
+        raise SystemExit(f"{self.script.name} did not come up")
 
     def reset(self, seed):
         return http_json(f"{self.base}/__reset?seed={seed}")

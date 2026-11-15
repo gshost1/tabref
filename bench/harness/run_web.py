@@ -18,6 +18,15 @@ One command per pass (spend stops at --budget, from Claude Code's total_cost_usd
   laptop: <key on stdin> | bench/tools/tabbench.sh run --arms tabref --rounds 0-4   (as the tabbench user)
   [--display xvfb|headless|host] [--tasks hw1,hp3] [--budget 5] [--tabref-checkout <dir>]
 Rows go to $BENCH_RUNS/results-web.jsonl (default bench/runs/); report: python3 -I bench/report.py models.
+
+Task sets (--taskset, rows carry it): heldout (default; the 10 tuning tasks, site on 8792) or fresh (the sealed
+10, harness/fresh.py: read from --fresh-dir / BENCH_FRESH_DIR, seal checked before the pass and after it, sealed
+server on 8793). Both use the same arms, tool paragraphs, caps, Chrome setup, logging and scoring. Fresh rows keep
+only numbers and flags: answers, verifier text and stray names go to web-fresh/detail.jsonl beside the
+transcripts, and the console shows no verifier text, so a tuner reading rows or logs learns nothing of the tasks.
+  laptop: <key on stdin> | BENCH_FRESH_DIR=<sealed dir> bench/tools/tabbench.sh run --taskset fresh --rounds 0-4
+--smoke: no model, no key, no Chrome: start the set's site, reset every task for run 0, and count how many
+verifiers reject an empty answer with an empty and with an untouched state (bench/tools/tabbench.sh smoke).
 """
 import argparse
 import json
@@ -34,6 +43,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import core  # noqa: E402
 import arms  # noqa: E402
+import fresh  # noqa: E402
 
 sys.path.insert(0, str(core.HELDOUT))
 sys.path.insert(0, str(core.BENCH))
@@ -42,6 +52,53 @@ import tasks_heldout as th  # noqa: E402
 ORDER = ["hw1", "hw2", "hw3", "hw4", "hw5", "hw6", "hw7", "hp1", "hp2", "hp3"]
 TASKS = {t["id"]: t for t in th.WEB_TASKS}
 TIMEOUT_S = 600
+HELDOUT_BASE = "http://127.0.0.1:8792"
+SEALED_FIELDS = ("verify", "answer", "strays", "invalid_reason")
+
+
+class TaskSet:
+    """Which tasks a pass runs: the module with the tasks_heldout interface, the run order, the site script."""
+
+    def __init__(self, name, mod, order, script, sealed_dir=None):
+        self.name, self.mod, self.order, self.script, self.sealed_dir = name, mod, order, script, sealed_dir
+        self.tasks = {t["id"]: t for t in mod.WEB_TASKS}
+
+    @property
+    def sealed(self):
+        return self.sealed_dir is not None
+
+    def recheck(self):
+        """The seal still holds after the pass (nothing wrote into the folder); a no-op for heldout."""
+        if self.sealed:
+            fresh.verify(self.sealed_dir)
+
+
+def load_taskset(name, fresh_arg=None):
+    if name == "heldout":
+        return TaskSet("heldout", th, ORDER, None)
+    try:
+        root = fresh.fresh_dir(fresh_arg)
+        mod = fresh.load(root)
+    except (fresh.SealBroken, OSError) as e:
+        raise SystemExit(f"fresh task set refused: {e}")
+    return TaskSet("fresh", mod, [t["id"] for t in mod.WEB_TASKS], fresh.server_script(root), root)
+
+
+def seal_record(record, detail_path):
+    """Fresh rows: free text (answer, verifier reason, stray names, invalid reason) moves to the sealed detail file;
+    the row keeps numbers, flags, the stray count and the invalid reason's generic prefix."""
+    detail = {k: record[k] for k in SEALED_FIELDS if k in record}
+    detail.update({k: record.get(k) for k in ("task", "arm", "round", "seed", "success")})
+    Path(detail_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(detail_path, "a") as fh:
+        fh.write(json.dumps(detail) + "\n")
+    out = dict(record, verify="sealed")
+    out.pop("answer", None)
+    if "strays" in record:
+        out["strays"] = len(record["strays"])
+    if record.get("invalid_reason"):
+        out["invalid_reason"] = str(record["invalid_reason"]).split(":", 1)[0]
+    return out
 
 
 def rot(n, items):
@@ -152,9 +209,10 @@ def summarize_stream(lines):
 
 
 class Runner:
-    def __init__(self, a, display, site, key):
-        self.a, self.display, self.site, self.key = a, display, site, key
+    def __init__(self, a, display, site, key, ts):
+        self.a, self.display, self.site, self.key, self.ts = a, display, site, key, ts
         self.runs = Path(a.out)
+        self.web = self.runs / ("web-fresh" if ts.sealed else "web")
         self.home = self.runs / "home"
         self.home.mkdir(parents=True, exist_ok=True)
         self.tabref = core.tabref_bin(a.tabref_checkout)
@@ -164,28 +222,34 @@ class Runner:
                          "tabref": version([str(self.tabref), "--version"]) if self.tabref.exists() else None}
 
     def write_row(self, record):
+        if self.ts.sealed:
+            record = seal_record(record, self.web / "detail.jsonl")
         with open(self.runs / "results-web.jsonl", "a") as fh:
             fh.write(json.dumps(record) + "\n")
 
+    def say(self, line, why=""):
+        print(line if self.ts.sealed else f"{line}{why}", flush=True)
+
     def run_one(self, arm, tid, rnd):
         a = self.a
-        task = TASKS[tid]
-        seed = th.web_seed(tid, rnd)
+        ts = self.ts
+        task = ts.tasks[tid]
+        seed = ts.mod.web_seed(tid, rnd)
         channel = arms.WEB_ARMS[arm]
-        base_row = {"suite": "web", "arm": arm, "arm_version": arms.arm_version(arm, self.versions["tabref"]), "task": tid,
+        base_row = {"suite": "web", "taskset": ts.name, "arm": arm, "arm_version": arms.arm_version(arm, self.versions["tabref"]), "task": tid,
                     "round": rnd, "model": a.model, "channel": channel, "seed": seed, "host": a.host,
                     "vm": core.host_label(), "display": self.display.mode, "claude_version": self.versions["claude"],
                     "chrome_version": self.versions["chrome"]}
         exp = self.site.reset(seed)
         try:
-            exp.update(th.web_expectations(tid))
+            exp.update(ts.mod.web_expectations(tid))
         except Exception as e:
             why = f"expected value unavailable: {e}"
             self.write_row({**base_row, "success": False, "verify": why, "valid": False, "invalid_reason": why})
-            print(f"{tid} {arm} INVALID {why}", flush=True)
+            self.say(f"{tid} {arm} INVALID expected value unavailable", why=f": {e}")
             return
         run_id = f"{tid}-{channel}-{rnd}"
-        out = self.runs / "web" / f"{arm}-{a.model}"
+        out = self.web / f"{arm}-{a.model}"
         work = out / "work" / run_id
         shutil.rmtree(work, ignore_errors=True)
         downloads = work / "downloads"
@@ -205,7 +269,7 @@ class Runner:
             core.stop_chrome(chrome, profile)
             why = f"bench launch failed: {e}"
             self.write_row({**base_row, "success": False, "verify": why, "valid": False, "invalid_reason": why})
-            print(f"{tid} {arm} INVALID {why}", flush=True)
+            self.say(f"{tid} {arm} INVALID bench launch failed", why=f": {e}")
             return
         if arm == "ad-14":
             cdp_port = core.ad_endpoint_port(env["AGENT_DESKTOP_HOME"])
@@ -244,7 +308,7 @@ class Runner:
         answer = final.get("result", "") or ""
         state = self.site.state()
         try:
-            ok, why = th.verify_web(task, ctx, answer, state)
+            ok, why = ts.mod.verify_web(task, ctx, answer, state)
         except Exception as exc:
             ok, why = False, f"verify error {exc}"
         strays = collect_strays(since, work, out / "strays" / run_id)
@@ -284,8 +348,8 @@ class Runner:
         self.max_cost = max(self.max_cost, record["cost_usd_list"] or 0.0)
         self.spent += cost
         self.write_row(record)
-        print(f"{run_id} {arm:6} ok={ok!s:5} wall={wall:6.1f}s cli={seconds:5.1f}s turns={final.get('num_turns')} "
-              f"in={record['input_total']} ${record['cost_usd_list']} | {why[:160]}", flush=True)
+        self.say(f"{run_id} {arm:6} ok={ok!s:5} wall={wall:6.1f}s cli={seconds:5.1f}s turns={final.get('num_turns')} "
+                 f"in={record['input_total']} ${record['cost_usd_list']}", why=f" | {why[:160]}")
 
 
 def main():
@@ -294,7 +358,10 @@ def main():
     ap.add_argument("--rounds", default="0", help="e.g. 0-4 or 0,2")
     ap.add_argument("--tasks", default="")
     ap.add_argument("--model", default="claude-sonnet-5-5")
-    ap.add_argument("--base", default="http://127.0.0.1:8792")
+    ap.add_argument("--taskset", default="heldout", choices=["heldout", "fresh"])
+    ap.add_argument("--fresh-dir", default=None, help="the sealed fresh folder (default: $BENCH_FRESH_DIR)")
+    ap.add_argument("--smoke", action="store_true", help="no model: reset every task and check empty answers fail")
+    ap.add_argument("--base", default=None, help="site URL (default: 127.0.0.1:8792 heldout, :8793 fresh)")
     ap.add_argument("--timeout", type=int, default=TIMEOUT_S)
     ap.add_argument("--host", default=None, help="host label for rows (default: vm or laptop)")
     ap.add_argument("--display", default="xvfb", choices=["xvfb", "headless", "host"])
@@ -306,6 +373,15 @@ def main():
     a.host = a.host or core.host_label()
     core.check_frozen()
     core.exit_on_sigterm()
+    ts = load_taskset(a.taskset, a.fresh_dir)
+    if ts.sealed:
+        if a.base not in (None, fresh.BASE):
+            raise SystemExit(f"the fresh site runs on {fresh.BASE} only")
+        if a.tasks and not set(a.tasks.split(",")) <= set(ts.order):
+            raise SystemExit("--tasks names tasks outside the fresh set")
+    a.base = a.base or (fresh.BASE if ts.sealed else HELDOUT_BASE)
+    if a.smoke:
+        return smoke(a, ts)
     why = core.isolation_problem(a.display)
     if why:
         raise SystemExit(f"refusing a model pass: {why}")
@@ -324,17 +400,75 @@ def main():
         if why is None:
             ready.append(arm)
     Path(a.out).mkdir(parents=True, exist_ok=True)
-    with core.Display(a.display, Path(a.out) / "display") as display, \
-            core.Site(a.base, Path(a.out) / "server.log") as site:
-        r = Runner(a, display, site, key)
-        for rnd in rounds(a.rounds):
-            for arm in rot(rnd, ready):
-                for tid in (a.tasks.split(",") if a.tasks else rot(rnd, ORDER)):
-                    if r.spent >= a.budget:
-                        print(f"budget stop: ${r.spent:.2f} spent of ${a.budget:.2f}", flush=True)
-                        return
-                    r.run_one(arm, tid, rnd)
-        print(f"pass done: ${r.spent:.2f} spent", flush=True)
+    try:
+        with core.Display(a.display, Path(a.out) / "display") as display, \
+                open_site(a, ts) as site:
+            r = Runner(a, display, site, key, ts)
+            for rnd in rounds(a.rounds):
+                for arm in rot(rnd, ready):
+                    for tid in (a.tasks.split(",") if a.tasks else rot(rnd, ts.order)):
+                        if r.spent >= a.budget:
+                            print(f"budget stop: ${r.spent:.2f} spent of ${a.budget:.2f}", flush=True)
+                            return
+                        r.run_one(arm, tid, rnd)
+            print(f"pass done ({ts.name}): ${r.spent:.2f} spent", flush=True)
+    finally:
+        after_pass(ts)
+
+
+def open_site(a, ts):
+    """The set's site; the fresh seal is checked again right before its server starts."""
+    try:
+        ts.recheck()
+    except (fresh.SealBroken, OSError) as e:
+        raise SystemExit(f"fresh task set refused: {e}")
+    log = Path(a.out) / ("web-fresh" if ts.sealed else ".") / "server.log"
+    return core.Site(a.base, log, ts.script)
+
+
+def after_pass(ts):
+    try:
+        ts.recheck()
+    except (fresh.SealBroken, OSError) as e:
+        print(f"fresh seal BROKEN after the pass: {e}; treat this pass as invalid", flush=True)
+        raise SystemExit(3)
+    if ts.sealed:
+        print("fresh seal ok after the pass", flush=True)
+
+
+def smoke(a, ts):
+    """Model-free check of a task set: every task resets for run 0, and its verifier rejects an empty answer with
+    an empty state and with the untouched state the reset left. Prints counts only."""
+    n = len(ts.order)
+    counts = {"reset": 0, "expectations": 0, "reject_empty_state": 0, "reject_untouched_state": 0, "verify_raised": 0}
+    Path(a.out).mkdir(parents=True, exist_ok=True)
+    try:
+        with open_site(a, ts) as site:
+            for tid in ts.order:
+                try:
+                    exp = site.reset(ts.mod.web_seed(tid, 0))
+                except Exception:
+                    continue
+                counts["reset"] += 1
+                try:
+                    exp.update(ts.mod.web_expectations(tid))
+                    counts["expectations"] += 1
+                except Exception:
+                    pass
+                ctx = {"base": a.base, "work": str(a.out), "downloads": str(Path(a.out) / "smoke-downloads"),
+                       "exp": exp, "ad": str(core.ad_bin()), "cdp_port": None}
+                for key, state in (("reject_empty_state", dict), ("reject_untouched_state", site.state)):
+                    try:
+                        ok, _ = ts.mod.verify_web(ts.tasks[tid], ctx, "", state())
+                    except Exception:
+                        counts["verify_raised"] += 1
+                        continue
+                    counts[key] += not ok
+    finally:
+        after_pass(ts)
+    print(f"smoke ({ts.name}): " + ", ".join(f"{k} {v}/{n}" for k, v in counts.items()), flush=True)
+    good = counts["reset"] == n and counts["reject_empty_state"] == n and counts["reject_untouched_state"] == n
+    raise SystemExit(0 if good else 1)
 
 
 if __name__ == "__main__":

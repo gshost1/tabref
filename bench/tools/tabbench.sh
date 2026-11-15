@@ -12,7 +12,16 @@
 #                                                  earlier pass could have edited), then a pass as tabbench; the key goes over stdin into that process's
 #                                                  environment only (never a command line, file or log). With a
 #                                                  terminal and no pipe it asks for the key without echo.
-#   bench/tools/tabbench.sh results                copy tabbench's runs/ to bench/runs/tabbench/ for report.py
+#   bench/tools/tabbench.sh results [--with-fresh] copy tabbench's runs/ to bench/runs/tabbench/ for report.py;
+#                                                  web-fresh/ (sealed transcripts and verifier text) stays behind
+#                                                  unless --with-fresh
+#   bench/tools/tabbench.sh smoke [--taskset fresh] [run_web.py args]
+#                                                  no model, no key: as tabbench, start the set's site, reset every
+#                                                  task for run 0 and count verifiers that reject an empty answer
+#
+# --taskset fresh (run and smoke): the sealed folder (--fresh-dir <dir> or BENCH_FRESH_DIR) is seal-checked here,
+# copied into tabbench's home for that pass only ($HOME/fresh, a tar stream like sync), seal-checked again there,
+# handed to run_web.py as --fresh-dir, and removed when the pass ends (also on failure or interrupt).
 #
 # Only setup needs root. sync, run and results run as the operator and reach tabbench only through a root-owned
 # wrapper, /usr/local/bin/as-tabbench (`exec sudo -n -u tabbench "$@"`, with a sudoers drop-in
@@ -25,7 +34,7 @@ set -euo pipefail
 U=tabbench
 H=/home/$U
 here=$(cd "$(dirname "$0")/.." && pwd)
-cmd=${1:?setup, sync, run or results}; shift || true
+cmd=${1:?setup, sync, run, smoke or results}; shift || true
 AS=${TABBENCH_AS:-/usr/local/bin/as-tabbench}
 [[ $AS == /* ]] || { echo "TABBENCH_AS must be an absolute path" >&2; exit 2; }
 as_raw() { ( cd / && "$AS" env -i HOME="$H" USER="$U" LOGNAME="$U" LANG=C.UTF-8 PATH=/usr/bin:/bin "$@" ) \
@@ -47,6 +56,35 @@ sync_files() {
         mv "$HOME/bin/tabref.new" "$HOME/bin/tabref"' < "$tb"
     echo "tabref: $tb -> $H/bin/tabref"
   else echo "tabref: no binary (${tb:-none}); tabref rows will be skipped"; fi
+}
+FRESH=0
+FRESH_SRC=${BENCH_FRESH_DIR:-}
+ARGS=()
+parse_set() {
+  local want=""
+  while (($#)); do
+    case $1 in
+      --taskset) want=${2:-}; ARGS+=("$1" "${2:-}"); shift 2 || shift ;;
+      --taskset=*) want=${1#*=}; ARGS+=("$1"); shift ;;
+      --fresh-dir) FRESH_SRC=${2:-}; shift 2 || shift ;;
+      --fresh-dir=*) FRESH_SRC=${1#*=}; shift ;;
+      *) ARGS+=("$1"); shift ;;
+    esac
+  done
+  if [[ $want == fresh ]]; then
+    FRESH=1
+    [[ -n $FRESH_SRC ]] || { echo "--taskset fresh needs --fresh-dir <dir> or BENCH_FRESH_DIR" >&2; exit 2; }
+    ARGS+=(--fresh-dir "$H/fresh")
+  fi
+}
+fresh_out() { as_user bash -c 'rm -rf "$HOME/fresh" "$HOME/fresh.new"' || true; }
+fresh_in() {
+  python3 -I -B "$here/harness/fresh.py" verify "$FRESH_SRC"
+  trap fresh_out EXIT
+  tar -C "$FRESH_SRC" -cf - . \
+    | as_user bash -c 'set -e; rm -rf "$HOME/fresh.new" "$HOME/fresh"; mkdir -m 700 "$HOME/fresh.new"
+        tar -C "$HOME/fresh.new" --no-same-owner -xf -; mv "$HOME/fresh.new" "$HOME/fresh"'
+  as_user python3 -I -B "$H/tabref/bench/harness/fresh.py" verify "$H/fresh"
 }
 default_bin() {
   local common
@@ -96,15 +134,29 @@ case $cmd in
       export ANTHROPIC_API_KEY
       cd "$H/tabref"
       exec env -u TABBENCH_INNER BENCH_TOOLS="$H/bench-tools" BENCH_RUNS="$H/runs" TABREF_BIN="$H/bin/tabref" \
-        python3 -I bench/harness/run_web.py "$@" < /dev/null
+        python3 -I -B bench/harness/run_web.py "$@" < /dev/null
     fi
+    parse_set "$@"
     if [[ -t 0 ]]; then IFS= read -rs -p "Anthropic API key for the bench: " key; echo; else IFS= read -r key; fi
     [[ -n $key ]] || { echo "no key" >&2; exit 2; }
     need_user
     sync_files "${TABREF_BIN:-$(default_bin)}"
+    ((FRESH)) && fresh_in
     rc=0
-    printf '%s\n' "$key" | as_raw TABBENCH_INNER=1 bash "$H/tabref/bench/tools/tabbench.sh" run "$@" || rc=$?
+    printf '%s\n' "$key" | as_raw TABBENCH_INNER=1 bash "$H/tabref/bench/tools/tabbench.sh" run "${ARGS[@]}" || rc=$?
     unset key
+    as_user bash -c 'kill -9 -1' 2>/dev/null || true
+    exit "$rc"
+    ;;
+  smoke)
+    [[ $(id -u) != 0 ]] || { echo "run smoke as the operator, not root" >&2; exit 2; }
+    parse_set "$@"
+    need_user
+    sync_files "${TABREF_BIN:-$(default_bin)}"
+    ((FRESH)) && fresh_in
+    rc=0
+    as_user bash -c 'cd "$HOME/tabref" && exec env BENCH_TOOLS="$HOME/bench-tools" BENCH_RUNS="$HOME/runs-smoke" \
+        python3 -I -B bench/harness/run_web.py --smoke "$@"' _ "${ARGS[@]}" || rc=$?
     as_user bash -c 'kill -9 -1' 2>/dev/null || true
     exit "$rc"
     ;;
@@ -113,7 +165,10 @@ case $cmd in
     need_user
     mkdir -p "$here/runs"
     tmp=$(mktemp -d "$here/runs/.tabbench.XXXXXX")
-    as_user bash -c '[[ -d "$HOME/runs" ]] || exit 0; tar -C "$HOME/runs" -cf - .' \
+    with=0; [[ ${1:-} == --with-fresh ]] && with=1
+    as_user bash -c '[[ -d "$HOME/runs" ]] || exit 0
+        if [[ $1 == 1 ]]; then tar -C "$HOME/runs" -cf - .; else tar -C "$HOME/runs" --exclude=./web-fresh -cf - .; fi' \
+      _ "$with" \
       | python3 -I -c 'import sys, tarfile
 def keep(m, path):
     return tarfile.data_filter(m, path) if m.isfile() or m.isdir() else None
