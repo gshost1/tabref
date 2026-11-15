@@ -527,6 +527,7 @@ class Site:
     def start(self):
         port = int(self.base.rsplit(":", 1)[1])
         with socket.socket() as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 probe.bind(("127.0.0.1", port))
             except OSError:
