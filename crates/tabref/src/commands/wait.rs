@@ -6,6 +6,8 @@ use tabref_cdp::{PageSession, is_timeout};
 use tabref_core::{AppError, Deadline, DeliverySemantics};
 use tabref_page::{wait_for_text, wait_for_url};
 
+use super::download_lines::{download_json, download_line};
+use super::download_wait::wait_download;
 use super::wait_condition::Condition;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -20,50 +22,65 @@ const MATCHES_SHOWN: usize = 5;
 pub(crate) fn run(session: &mut Session, condition: Condition) -> Result<Outcome, AppError> {
     let started = Instant::now();
     let deadline = session.deadline();
-    let detail = wait_for(session, &condition, deadline, true)?;
+    let (detail, extra) = wait_for(session, &condition, deadline, true)?;
     let elapsed = started.elapsed().as_millis();
     let mut text = format!("ok after {elapsed} ms waiting for {}", condition.describe());
     if !detail.is_empty() {
         text.push('\n');
         text.push_str(&detail);
     }
-    Ok(Outcome::new(
-        text,
-        json!({ "elapsed_ms": elapsed, "detail": detail }),
-    ))
+    let mut data = json!({ "elapsed_ms": elapsed, "detail": detail });
+    if let (Some(object), Value::Object(more)) = (data.as_object_mut(), extra) {
+        object.extend(more);
+    }
+    Ok(Outcome::new(text, data))
 }
 
-/// Waits for `condition` within `deadline`. With `show`, appearing text is
-/// reported as the lines that hold it, with their refs.
+/// Waits for `condition` within `deadline`, and returns what to show
+/// (with `show`, the lines that hold appearing text, with their refs; the
+/// download a download wait returned) and any `--json` data to add.
 pub(crate) fn wait_for(
     session: &mut Session,
     condition: &Condition,
     deadline: Deadline,
     show: bool,
-) -> Result<String, AppError> {
-    let page = session.page()?;
+) -> Result<(String, Value), AppError> {
     match condition {
         Condition::Text(text) | Condition::Gone(text) => {
+            let page = session.page()?;
             let present = matches!(condition, Condition::Text(_));
             if !wait_for_text(session.connection(), &page, text, present, deadline)? {
                 return Err(timed_out(condition, deadline));
             }
             if !present || !show {
-                return Ok(String::new());
+                return Ok((String::new(), Value::Null));
             }
             let captured = session.capture()?;
             let lines = find_matches(&captured.tree, text, None);
-            Ok(lines
+            let shown = lines
                 .into_iter()
                 .take(MATCHES_SHOWN)
                 .collect::<Vec<_>>()
-                .join("\n"))
+                .join("\n");
+            Ok((shown, Value::Null))
         }
-        Condition::Url(part) => wait_for_url(session.connection(), &page, part, deadline)?
-            .ok_or_else(|| timed_out(condition, deadline)),
+        Condition::Url(part) => {
+            let page = session.page()?;
+            let reached = wait_for_url(session.connection(), &page, part, deadline)?
+                .ok_or_else(|| timed_out(condition, deadline))?;
+            Ok((reached, Value::Null))
+        }
         Condition::Idle => {
+            let page = session.page()?;
             wait_idle(session, &page, condition, deadline)?;
-            Ok(String::new())
+            Ok((String::new(), Value::Null))
+        }
+        Condition::Download => {
+            let download = wait_download(session, deadline)?;
+            Ok((
+                download_line(&download),
+                json!({ "download": download_json(&download) }),
+            ))
         }
     }
 }

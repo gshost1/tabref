@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -5,10 +6,13 @@ use tabref_core::AppError;
 
 use super::do_expand::expand;
 use super::do_step::run_step;
+use super::downloads;
 use super::page_view::current_page_view;
 use super::step_words::split_steps;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
+
+static NEXT_BATCH: AtomicU64 = AtomicU64::new(1);
 
 /// Runs the steps of `text`, or of stdin when `text` is absent or `-`, in
 /// order, each within `step_timeout_ms` and all within `--timeout`. The
@@ -33,12 +37,13 @@ pub(crate) fn run(
     }
     let mut lines: Vec<String> = Vec::new();
     let mut done: Vec<Value> = Vec::new();
+    let batch = (u64::from(std::process::id()) << 32) | NEXT_BATCH.fetch_add(1, Ordering::Relaxed);
     for (index, step) in steps.iter().enumerate() {
         let last = index + 1 == steps.len();
         let deadline = session
             .deadline()
             .capped(Duration::from_millis(step_timeout_ms));
-        match run_step(session, step, last, deadline) {
+        match downloads::in_batch(batch, || run_step(session, step, last, deadline)) {
             Ok(finished) => {
                 done.push(
                     json!({ "step": step.source, "text": finished.text, "data": finished.data }),
