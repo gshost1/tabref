@@ -37,6 +37,19 @@ pub fn enable_downloads(
         .map(|_| ())
 }
 
+/// Makes the browser refuse downloads, for a download folder that is no
+/// longer safe to save into.
+pub fn deny_downloads(connection: &mut CdpConnection, deadline: Deadline) -> Result<(), AppError> {
+    connection
+        .call(
+            "Browser.setDownloadBehavior",
+            json!({ "behavior": "deny" }),
+            None,
+            deadline,
+        )
+        .map(|_| ())
+}
+
 /// Gives the browser back its own download behaviour, with no events for
 /// this connection, so the user's later downloads stay theirs.
 pub fn restore_downloads(

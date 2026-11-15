@@ -69,25 +69,37 @@ pub(crate) fn launched_here(session: &mut Session) -> bool {
 }
 
 /// The folder this browser's downloads land in, or `None` when the
-/// browser keeps its own. A chosen folder is checked again each time, so
-/// one swapped for a link into the state directory is never used.
-pub(crate) fn download_folder(session: &mut Session) -> Option<PathBuf> {
+/// browser keeps its own. A chosen folder is checked again each time: one
+/// that became unsafe (swapped for a link into the state directory or a
+/// profile) is an error, never quietly replaced by the browser's own
+/// folder.
+pub(crate) fn download_folder(session: &mut Session) -> Result<Option<PathBuf>, AppError> {
     let name = state_name(session, "download-dir");
     let root = session.store().base_dir().to_path_buf();
     if let Some(chosen) = session.store().read_state(&name) {
         let chosen = PathBuf::from(chosen.trim());
         let safe = within(&chosen, &root).is_ok_and(|inside| !inside)
             && in_a_profile(&chosen).is_ok_and(|inside| !inside);
-        return safe.then_some(chosen);
+        if !safe {
+            return Err(AppError::invalid_args(format!(
+                "download folder {} is no longer safe; choose another with --download-dir",
+                chosen.display()
+            ))
+            .with_details(serde_json::json!({ "kind": UNSAFE_FOLDER })));
+        }
+        return Ok(Some(chosen));
     }
     if !launched_here(session) {
-        return None;
+        return Ok(None);
     }
     let folder = root.join("downloads");
-    create_private_dir(&folder).ok()?;
+    create_private_dir(&folder)?;
     let real = std::fs::symlink_metadata(&folder).is_ok_and(|meta| meta.is_dir());
-    real.then_some(folder)
+    Ok(real.then_some(folder))
 }
+
+/// The `details.kind` of a chosen download folder that is no longer safe.
+pub(crate) const UNSAFE_FOLDER: &str = "download_folder_unsafe";
 
 /// Whether `dir` is `root` or inside it, as written and with symbolic
 /// links resolved, for a `dir` that need not exist yet: its nearest

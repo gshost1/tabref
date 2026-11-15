@@ -24,7 +24,8 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
 Downloads: an action or `open` that downloads prints the saved file's path; `tabref wait --download` waits for
 one still running (`open --download-dir DIR URL` picks the folder).
 In your own Chrome, tabref restores Chrome's default download behaviour after each command, and a download
-that starts after the command goes to Chrome's own folder and is not reported.
+that starts after the command goes to Chrome's own folder and is not reported; one left running is named by
+the next `wait --download`.
 T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
 `"Edit" in "<row text>"`, `"Reply" after "<text>"` (or `before`). Several or no matches fail with candidates;
 nothing is guessed. Each action prints what changed (new address, `{3 -> 4}`, field `"67.00" -> "62.00"`,

@@ -93,7 +93,7 @@ fn opened_line(
     deadline: Deadline,
 ) -> Result<(String, Value), AppError> {
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
-    let _ = downloads::enable(session, deadline);
+    downloads::enable_for_action(session, deadline)?;
     let navigated = navigate(session.connection(), page, url, navigation);
     let grace = downloads::grace_after(&navigated);
     let started = downloads::after_action(session, page, None, deadline, grace);

@@ -7,7 +7,7 @@ use serde_json::json;
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 use tabref_page::{DownloadRecord, DownloadState, note_downloads};
 
-use super::download_folder::{download_cap, download_folder};
+use super::download_folder::{download_cap, download_folder, launched_here};
 use super::download_ledger::{DownloadLedger, merge};
 use super::download_lines::{download_json, download_line};
 use super::downloads::{current_batch, enable, enforce_cap, land_from_disk, name_landed};
@@ -20,13 +20,18 @@ const WAIT_POLL: Duration = Duration::from_millis(50);
 /// finished, and returns it, marked reported: one an earlier command left
 /// running (found in the folder when its events were missed), one that
 /// finished between commands, one that starts during the wait, or, in a
-/// batch, one an earlier step of the batch reported.
+/// batch, one an earlier step of the batch reported. A download that starts
+/// during the wait is capped only when it is tabref's: in a browser tabref
+/// launched, or started by the current tab's page; one the user started in
+/// another tab of their own Chrome may be returned, never stopped.
 pub(crate) fn wait_download(
     session: &mut Session,
     deadline: Deadline,
 ) -> Result<DownloadRecord, AppError> {
     enable(session, deadline)?;
-    let folder = download_folder(session);
+    let folder = download_folder(session)?;
+    let own = launched_here(session);
+    let tab = session.current_tab_unclaimed()?.map(|tab| tab.target_id);
     let cap = download_cap(session);
     let batch = current_batch();
     let ledger = DownloadLedger::of(session);
@@ -36,11 +41,12 @@ pub(crate) fn wait_download(
                 kept.iter().map(|entry| entry.record.clone()).collect();
             let _ = note_downloads(session.connection(), &mut records, deadline);
             for record in records {
-                let began_here = kept.iter().all(|old| old.record.guid != record.guid);
+                let new = kept.iter().all(|old| old.record.guid != record.guid);
+                let ours = own || tab.as_deref() == Some(record.origin.frame_id.as_str());
                 let entry = KeptDownload {
                     record,
                     reported: false,
-                    watched: began_here,
+                    watched: new && ours,
                     batch: None,
                 };
                 merge(kept, entry);

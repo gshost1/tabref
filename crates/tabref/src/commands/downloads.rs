@@ -13,11 +13,11 @@ use std::time::Duration;
 use tabref_cdp::{CdpConnection, PageSession, list_frames};
 use tabref_core::{AppError, Deadline};
 use tabref_page::{
-    DownloadRecord, DownloadState, cancel_download, enable_downloads, next_download_event,
-    note_downloads, now_ms, restore_downloads,
+    DownloadRecord, DownloadState, cancel_download, deny_downloads, enable_downloads,
+    next_download_event, note_downloads, now_ms, restore_downloads,
 };
 
-use super::download_folder::{download_cap, download_folder, launched_here};
+use super::download_folder::{UNSAFE_FOLDER, download_cap, download_folder, launched_here};
 use super::download_ledger::{DownloadLedger, merge};
 use super::download_place::{landed_size, place};
 use super::kept_download::KeptDownload;
@@ -35,10 +35,26 @@ thread_local! {
 }
 
 /// Turns the browser's download events on, pointed at this browser's
-/// download folder when it has one.
+/// download folder when it has one. A chosen folder that is no longer safe
+/// makes the browser refuse downloads and is the error.
 pub(crate) fn enable(session: &mut Session, deadline: Deadline) -> Result<(), AppError> {
-    let folder = download_folder(session);
-    enable_downloads(session.connection(), folder.as_deref(), deadline)
+    match download_folder(session) {
+        Ok(folder) => enable_downloads(session.connection(), folder.as_deref(), deadline),
+        Err(error) => {
+            let _ = deny_downloads(session.connection(), deadline);
+            Err(error)
+        }
+    }
+}
+
+/// [`enable`] before an action or an open: only an unsafe folder fails the
+/// command; a browser that refuses download events (an embedded runtime)
+/// does not.
+pub(crate) fn enable_for_action(session: &mut Session, deadline: Deadline) -> Result<(), AppError> {
+    match enable(session, deadline) {
+        Err(error) if error.kind() == Some(UNSAFE_FOLDER) => Err(error),
+        _ => Ok(()),
+    }
 }
 
 /// Notes that a daemon command started on this session's browser.
@@ -116,7 +132,7 @@ pub(crate) fn after_action(
         return records;
     }
     let cap = download_cap(session);
-    let folder = download_folder(session);
+    let folder = download_folder(session).ok().flatten();
     let elsewhere = other_tabs(session, tab, opened, deadline);
     let landing = deadline.capped(LANDING.min(deadline.remaining() / 2));
     loop {

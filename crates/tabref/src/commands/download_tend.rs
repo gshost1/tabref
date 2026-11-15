@@ -26,7 +26,7 @@ pub(crate) fn tend(session: &mut Session) {
     let Ok(deadline) = Deadline::after(TENDING) else {
         return;
     };
-    let folder = download_folder(session);
+    let folder = download_folder(session).ok().flatten();
     let cap = download_cap(session);
     let ledger = DownloadLedger::of(session);
     let _ = ledger.try_with(|kept| {

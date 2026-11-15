@@ -9,6 +9,12 @@ impl Session {
     /// resolve a relative address never waits on another command working
     /// there. `None` when the browser has no tab.
     pub(crate) fn current_url_unclaimed(&mut self) -> Result<Option<String>, AppError> {
+        Ok(self.current_tab_unclaimed()?.map(|tab| tab.url))
+    }
+
+    /// The tab this command would work in, read from the tab listing
+    /// without claiming it. `None` when the browser has no tab.
+    pub(crate) fn current_tab_unclaimed(&mut self) -> Result<Option<PageTarget>, AppError> {
         let tabs = self.tabs()?;
         let chosen = match &self.scope.tab {
             Some(tab) => Some(tab.clone()),
@@ -17,9 +23,7 @@ impl Session {
                 choose_tab(&tabs, self.scope.tab_hint.as_deref(), remembered.as_deref())?
             }
         };
-        Ok(chosen
-            .and_then(|id| tabs.into_iter().find(|tab| tab.target_id == id))
-            .map(|tab| tab.url))
+        Ok(chosen.and_then(|id| tabs.into_iter().find(|tab| tab.target_id == id)))
     }
 }
 

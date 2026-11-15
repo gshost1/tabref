@@ -22,7 +22,7 @@ impl Session {
         deadline: Deadline,
     ) -> Result<WatchedAction, AppError> {
         let tab = self.attach(tab_id)?;
-        let _ = downloads::enable(self, deadline);
+        downloads::enable_for_action(self, deadline)?;
         let watched = WatchedAction::start(self.connection(), &tab, deadline)?;
         let connection = self.connection();
         connection.call(

@@ -81,7 +81,7 @@ fn load(
     let remaining = deadline.remaining_ms();
     let load = remaining * 3 / 4;
     let commit = remaining.saturating_sub(SNAPSHOT_RESERVE_MS).max(load);
-    let _ = downloads::enable(session, deadline);
+    downloads::enable_for_action(session, deadline)?;
     let navigated = navigate_by(
         session.connection(),
         page,

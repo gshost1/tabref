@@ -168,7 +168,12 @@ fn a_folder_swapped_for_a_link_into_the_state_directory_is_never_used() {
     ]);
     std::fs::remove_file(&link).unwrap();
     std::os::unix::fs::symlink(&tabref.home, &link).unwrap();
-    tabref.ok(&["click", "Export"]);
+    let clicked = tabref.run(&["click", "Export"]);
+    assert!(
+        clicked.stderr.contains("no longer safe"),
+        "{}",
+        clicked.stderr
+    );
     assert!(!tabref.home.join("report.csv").exists());
     assert!(
         names(&tabref.home)
@@ -203,4 +208,77 @@ fn a_folder_swapped_for_a_link_into_the_state_directory_is_never_used() {
         "{}",
         broken.stderr
     );
+}
+
+#[test]
+fn a_wait_never_caps_a_download_the_user_started_in_another_tab() {
+    if !live() {
+        return;
+    }
+    let site = site("own-other-tab");
+    let tabref = &site.tabref;
+    let page = format!("{}/", site.base);
+    tabref.ok(&["open", "--download-max-mb", "1", &page]);
+    tabref.ok(&["open", "--new-tab", &page]);
+    tabref.ok(&["tab", "0"]);
+    let waiting = Command::new(env!("CARGO_BIN_EXE_tabref"))
+        .args([
+            "--cdp",
+            &tabref.browser.port.to_string(),
+            "--timeout",
+            "4000",
+        ])
+        .args(["wait", "--download"])
+        .env("TABREF_HOME", &tabref.home)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(800));
+    tabref.ok(&["--tab", "1", "js", "location.href = '/bigslow.bin'; 1"]);
+    let _ = waiting.wait_with_output().unwrap();
+    std::thread::sleep(Duration::from_millis(2_500));
+    assert_eq!(
+        std::fs::metadata(site.own.join("bigslow.bin"))
+            .map(|meta| meta.len())
+            .ok(),
+        Some(BIG_BYTES as u64),
+        "{:?}",
+        names(&site.own)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_chosen_folder_that_became_unsafe_is_an_error_not_a_fallback() {
+    if !live() {
+        return;
+    }
+    let site = site("own-unsafe");
+    let tabref = &site.tabref;
+    let record = serde_json::to_string(&tabref.browser).unwrap();
+    std::fs::write(tabref.home.join("launched.json"), record).unwrap();
+    let real = site._outside.0.join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    let link = site._outside.0.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    tabref.ok(&[
+        "open",
+        "--download-dir",
+        link.to_str().unwrap(),
+        &format!("{}/", site.base),
+    ]);
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&tabref.home, &link).unwrap();
+    let clicked = tabref.run(&["click", "Export"]);
+    assert!(
+        clicked
+            .stderr
+            .contains("is no longer safe; choose another with --download-dir"),
+        "{}{}",
+        clicked.stdout,
+        clicked.stderr
+    );
+    assert!(names(&site.own).is_empty(), "{:?}", names(&site.own));
+    assert!(!tabref.home.join("downloads").join("report.csv").exists());
 }
