@@ -14,8 +14,11 @@ mod tree;
 
 pub(crate) use tabref_cdp::{CdpConnection, CdpEvent, PageSession};
 
+pub use act::action_need::ActionNeed;
+pub use act::actionable::wait_actionable;
 pub use act::append_text::append_text;
 pub use act::assigned_input::AssignedInput;
+pub use act::blocker::Blocker;
 pub use act::change_watch::{mark_page, page_changes};
 pub use act::checked::set_checked;
 pub use act::click::{click, click_times};
@@ -33,6 +36,7 @@ pub use act::scroll_by::scroll_by;
 pub use act::select_option::select_option;
 pub use act::select_outcome::SelectOutcome;
 pub use act::text_change::TextChange;
+pub use act::unactionable::Unactionable;
 pub use act::upload::upload_files;
 pub use act::upload_outcome::UploadOutcome;
 pub use locate::locate_intent::LocateIntent;

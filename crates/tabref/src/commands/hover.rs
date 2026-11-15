@@ -1,6 +1,6 @@
 use serde_json::json;
 use tabref_core::{AppError, Deadline};
-use tabref_page::{LocateIntent, hover};
+use tabref_page::{ActionNeed, LocateIntent, hover};
 
 use super::act_target::{ActTarget, resolve_target};
 use super::acted::Acted;
@@ -25,6 +25,7 @@ pub(crate) fn act(
     target: ActTarget,
     deadline: Deadline,
 ) -> Result<Acted, AppError> {
+    target.ensure_ready(session, ActionNeed::Hover, deadline)?;
     let watched = session.watch_action(&target.tab_id, deadline)?;
     let point = hover(
         session.connection(),

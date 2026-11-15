@@ -1,10 +1,14 @@
 #[cfg(test)]
 pub(crate) mod act_fixture;
+pub(crate) mod action_need;
+pub(crate) mod actionable;
 pub(crate) mod append_text;
 pub(crate) mod assigned_input;
+pub(crate) mod blocker;
 pub(crate) mod change_watch;
 pub(crate) mod checked;
 pub(crate) mod click;
+pub(crate) mod drawn_element;
 pub(crate) mod element_call;
 pub(crate) mod element_errors;
 pub(crate) mod element_reading;
@@ -31,6 +35,7 @@ pub(crate) mod select_option;
 pub(crate) mod select_outcome;
 pub(crate) mod text_change;
 pub(crate) mod text_diff;
+pub(crate) mod unactionable;
 pub(crate) mod upload;
 pub(crate) mod upload_outcome;
 pub(crate) mod value_target;

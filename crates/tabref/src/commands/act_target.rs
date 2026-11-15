@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use tabref_cdp::PageSession;
 use tabref_core::{AccessibilityNode, AppError, Deadline};
-use tabref_page::{ElementToken, LocateIntent, locate, snapshot_page_within_budget};
+use tabref_page::{
+    ActionNeed, ElementToken, LocateIntent, locate, snapshot_page_within_budget, wait_actionable,
+};
 
 use super::action_report::styled;
 use super::target_spec::TargetSpec;
@@ -10,16 +12,42 @@ use crate::session::Session;
 use crate::view::node_line::quote_text;
 
 /// The element an action runs on, however it was named: its token, the
-/// session that addresses it, its tab, how the result names it, and the
-/// element tokens of the view it was found in, so the result can name the
-/// controls the action made appear.
+/// session that addresses it, its tab, how the result names it, how an
+/// error names it (with its role: `button "Save"`), and the element tokens
+/// of the view it was found in, so the result can name the controls the
+/// action made appear.
 #[derive(Debug, Clone)]
 pub(crate) struct ActTarget {
     pub(crate) token: ElementToken,
     pub(crate) session: PageSession,
     pub(crate) tab_id: String,
     pub(crate) label: String,
+    pub(crate) subject: String,
     pub(crate) known: HashSet<String>,
+}
+
+impl ActTarget {
+    /// Waits briefly for the element to be able to take an action that
+    /// needs `need`, and refuses it with the reason and the next step when
+    /// it stays hidden, disabled or read-only, or has no size to press,
+    /// before any input is sent.
+    pub(crate) fn ensure_ready(
+        &self,
+        session: &mut Session,
+        need: ActionNeed,
+        deadline: Deadline,
+    ) -> Result<(), AppError> {
+        match wait_actionable(
+            session.connection(),
+            &self.session,
+            &self.token,
+            need,
+            deadline,
+        )? {
+            None => Ok(()),
+            Some(blocked) => Err(blocked.error(&self.subject)),
+        }
+    }
 }
 
 /// Resolves `spec`: a ref through its snapshot, a locator against a fresh
@@ -33,9 +61,27 @@ pub(crate) fn resolve_target(
 ) -> Result<ActTarget, AppError> {
     match spec {
         TargetSpec::Ref(text) => {
-            let target = session.resolve_ref(text)?;
+            let (mut target, hidden) = match intent {
+                LocateIntent::Read => (session.resolve_ref(text)?, false),
+                _ => session.resolve_ref_or_hidden(text)?,
+            };
+            if hidden {
+                let shown = wait_actionable(
+                    session.connection(),
+                    &target.session,
+                    &target.token,
+                    ActionNeed::Shown,
+                    deadline,
+                )?;
+                if let Some(blocked) = shown {
+                    return Err(blocked.error(&styled(&target.label())));
+                }
+                target = session.resolve_ref(text)?;
+            }
+            let label = styled(&target.label());
             Ok(ActTarget {
-                label: styled(&target.label()),
+                subject: label.clone(),
+                label,
                 token: target.token,
                 session: target.session,
                 tab_id: target.tab_id,
@@ -61,6 +107,10 @@ pub(crate) fn resolve_target(
                 ));
             }
             Ok(ActTarget {
+                subject: match &found.name {
+                    Some(_) => format!("{} {label}", found.role),
+                    None => label.clone(),
+                },
                 token: found.token,
                 session: target_session,
                 tab_id: page.target_id,

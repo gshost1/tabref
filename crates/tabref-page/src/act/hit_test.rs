@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, Point};
 
+use super::drawn_element::CONTROLS;
 use super::element_errors::{node_error, script_failed};
 use super::hit_point::HitPoint;
 use crate::{CdpConnection, ElementToken, PageSession};
@@ -9,14 +10,19 @@ use tabref_cdp::is_protocol_error;
 const OBJECT_GROUP: &str = "tabref-hit";
 const INTERCEPTED: &str = "cdp_click_intercepted";
 
-const CONTAINS_HIT: &str = r"function(hit) {
+const CONTAINS_HIT: &str = r"function(hit, controls) {
   const within = (root) => {
     for (let node = hit; node; node = node.parentNode || node.host) {
       if (node === root) return true;
     }
     return false;
   };
-  return within(this) || Array.from(this.labels || []).some(within);
+  if (!within(this)) return { inside: Array.from(this.labels || []).some(within), steer: false };
+  if (this.ownerDocument.defaultView.getComputedStyle(this).display !== 'contents') return { inside: true, steer: false };
+  for (let node = hit; node && node !== this; node = node.parentNode || node.host) {
+    if (node.nodeType === 1 && node.matches(controls)) return { inside: true, steer: true };
+  }
+  return { inside: true, steer: false };
 }";
 
 /// Proves the page would deliver a press at `point` to the token's node:
@@ -27,14 +33,16 @@ const CONTAINS_HIT: &str = r"function(hit) {
 /// a label draws). A point an overlay, a
 /// banner or another element covers is `ACTION_FAILED` and nothing is sent.
 /// A hit the page cannot relate to the node, such as one in another frame's
-/// script world, counts as covered.
+/// script world, counts as covered. Returns `true` when the node is
+/// `display: contents` and the point lands on a separate control it draws
+/// (a link in a shadow host), which a press there would act on instead.
 pub(crate) fn confirm_hit(
     connection: &mut CdpConnection,
     session: &PageSession,
     token: &ElementToken,
     point: &HitPoint,
     deadline: Deadline,
-) -> Result<(), AppError> {
+) -> Result<bool, AppError> {
     let located = connection.call(
         "DOM.getNodeForLocation",
         json!({
@@ -54,10 +62,13 @@ pub(crate) fn confirm_hit(
     let Some(hit) = hit else {
         return Err(intercepted(token, &point.viewport, None));
     };
-    if hit == token.backend_node_id || hit_is_inside(connection, session, token, hit, deadline)? {
-        return Ok(());
+    if hit == token.backend_node_id {
+        return Ok(false);
     }
-    Err(intercepted(token, &point.viewport, Some(hit)))
+    match hit_is_inside(connection, session, token, hit, deadline)? {
+        (true, steer) => Ok(steer),
+        (false, _) => Err(intercepted(token, &point.viewport, Some(hit))),
+    }
 }
 
 fn hit_is_inside(
@@ -66,7 +77,7 @@ fn hit_is_inside(
     token: &ElementToken,
     hit: i64,
     deadline: Deadline,
-) -> Result<bool, AppError> {
+) -> Result<(bool, bool), AppError> {
     let target = resolve(connection, session, token.backend_node_id, deadline)
         .map_err(|error| node_error(error, token))?;
     let inside = resolve(connection, session, hit, deadline).and_then(|hit_object| {
@@ -75,7 +86,7 @@ fn hit_is_inside(
             json!({
                 "objectId": target,
                 "functionDeclaration": CONTAINS_HIT,
-                "arguments": [{ "objectId": hit_object }],
+                "arguments": [{ "objectId": hit_object }, { "value": CONTROLS }],
                 "returnByValue": true,
             }),
             Some(&session.session_id),
@@ -87,13 +98,19 @@ fn hit_is_inside(
     release(connection, session, &target, deadline);
     let reply = match inside {
         Ok(reply) => reply,
-        Err(error) if is_protocol_error(&error) => return Ok(false),
+        Err(error) if is_protocol_error(&error) => return Ok((false, false)),
         Err(error) => return Err(error),
     };
     if let Some(exception) = reply.get("exceptionDetails") {
         return Err(script_failed(exception));
     }
-    Ok(reply.pointer("/result/value").and_then(Value::as_bool) == Some(true))
+    let flag = |name: &str| {
+        reply
+            .pointer(&format!("/result/value/{name}"))
+            .and_then(Value::as_bool)
+            == Some(true)
+    };
+    Ok((flag("inside"), flag("steer")))
 }
 
 fn resolve(

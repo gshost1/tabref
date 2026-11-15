@@ -2,7 +2,7 @@ use serde_json::json;
 use tabref_core::{ErrorCode, Point};
 
 use super::quad_center;
-use crate::act::act_fixture::{deadline, laid_out, metrics, proven, session, token};
+use crate::act::act_fixture::{deadline, laid_out, metrics, proven, resolved, session, token};
 use crate::{CdpConnection, click, scroll_into_view};
 use tabref_cdp::ScriptedTransport;
 
@@ -50,7 +50,7 @@ fn a_click_whose_point_another_element_covers_sends_no_input() {
         )
         .expect(
             "Runtime.callFunctionOn",
-            json!({ "result": { "type": "boolean", "value": false } }),
+            json!({ "result": { "type": "object", "value": { "inside": false, "steer": false } } }),
         )
         .expect("Runtime.releaseObject", json!({}))
         .expect("Runtime.releaseObject", json!({}));
@@ -118,6 +118,12 @@ fn a_hidden_element_has_no_box_to_click() {
             -32000,
             "Could not compute content quads.",
         );
+    let transport = resolved(transport)
+        .expect(
+            "Runtime.callFunctionOn",
+            json!({ "result": { "type": "object", "subtype": "null", "value": null } }),
+        )
+        .expect("Runtime.releaseObject", json!({}));
     let mut connection = CdpConnection::new(transport.boxed());
 
     let error = click(&mut connection, &session(), &token(9), deadline()).unwrap_err();

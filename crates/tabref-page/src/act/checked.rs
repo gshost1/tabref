@@ -2,14 +2,17 @@ use serde_json::json;
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::click::click_node;
+use super::drawn_element::{DRAWN_LABEL, drawn_element};
 use super::read::read_object;
 use super::remote_element::with_element;
+use super::scroll::NOT_RENDERED;
 use crate::{CdpConnection, ElementToken, PageSession};
 
 /// Sets a checkbox, radio button or switch to `checked` by clicking it when
-/// its state differs, then re-reads the state to confirm. Returns the final
-/// state. The node is resolved once for the reads on both sides of the
-/// click. A node with no checked state is `ACTION_NOT_SUPPORTED`; a click
+/// its state differs (through the label that draws it when the input itself
+/// has no box, as a toggle switch's does), then re-reads the state to
+/// confirm. Returns the final state. The node is resolved once for the reads
+/// on both sides of the click. A node with no checked state is `ACTION_NOT_SUPPORTED`; a click
 /// that does not reach the wanted state (unchecking a radio button) is
 /// `ACTION_FAILED`.
 pub fn set_checked(
@@ -31,7 +34,16 @@ pub fn set_checked(
             if current == checked {
                 return Ok(current);
             }
-            click_node(connection, session, token, deadline)?;
+            match click_node(connection, session, token, deadline) {
+                Ok(_) => {}
+                Err(error) if error.kind() == Some(NOT_RENDERED) => {
+                    let label =
+                        drawn_element(connection, session, (object, DRAWN_LABEL), token, deadline)?
+                            .ok_or(error)?;
+                    click_node(connection, session, &label, deadline)?;
+                }
+                Err(error) => return Err(error),
+            }
             let after = read_object(connection, session, object, deadline)?.checked;
             if after == Some(checked) {
                 return Ok(checked);

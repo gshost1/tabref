@@ -33,7 +33,7 @@ fn compared(transport: ScriptedTransport, inside: bool) -> ScriptedTransport {
         )
         .expect(
             "Runtime.callFunctionOn",
-            json!({ "result": { "type": "boolean", "value": inside } }),
+            json!({ "result": { "type": "object", "value": { "inside": inside, "steer": false } } }),
         )
         .expect("Runtime.releaseObject", json!({}))
         .expect("Runtime.releaseObject", json!({}))
