@@ -1,11 +1,12 @@
 use std::path::Path;
 use std::time::Duration;
 
-use tabref_cdp::navigate_by;
-use tabref_core::AppError;
+use tabref_cdp::{PageSession, navigate_by};
+use tabref_core::{AppError, Deadline};
 use tabref_page::PageInfo;
 
 use super::action_report::set;
+use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::page_url::resolve_url;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -16,14 +17,26 @@ use crate::view::view_scope::ViewScope;
 const SCHEMES: &[&str] = &["about:", "data:", "file:", "chrome:", "javascript:"];
 const SNAPSHOT_RESERVE_MS: u64 = 1_000;
 
-/// Navigates the current tab to `url` and prints the loaded page's view,
-/// so reading it costs no second command. A page that has not fired `load` after three quarters of the
-/// deadline is snapshotted as it stands, with a note. The browser may take
-/// until one second before the deadline to start the new document, as a
-/// browser that has just started can hold its first page load for seconds.
-pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError> {
-    let page = session.page()?;
+/// Navigates the current tab to `url`, or a new tab that becomes the
+/// current one when `new_tab` is set, and prints the loaded page's view,
+/// so reading it costs no second command. A relative address resolves
+/// against the current page. A page that has not fired `load` after three
+/// quarters of the deadline is snapshotted as it stands, with a note. The
+/// browser may take until one second before the deadline to start the new
+/// document, as a browser that has just started can hold its first page
+/// load for seconds.
+pub(crate) fn run(session: &mut Session, url: &str, new_tab: bool) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
+    if new_tab {
+        let url = new_tab_address(session, url)?;
+        let (index, page) = open_tab(session, deadline)?;
+        let mut report =
+            load(session, &page, &url, deadline).map_err(|error| in_new_tab(error, index, &url))?;
+        report.text = format!("new tab [{index}]\n{}", report.text);
+        set(&mut report.data, "new_tab_index", serde_json::json!(index));
+        return Ok(report);
+    }
+    let page = session.page()?;
     let url = normalize_url(url);
     let url = if is_relative(&url) {
         let current = PageInfo::read(session.connection(), &page.target_id, deadline)?.url;
@@ -31,21 +44,33 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
     } else {
         url
     };
+    load(session, &page, &url, deadline).map_err(|error| {
+        if error.kind() == Some("cdp_navigation_pending") {
+            open_again(error)
+        } else {
+            error
+        }
+    })
+}
+
+fn load(
+    session: &mut Session,
+    page: &PageSession,
+    url: &str,
+    deadline: Deadline,
+) -> Result<Outcome, AppError> {
     let remaining = deadline.remaining_ms();
     let load = remaining * 3 / 4;
     let commit = remaining.saturating_sub(SNAPSHOT_RESERVE_MS).max(load);
     let unfinished = match navigate_by(
         session.connection(),
-        &page,
-        &url,
+        page,
+        url,
         deadline.capped(Duration::from_millis(commit)),
         deadline.capped(Duration::from_millis(load)),
     ) {
         Ok(()) => false,
         Err(error) if error.kind() == Some("cdp_load_timeout") => true,
-        Err(error) if error.kind() == Some("cdp_navigation_pending") => {
-            return Err(open_again(error));
-        }
         Err(error) => return Err(error),
     };
     let captured = session.capture()?;

@@ -8,6 +8,7 @@ fn open(url: &str) -> Command {
         url: url.into(),
         launch: false,
         headed: false,
+        new_tab: false,
     }
 }
 

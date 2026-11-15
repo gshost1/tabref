@@ -1,6 +1,28 @@
 use tabref_cdp::PageTarget;
 use tabref_core::{AppError, DeliverySemantics, ErrorCode};
 
+use super::Session;
+
+impl Session {
+    /// The address of the tab this command would work in, read from the tab
+    /// listing without claiming the tab, so a command that only needs it to
+    /// resolve a relative address never waits on another command working
+    /// there. `None` when the browser has no tab.
+    pub(crate) fn current_url_unclaimed(&mut self) -> Result<Option<String>, AppError> {
+        let tabs = self.tabs()?;
+        let chosen = match &self.scope.tab {
+            Some(tab) => Some(tab.clone()),
+            None => {
+                let remembered = self.store.read_state(&self.tab_state_name());
+                choose_tab(&tabs, self.scope.tab_hint.as_deref(), remembered.as_deref())?
+            }
+        };
+        Ok(chosen
+            .and_then(|id| tabs.into_iter().find(|tab| tab.target_id == id))
+            .map(|tab| tab.url))
+    }
+}
+
 /// Picks the tab a command works in. `hint` (`--tab`, or `tab <n>`) is an
 /// index into `tabs` or a target id or unique id prefix; without one, the
 /// tab the last command used when it is still open, otherwise the first tab.

@@ -43,4 +43,5 @@ Steps: any action above, `open URL`, `expect text|gone|url X`, `read [T]`, `find
 
 ## Errors (one line, code first)
 `ELEMENT_NOT_FOUND` lists the closest names; `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`;
-`STALE_REF`: use the fresh ref it gives; `TIMEOUT`; `INVALID_ARGS`. Tabs: `tabref tabs`, `tabref tab N`.
+`STALE_REF`: use the fresh ref it gives; `TIMEOUT`; `INVALID_ARGS`. Tabs: `tabref tabs`, `tabref tab N`,
+`tabref open --new-tab URL` (relative too; the new tab becomes current).

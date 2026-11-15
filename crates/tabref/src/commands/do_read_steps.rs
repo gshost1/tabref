@@ -4,12 +4,13 @@
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tabref_cdp::navigate;
+use tabref_cdp::{PageSession, navigate};
 use tabref_core::{AppError, Deadline};
 use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
 
 use super::act_target::resolve_target;
 use super::batch_step::BatchStep;
+use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open::normalize_url;
 use super::page_url::{resolve_url, short_url};
 use super::page_view::current_page_view;
@@ -33,27 +34,21 @@ pub(crate) fn open_step(
     last: bool,
     deadline: Deadline,
 ) -> Result<StepDone, AppError> {
-    let [address] = args else {
-        return Err(AppError::invalid_args(
-            "open takes one address, as in: open /admin/",
-        ));
+    let (new_tab, address) = step_address(args)?;
+    let (mut text, mut data) = if new_tab {
+        let url = new_tab_address(session, &address.text)?;
+        let (index, page) = open_tab(session, deadline)?;
+        let (mut text, mut data) = opened_line(session, &page, (&url, &url), deadline)
+            .map_err(|error| in_new_tab(error, index, &url))?;
+        text.push_str(&format!(" (new tab [{index}])"));
+        data["new_tab_index"] = json!(index);
+        (text, data)
+    } else {
+        let page = session.page()?;
+        let current = PageInfo::read(session.connection(), &page.target_id, deadline)?.url;
+        let url = normalize_url(&resolve_url(&current, &address.text));
+        opened_line(session, &page, (&url, &current), deadline)?
     };
-    let page = session.page()?;
-    let current = PageInfo::read(session.connection(), &page.target_id, deadline)?.url;
-    let url = normalize_url(&resolve_url(&current, &address.text));
-    let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
-    match navigate(session.connection(), &page, &url, navigation) {
-        Ok(()) => {}
-        Err(error) if error.kind() == Some("cdp_load_timeout") => {}
-        Err(error) => return Err(error),
-    }
-    let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
-    let mut text = format!(
-        "ok open {} {}",
-        short_url(&current, &info.url),
-        quote_text(&info.title)
-    );
-    let mut data = json!({ "action": "open", "url": info.url, "title": info.title });
     if last {
         let report = current_page_view(session)?;
         text.push('\n');
@@ -61,6 +56,54 @@ pub(crate) fn open_step(
         data["page"] = report.data;
     }
     Ok(StepDone { text, data })
+}
+
+/// The address of an open step and whether it asks for a new tab:
+/// `open URL`, `open --new-tab URL` or `open URL --new-tab`. A missing
+/// address, or a bare word that starts with `--`, is refused rather than
+/// read as a host name.
+fn step_address(args: &[Word]) -> Result<(bool, &Word), AppError> {
+    let flag = |word: &Word| !word.quoted && word.text == "--new-tab";
+    let (new_tab, address) = match args {
+        [first, second] if flag(first) => (true, second),
+        [first, second] if flag(second) => (true, first),
+        [address] => (false, address),
+        _ => {
+            return Err(AppError::invalid_args(
+                "open takes one address, as in: open /admin/ or open --new-tab /help",
+            ));
+        }
+    };
+    if !address.quoted && address.text.starts_with("--") {
+        return Err(AppError::invalid_args(format!(
+            "'{}' is not an address; open takes one, as in: open --new-tab /help",
+            address.text
+        )));
+    }
+    Ok((new_tab, address))
+}
+
+/// Loads `url` in `page` and names where it led, as seen from `from`.
+fn opened_line(
+    session: &mut Session,
+    page: &PageSession,
+    (url, from): (&str, &str),
+    deadline: Deadline,
+) -> Result<(String, Value), AppError> {
+    let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
+    match navigate(session.connection(), page, url, navigation) {
+        Ok(()) => {}
+        Err(error) if error.kind() == Some("cdp_load_timeout") => {}
+        Err(error) => return Err(error),
+    }
+    let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
+    let text = format!(
+        "ok open {} {}",
+        short_url(from, &info.url),
+        quote_text(&info.title)
+    );
+    let data = json!({ "action": "open", "url": info.url, "title": info.title });
+    Ok((text, data))
 }
 
 /// `expect text "Saved"`, `expect gone "Loading"`, `expect url ~saved=1`,

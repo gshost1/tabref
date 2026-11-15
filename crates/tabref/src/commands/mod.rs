@@ -13,6 +13,7 @@ pub(crate) mod fill;
 pub(crate) mod find;
 pub(crate) mod hover;
 pub(crate) mod js;
+pub(crate) mod new_tab;
 pub(crate) mod open;
 pub(crate) mod page_url;
 pub(crate) mod page_view;
@@ -78,7 +79,7 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
 /// Runs `command` against `session`, in-process or inside the daemon.
 pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
-        Command::Open { url, .. } => open::run(session, url),
+        Command::Open { url, new_tab, .. } => open::run(session, url, *new_tab),
         Command::Snap {
             all,
             root,
