@@ -1,17 +1,20 @@
 //! Attaching to the user's own, logged-in browser: opt-in only, through
 //! `tabref connect --user-chrome`. The browser's `DevToolsActivePort` (written
 //! when its user turns remote debugging on at chrome://inspect) gives the
-//! port. Before anything is sent there, the port must be held by the very
-//! process that holds that profile's lock (Linux), so a stale file or a
-//! program that took the port over is never attached to. Elsewhere the
-//! owner cannot be checked cheaply: the command says so in a warning, and the
-//! browser's own approval prompt still stands in the way.
+//! port, and the profile's lock names the browser process. The opt-in holds
+//! for that one process (pid and start time): a browser that exits or
+//! restarts is gone, and needs a new opt-in. Before anything is sent to the
+//! port, it must be held by that process and by no other (Linux: the socket
+//! tables; macOS: `lsof`). Where that cannot be checked (Windows), tabref
+//! does not attach to the user's browser at all. Every command run in it
+//! says so in a warning.
 
 use std::path::{Path, PathBuf};
 
 use tabref_cdp::{
     ListenerVerdict, ProcessView, check_listener, connect, connect_held, default_user_data_dirs,
-    endpoint_from_user_data_dir, is_chrome_family, profile_lock_pid, read_active_port,
+    endpoint_from_user_data_dir, is_chrome_family, listener_pids, process_start, profile_lock_pid,
+    read_active_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
@@ -19,31 +22,44 @@ use super::connected_browser::ConnectedBrowser;
 use super::user_chrome_record::UserChromeRecord;
 
 const AGAIN: &str = "Turn remote debugging on at chrome://inspect/#remote-debugging and run \
-                     'tabref connect --user-chrome' again, or 'tabref connect --off' to stop using it";
+                     'tabref connect --user-chrome' again";
+pub(crate) const GONE_KIND: &str = "cdp_user_chrome_gone";
 
 /// The user's browser to attach to: the one in `dir`, or the one default
 /// profile whose browser has remote debugging on. Only these directories'
-/// `DevToolsActivePort` files are read.
+/// `DevToolsActivePort` files and profile locks are read.
 pub(crate) fn find_user_chrome(dir: Option<&Path>) -> Result<UserChromeRecord, AppError> {
-    if let Some(dir) = dir {
-        let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
-        read_active_port(&dir)?;
-        let name = default_user_data_dirs()
-            .into_iter()
-            .find(|browser| browser.user_data_dir == dir)
-            .map_or("Chrome", |browser| browser.name);
-        return Ok(UserChromeRecord {
-            name: name.to_owned(),
-            user_data_dir: dir,
-        });
+    if cfg!(windows) {
+        return Err(unsupported());
     }
-    let found: Vec<UserChromeRecord> = default_user_data_dirs()
+    let (name, dir) = match dir {
+        Some(dir) => named_profile(dir)?,
+        None => only_profile()?,
+    };
+    let pid = profile_lock_pid(&dir).ok_or_else(|| not_running(&dir))?;
+    Ok(UserChromeRecord {
+        name: name.to_owned(),
+        user_data_dir: dir,
+        pid,
+        started: process_start(pid),
+    })
+}
+
+fn named_profile(dir: &Path) -> Result<(&'static str, PathBuf), AppError> {
+    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    read_active_port(&dir)?;
+    let name = default_user_data_dirs()
+        .into_iter()
+        .find(|browser| browser.user_data_dir == dir)
+        .map_or("Chrome", |browser| browser.name);
+    Ok((name, dir))
+}
+
+fn only_profile() -> Result<(&'static str, PathBuf), AppError> {
+    let found: Vec<(&'static str, PathBuf)> = default_user_data_dirs()
         .into_iter()
         .filter(|browser| read_active_port(&browser.user_data_dir).is_ok())
-        .map(|browser| UserChromeRecord {
-            name: browser.name.to_owned(),
-            user_data_dir: browser.user_data_dir,
-        })
+        .map(|browser| (browser.name, browser.user_data_dir))
         .collect();
     match found.as_slice() {
         [one] => Ok(one.clone()),
@@ -65,7 +81,7 @@ pub(crate) fn find_user_chrome(dir: Option<&Path>) -> Result<UserChromeRecord, A
             "Name one with --user-data-dir: {}",
             several
                 .iter()
-                .map(|record| record.user_data_dir.display().to_string())
+                .map(|(_, dir)| dir.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         ))
@@ -74,33 +90,61 @@ pub(crate) fn find_user_chrome(dir: Option<&Path>) -> Result<UserChromeRecord, A
     }
 }
 
-/// Connects to the user's browser `record` names, after checking who holds
-/// the port its profile advertises.
+/// Connects to the user's browser `record` names: only while the very
+/// process the user opted in to still holds the profile, and only after
+/// checking that it alone holds the port its profile advertises. A browser
+/// that exited or restarted is kind `cdp_user_chrome_gone`.
 pub(crate) fn connect_user_chrome(
     record: &UserChromeRecord,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
-    let dir = &record.user_data_dir;
-    let endpoint = endpoint_from_user_data_dir(dir).map_err(|_| gone(record))?;
+    if !same_process(record) {
+        return Err(gone(record));
+    }
+    let endpoint = endpoint_from_user_data_dir(&record.user_data_dir).map_err(|_| gone(record))?;
     let port = endpoint.port();
-    let verdict = check_listener(port, &runs_profile(profile_lock_pid(dir)));
-    let (connection, warning) = match &verdict {
-        ListenerVerdict::Trusted(held) => (connect_held(&endpoint, held, deadline)?, None),
-        ListenerVerdict::Unknown => (
-            connect(&endpoint, deadline)?,
-            Some(format!(
-                "who holds port {port} cannot be checked on this platform; tabref relies on your \
-                 browser's approval prompt"
-            )),
-        ),
+    let connection = match check_listener(port, &runs_profile(Some(record.pid))) {
+        ListenerVerdict::Trusted(held) => connect_held(&endpoint, &held, deadline)?,
+        ListenerVerdict::Unknown => {
+            listener_is(port, record)?;
+            connect(&endpoint, deadline)?
+        }
         ListenerVerdict::Nothing => return Err(gone(record)),
-        refused => return Err(not_the_profile(record, port, refused)),
+        refused => return Err(not_the_profile(record, port, &refused)),
     };
     Ok(ConnectedBrowser {
         endpoint,
         connection,
-        warning,
+        warning: Some(format!("in your {} (logged in)", record.name)),
     })
+}
+
+/// Whether the profile is still held by the process the user opted in to:
+/// same pid in the lock, and, where the platform says, same start time.
+pub(crate) fn same_process(record: &UserChromeRecord) -> bool {
+    profile_lock_pid(&record.user_data_dir) == Some(record.pid)
+        && record
+            .started
+            .as_ref()
+            .is_none_or(|started| process_start(record.pid).as_ref() == Some(started))
+}
+
+/// Where the socket tables cannot be read (macOS), the port's listeners as
+/// `lsof` reports them must all be the opted-in browser; with no such check
+/// (Windows), tabref refuses.
+fn listener_is(port: u16, record: &UserChromeRecord) -> Result<(), AppError> {
+    match listener_pids(port) {
+        Some(pids) if pids.is_empty() => Err(gone(record)),
+        Some(pids) if pids.iter().all(|pid| *pid == record.pid) => Ok(()),
+        Some(pids) => Err(not_the_profile(
+            record,
+            port,
+            &ListenerVerdict::Untrusted {
+                holder: Some(format!("pid {}", pids.first().copied().unwrap_or_default())),
+            },
+        )),
+        None => Err(unsupported()),
+    }
 }
 
 /// Whether a process is the browser holding the profile lock (`lock_pid`).
@@ -112,13 +156,38 @@ fn gone(record: &UserChromeRecord) -> AppError {
     AppError::new(
         ErrorCode::ActionFailed,
         format!(
-            "Your {} at {} no longer has remote debugging on",
+            "Your {} at {} has closed, restarted or turned remote debugging off, so tabref no \
+             longer uses it",
             record.name,
-            record.user_data_dir.display()
+            shown_dir(&record.user_data_dir)
+        ),
+    )
+    .with_suggestion(format!("{AGAIN} to use it again"))
+    .with_details(serde_json::json!({ "kind": GONE_KIND }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
+fn not_running(dir: &Path) -> AppError {
+    AppError::new(
+        ErrorCode::ActionFailed,
+        format!(
+            "No running browser holds the profile at {}; its DevToolsActivePort is left from an earlier run",
+            shown_dir(dir)
         ),
     )
     .with_suggestion(AGAIN)
-    .with_details(serde_json::json!({ "kind": "cdp_user_chrome_gone" }))
+    .with_details(serde_json::json!({ "kind": "cdp_user_chrome_not_found" }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
+fn unsupported() -> AppError {
+    AppError::new(
+        ErrorCode::ActionNotSupported,
+        "tabref cannot yet check who holds your browser's DevTools port on this platform, so it \
+         does not attach to your own browser here",
+    )
+    .with_suggestion("Run 'tabref open <url> --launch' for a browser of tabref's own")
+    .with_details(serde_json::json!({ "kind": "cdp_user_chrome_unsupported" }))
     .with_disposition(DeliverySemantics::not_delivered())
 }
 
@@ -135,11 +204,13 @@ fn not_the_profile(record: &UserChromeRecord, port: u16, verdict: &ListenerVerdi
         format!(
             "The profile at {} names port {port}, which is {holder}, not the {} running that \
              profile; tabref does not attach to it",
-            record.user_data_dir.display(),
+            shown_dir(&record.user_data_dir),
             record.name
         ),
     )
-    .with_suggestion(AGAIN)
+    .with_suggestion(format!(
+        "{AGAIN}, or 'tabref connect --off' to stop using it"
+    ))
     .with_details(serde_json::json!({ "kind": "cdp_endpoint_unverified", "port": port }))
     .with_disposition(DeliverySemantics::not_delivered())
 }

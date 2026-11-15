@@ -71,6 +71,16 @@ class Wrappers(unittest.TestCase):
                      ["plugins"]):
             self.assertEqual(self.run_wrapper("ab", "agent-browser", *args).returncode, 64, args)
 
+    def test_tabref_refuses_the_users_own_browser(self):
+        env = dict(TABREF_BIN="/bin/true", HO_CDP_PORT="1", HO_WRAP="/bin/true")
+        for args in (["connect", "--user-chrome"], ["--cdp", "1", "connect", "--user-chrome"],
+                     ["--json", "--timeout", "5", "connect", "--off"], ["--tab=0", "connect"]):
+            p = self.run_wrapper("tabref", "tabref", *args, **env)
+            self.assertEqual(p.returncode, 64, args)
+            self.assertIn("connect", p.stderr)
+        self.assertEqual(self.run_wrapper("tabref", "tabref", "open", "connect", **env).returncode, 0)
+        self.assertEqual(self.run_wrapper("tabref", "tabref", "--tab", "connect", "snap", **env).returncode, 0)
+
     def test_tabref_without_binary_fails_cleanly(self):
         p = self.run_wrapper("tabref", "tabref", "skill", TABREF_BIN="/nonexistent/tabref", HO_CDP_PORT="1")
         self.assertEqual(p.returncode, 2)

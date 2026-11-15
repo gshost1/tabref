@@ -30,16 +30,22 @@ fn linux_profiles_live_under_the_xdg_config_dir_or_home() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_default_profile_is_recognised_in_any_spelling_and_others_are_not() {
-    let Some(first) = super::default_user_data_dirs().into_iter().next() else {
-        return;
-    };
-    let spelled = first
-        .user_data_dir
+    let config = std::env::temp_dir().join(format!("tabref-defaults-{}", std::process::id()));
+    let browsers = user_data_dirs_with(|name| {
+        (name == "XDG_CONFIG_HOME").then(|| OsString::from(config.as_os_str()))
+    });
+    let chrome = config.join("google-chrome");
+    std::fs::create_dir_all(&chrome).unwrap();
+    let spelled = config
+        .join("google-chrome")
         .join("..")
-        .join(first.user_data_dir.file_name().unwrap_or_default());
-    assert!(super::is_default_user_data_dir(&first.user_data_dir));
-    assert!(super::is_default_user_data_dir(&spelled) || !first.user_data_dir.exists());
-    assert!(!super::is_default_user_data_dir(
-        &std::env::temp_dir().join("tabref-profile-x")
-    ));
+        .join("google-chrome");
+
+    let found = (
+        super::is_default_in(&chrome, &browsers),
+        super::is_default_in(&spelled, &browsers),
+        super::is_default_in(&config.join("tabref-profile-x"), &browsers),
+    );
+    let _ = std::fs::remove_dir_all(&config);
+    assert_eq!(found, (true, true, false));
 }

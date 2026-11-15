@@ -22,6 +22,7 @@ pub use discovery::held_port::HeldPort;
 pub use discovery::json_version::{endpoint_from_held, endpoint_from_port};
 pub use discovery::listener_owner::{check_listener, is_chrome_family};
 pub use discovery::listener_verdict::ListenerVerdict;
+pub use discovery::lsof_owner::listener_pids;
 pub use discovery::process_view::ProcessView;
 pub use discovery::profile_lock::profile_lock_pid;
 pub use discovery::user_browser::UserBrowser;

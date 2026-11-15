@@ -50,8 +50,13 @@ pub fn default_user_data_dirs() -> Vec<UserBrowser> {
 /// directories: the place their logins live, which only an explicit opt-in
 /// (`tabref connect --user-chrome`) may hand to tabref.
 pub fn is_default_user_data_dir(dir: &Path) -> bool {
+    is_default_in(dir, &default_user_data_dirs())
+}
+
+/// Whether `dir` is one of `browsers`' user-data directories.
+pub(crate) fn is_default_in(dir: &Path, browsers: &[UserBrowser]) -> bool {
     let wanted = comparable(dir);
-    default_user_data_dirs()
+    browsers
         .iter()
         .any(|browser| comparable(&browser.user_data_dir) == wanted)
 }

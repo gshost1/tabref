@@ -1,8 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use tabref_cdp::ProcessView;
+use tabref_cdp::{LaunchOptions, ProcessView, process_start};
+use tabref_core::RefStore;
 
-use super::{find_user_chrome, runs_profile, shown_dir};
+use super::{find_user_chrome, runs_profile, same_process, shown_dir};
+use crate::session::session_options::SessionOptions;
+use crate::session::user_chrome_record::{
+    UserChromeRecord, choice_in_use, forget_user_chrome, save_user_chrome,
+};
 
 fn process(pid: u32, exe: &str) -> ProcessView {
     ProcessView {
@@ -10,6 +15,26 @@ fn process(pid: u32, exe: &str) -> ProcessView {
         exe: PathBuf::from(exe),
         cmdline: vec!["chrome".to_owned()],
     }
+}
+
+fn temp(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("tabref-uc-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// A profile whose lock names `pid`, with remote debugging on.
+#[cfg(unix)]
+fn profile(name: &str, pid: u32) -> PathBuf {
+    let dir = temp(name);
+    std::fs::write(
+        dir.join("DevToolsActivePort"),
+        "40123\n/devtools/browser/abc\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(format!("myhost-{pid}"), dir.join("SingletonLock")).unwrap();
+    dir
 }
 
 #[test]
@@ -24,21 +49,107 @@ fn only_the_browser_holding_the_profile_lock_runs_the_profile() {
     )));
 }
 
+#[cfg(unix)]
 #[test]
-fn a_named_profile_without_remote_debugging_is_an_error() {
-    let dir = std::env::temp_dir().join(format!("tabref-userchrome-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let missing = find_user_chrome(Some(&dir)).unwrap_err();
-    assert_eq!(missing.kind(), Some("cdp_active_port_missing"));
-
+fn a_named_profile_needs_remote_debugging_and_a_running_browser() {
+    let empty = temp("empty");
+    assert_eq!(
+        find_user_chrome(Some(&empty)).unwrap_err().kind(),
+        Some("cdp_active_port_missing")
+    );
     std::fs::write(
-        dir.join("DevToolsActivePort"),
+        empty.join("DevToolsActivePort"),
         "40123\n/devtools/browser/abc\n",
     )
     .unwrap();
-    let record = find_user_chrome(Some(&dir)).unwrap();
+    assert_eq!(
+        find_user_chrome(Some(&empty)).unwrap_err().kind(),
+        Some("cdp_user_chrome_not_found")
+    );
+
+    let me = std::process::id();
+    let held = profile("held", me);
+    let record = find_user_chrome(Some(&held)).unwrap();
+    let _ = std::fs::remove_dir_all(&empty);
+    let _ = std::fs::remove_dir_all(&held);
+    assert_eq!((record.user_data_dir, record.pid), (held, me));
+    assert_eq!(record.started, process_start(me));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_browser_that_exited_or_restarted_is_not_the_one_opted_in_to() {
+    let me = std::process::id();
+    let dir = profile("restart", me);
+    let record = |pid: u32, started: Option<String>| UserChromeRecord {
+        name: "Google Chrome".to_owned(),
+        user_data_dir: dir.clone(),
+        pid,
+        started,
+    };
+
+    let results = (
+        same_process(&record(me, process_start(me))),
+        same_process(&record(me + 1, process_start(me))),
+        same_process(&record(me, Some("an earlier start".to_owned()))),
+    );
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(record.user_data_dir, dir);
+    assert_eq!(results, (true, false, false));
+}
+
+#[test]
+fn launch_and_cdp_never_use_the_users_browser() {
+    let state = temp("choice");
+    let store = RefStore::new(&state);
+    let record = UserChromeRecord {
+        name: "Google Chrome".to_owned(),
+        user_data_dir: PathBuf::from("/p"),
+        pid: 1,
+        started: None,
+    };
+    save_user_chrome(&store, &record).unwrap();
+    let plain = SessionOptions::default();
+    let launch = SessionOptions {
+        launch: Some(LaunchOptions::default()),
+        ..SessionOptions::default()
+    };
+    let named = SessionOptions {
+        cdp: Some("9333".to_owned()),
+        ..SessionOptions::default()
+    };
+
+    let used = (
+        choice_in_use(&store, &plain).map(|(_, r)| r),
+        choice_in_use(&store, &launch).is_none(),
+        choice_in_use(&store, &named).is_none(),
+    );
+    forget_user_chrome(&store).unwrap();
+    let after = choice_in_use(&store, &plain).is_none();
+    let _ = std::fs::remove_dir_all(&state);
+    assert_eq!(used, (Some(record), true, true));
+    assert!(after);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_opt_in_that_cannot_be_removed_is_an_error_not_a_quiet_success() {
+    use std::os::unix::fs::PermissionsExt;
+    let state = temp("stuck");
+    let store = RefStore::new(&state);
+    let record = UserChromeRecord {
+        name: "Google Chrome".to_owned(),
+        user_data_dir: PathBuf::from("/p"),
+        pid: 1,
+        started: None,
+    };
+    save_user_chrome(&store, &record).unwrap();
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let stuck = forget_user_chrome(&store);
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let cleared = forget_user_chrome(&store);
+    let _ = std::fs::remove_dir_all(&state);
+    assert!(stuck.is_err());
+    assert!(cleared.is_ok());
 }
 
 #[test]

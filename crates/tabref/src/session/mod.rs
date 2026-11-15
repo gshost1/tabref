@@ -33,7 +33,7 @@ use session_options::SessionOptions;
 use tab_choice::choose_tab;
 use tab_claim::TabClaim;
 use tab_order::{order_text, stable_order};
-use user_chrome_record::USER_CHROME_FILE;
+use user_chrome_record::choice_in_use;
 
 /// Everything one command runs against: the DevTools connection, the page
 /// sessions attached through it, the ref store and what the current command
@@ -64,8 +64,10 @@ impl Session {
     ) -> Result<Self, AppError> {
         let scope = CommandScope::new(options, claim)?;
         let store = RefStore::open()?;
-        let choice = store.read_state(USER_CHROME_FILE);
-        let browser = connect_browser(options, &store, scope.deadline)?;
+        let in_use = choice_in_use(&store, options);
+        let record = in_use.as_ref().map(|(_, record)| record);
+        let browser = connect_browser(options, &store, record, scope.deadline)?;
+        let choice = in_use.map(|(text, _)| text);
         let mut connection = browser.connection;
         connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
         Ok(Self {

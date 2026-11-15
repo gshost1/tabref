@@ -13,8 +13,8 @@ use super::connected_browser::ConnectedBrowser;
 use super::endpoint_refusal::{named_warning, unverified_port};
 use super::launch_record::{forget_launched, load_launched, save_launched};
 use super::session_options::SessionOptions;
-use super::user_chrome::connect_user_chrome;
-use super::user_chrome_record::load_user_chrome;
+use super::user_chrome::{GONE_KIND, connect_user_chrome};
+use super::user_chrome_record::{UserChromeRecord, forget_user_chrome};
 
 const DEFAULT_PORT: u16 = 9222;
 const PROBE_BUDGET: Duration = Duration::from_millis(300);
@@ -25,9 +25,11 @@ const REFUSALS: [&str; 2] = ["cdp_endpoint_changed", "cdp_endpoint_mismatch"];
 /// - the endpoint `--cdp`/`TABREF_CDP` names: the user chose it; when its
 ///   port is not held by a Chrome of this user, the command says so in a
 ///   warning;
-/// - the user's own browser, only after `tabref connect --user-chrome` chose
-///   it, while its port is held by the process running that profile (see
-///   `user_chrome`); without that opt-in no profile of the user is read;
+/// - `user_chrome`, the user's own browser `tabref connect --user-chrome`
+///   chose (the caller passes it only without `--cdp` and `--launch`), while
+///   the same browser process holds its profile and port (see
+///   `user_chrome`); a browser that is gone loses the opt-in. Without that
+///   opt-in no profile of the user is read;
 /// - the browser a previous `open --launch` started, while its port is held
 ///   by a process running that launch's profile (Linux), or while that very
 ///   process still runs (pid and start time; Windows: the profile's lock);
@@ -43,13 +45,18 @@ const REFUSALS: [&str; 2] = ["cdp_endpoint_changed", "cdp_endpoint_mismatch"];
 pub(crate) fn connect_browser(
     options: &SessionOptions,
     store: &RefStore,
+    user_chrome: Option<&UserChromeRecord>,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
     if let Some(spec) = &options.cdp {
         return named_browser(spec, deadline);
     }
-    if let Some(record) = load_user_chrome(store) {
-        return connect_user_chrome(&record, deadline);
+    if let Some(record) = user_chrome {
+        return connect_user_chrome(record, deadline).inspect_err(|error| {
+            if error.kind() == Some(GONE_KIND) {
+                let _ = forget_user_chrome(store);
+            }
+        });
     }
     if let Some(found) = launched_browser(store, deadline)? {
         return Ok(found);

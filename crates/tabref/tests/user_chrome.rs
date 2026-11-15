@@ -12,7 +12,7 @@ mod common;
 use std::net::TcpListener;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -118,13 +118,10 @@ fn a_profile_pointing_at_another_program_is_never_contacted() {
     );
 }
 
-#[test]
-fn the_users_browser_is_used_only_between_connect_and_off() {
-    if !live() {
-        return;
-    }
-    let home = UserHome::new("uc-live");
-    let mut browser = Command::new(find_chrome().unwrap())
+/// The "user's" Chrome: headless on the throwaway profile, with remote
+/// debugging on as chrome://inspect would turn it on.
+fn start_user_chrome(home: &UserHome) -> Option<Child> {
+    let browser = Command::new(find_chrome().unwrap())
         .args([
             format!("--user-data-dir={}", home.profile().display()),
             "--headless=new".to_owned(),
@@ -140,20 +137,41 @@ fn the_users_browser_is_used_only_between_connect_and_off() {
     let up = (0..100).any(|_| {
         std::thread::sleep(Duration::from_millis(100));
         read_active_port(&home.profile()).is_ok()
+            && std::fs::symlink_metadata(home.profile().join("SingletonLock")).is_ok()
     });
+    if up {
+        return Some(browser);
+    }
+    kill(browser);
+    None
+}
+
+fn kill(mut browser: Child) {
+    let _ = Command::new("kill")
+        .args(["-KILL", &format!("-{}", browser.id())])
+        .status();
+    let _ = browser.wait();
+    std::thread::sleep(Duration::from_millis(300));
+}
+
+#[test]
+fn the_users_browser_is_used_only_between_connect_and_off() {
+    if !live() {
+        return;
+    }
+    let home = UserHome::new("uc-live");
+    let browser = start_user_chrome(&home).expect("the user's Chrome never came up");
+    let pid = browser.id();
 
     let before = home.tabref(&["--json", "tabs"]);
     let connected = home.tabref(&["connect", "--user-chrome"]);
     let opened = home.tabref(&["open", "data:text/html,<h1>In your Chrome</h1>"]);
     let pages = list_pages(&home.profile());
     let off = home.tabref(&["connect", "--off"]);
+    let daemon = home.tabref(&["--json", "daemon", "status"]);
     let later = home.tabref(&["--json", "tabs"]);
+    kill(browser);
 
-    let _ = Command::new("kill")
-        .args(["-KILL", &format!("-{}", browser.id())])
-        .status();
-    let _ = browser.wait();
-    assert!(up, "the user's Chrome never turned remote debugging on");
     assert!(
         !before.ok,
         "used the user's browser without the opt-in: {}",
@@ -163,23 +181,101 @@ fn the_users_browser_is_used_only_between_connect_and_off() {
     assert!(
         connected.stdout.contains("attached to your Google Chrome")
             && connected.stdout.contains("profile ")
-            && connected.stdout.contains(&format!("pid {}", browser.id())),
+            && connected.stdout.contains(&format!("pid {pid}")),
         "{}",
         connected.stdout
     );
     assert!(opened.ok, "{}{}", opened.stdout, opened.stderr);
     assert!(
-        pages.contains("In your Chrome") || pages.contains("data:text/html"),
-        "{pages}"
+        opened
+            .stdout
+            .starts_with("warning: in your Google Chrome (logged in)"),
+        "{}",
+        opened.stdout
     );
+    assert!(pages.contains("In your Chrome"), "{pages}");
     assert!(
         off.ok && off.stdout.contains("stopped using your Google Chrome"),
         "{}",
         off.stdout
     );
+    assert_eq!(daemon.json()["data"]["running"], false, "{}", daemon.stdout);
     assert!(
         !later.ok,
         "still used the user's browser after --off: {}",
+        later.stdout
+    );
+}
+
+#[test]
+fn open_launch_while_opted_in_uses_tabrefs_own_browser() {
+    if !live() {
+        return;
+    }
+    let home = UserHome::new("uc-launch");
+    let browser = start_user_chrome(&home).expect("the user's Chrome never came up");
+    let connected = home.tabref(&["connect", "--user-chrome"]);
+    let launched = home.tabref(&["open", "data:text/html,<h1>Launched here</h1>", "--launch"]);
+    let pages = list_pages(&home.profile());
+    let record = std::fs::read_to_string(home.state.join("launched.json")).unwrap_or_default();
+    let _ = home.tabref(&["daemon", "stop"]);
+    kill(browser);
+    if let Ok(record) = serde_json::from_str::<serde_json::Value>(&record) {
+        let _ = Command::new("kill")
+            .args(["-KILL", &format!("-{}", record["pid"])])
+            .status();
+        let _ = std::fs::remove_dir_all(record["profile_dir"].as_str().unwrap_or("/nonexistent"));
+    }
+
+    assert!(connected.ok, "{}{}", connected.stdout, connected.stderr);
+    assert!(launched.ok, "{}{}", launched.stdout, launched.stderr);
+    assert!(
+        launched.stdout.contains("Launched here"),
+        "{}",
+        launched.stdout
+    );
+    assert!(
+        !launched.stdout.contains("in your Google Chrome"),
+        "{}",
+        launched.stdout
+    );
+    assert!(
+        !pages.contains("Launched here"),
+        "--launch landed in the user's browser: {pages}"
+    );
+}
+
+#[test]
+fn a_restarted_users_browser_needs_a_new_opt_in() {
+    if !live() {
+        return;
+    }
+    let home = UserHome::new("uc-restart");
+    let first = start_user_chrome(&home).expect("the user's Chrome never came up");
+    let connected = home.tabref(&["connect", "--user-chrome"]);
+    kill(first);
+    let second = start_user_chrome(&home).expect("the user's Chrome never came back");
+    let after_restart = home.tabref(&["--json", "tabs"]);
+    let kept = home.state.join("user_chrome.json").exists();
+    let later = home.tabref(&["--json", "tabs"]);
+    kill(second);
+
+    assert!(connected.ok, "{}{}", connected.stdout, connected.stderr);
+    assert!(
+        !after_restart.ok,
+        "used a restarted browser: {}",
+        after_restart.stdout
+    );
+    assert_eq!(
+        after_restart.json()["error"]["details"]["kind"],
+        "cdp_user_chrome_gone",
+        "{}",
+        after_restart.stdout
+    );
+    assert!(!kept, "the opt-in outlived the browser it was given for");
+    assert!(
+        !later.ok,
+        "used the restarted browser later: {}",
         later.stdout
     );
 }
