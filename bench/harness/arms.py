@@ -31,12 +31,13 @@ def arm_version(arm, tabref_version=None):
     return ARM_VERSIONS[arm]
 
 
+PROMPT_VERSION = "chained-2026-11-15"
+FROZEN_PROMPT_VERSION = "frozen-2026-11-10"
 START_LINE = " Read the guide and open the first page in one call, for example: "
 START_COMMANDS = {
     "tabref": "`tabref skill && tabref open <url>`",
     "ab": "`agent-browser skills get core && agent-browser --cdp {port} open <url>`",
-    "bh": ("`browser-harness skill && browser-harness <<'PY'` followed by the lines "
-           "`new_tab(\"<url>\"); wait_for_load(); print(page_info())` and `PY`"),
+    "bh": "`browser-harness skill && browser-harness <<'PY'\nnew_tab(\"<url>\"); wait_for_load(); print(page_info())\nPY`",
     "pw": ("`cat {skills}/playwright-cli/SKILL.md && playwright-cli attach --cdp=http://127.0.0.1:{port} "
            "&& playwright-cli goto <url>`"),
     "ad-14": "`agent-desktop skills get web && agent-desktop open-url <url> --app \"Google Chrome\"`",

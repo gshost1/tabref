@@ -129,5 +129,18 @@ class PwGuideReadable(unittest.TestCase):
             self.assertEqual(arms.web_extra_args(arm), [])
 
 
+class ArmsNotesMatchTheCode(unittest.TestCase):
+    def test_recorded_paragraphs_are_the_prompts_the_runner_sends(self):
+        import re
+        from harness import arms
+        notes = (Path(__file__).resolve().parents[1] / "ARMS.md").read_text()
+        section = notes[notes.index("## Tool paragraphs from 2026-11-15"):]
+        blocks = dict(re.findall(r"### (\S+)\n\n```\n(.*?)\n```", section, re.S))
+        self.assertEqual(sorted(blocks), sorted(arms.START_COMMANDS))
+        for arm, text in blocks.items():
+            want = arms.web_system_prompt(arm, "PORT").replace(str(arms.skills_dir()), "SKILLS")
+            self.assertEqual(text, want, arm)
+
+
 if __name__ == "__main__":
     unittest.main()

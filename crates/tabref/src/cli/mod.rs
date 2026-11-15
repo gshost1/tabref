@@ -6,8 +6,8 @@ use command::Command;
 
 /// Read and drive Chrome from the shell. Start in one call: `tabref skill && tabref open <url>`.
 ///
-/// `tabref skill` prints the short guide; `tabref open` prints the page with
-/// a ref per control (e4) that the actions take, as do names the page shows
+/// `tabref skill` prints the short guide. `tabref open` prints the page with a
+/// ref (e4) on each control; actions take a ref or a name the page shows
 /// ("Save"). Commands talk to Chrome over the DevTools protocol.
 #[derive(Debug, Parser)]
 #[command(name = "tabref", version, max_term_width = 100)]
