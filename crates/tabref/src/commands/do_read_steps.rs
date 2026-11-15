@@ -16,11 +16,10 @@ use super::step_done::StepDone;
 use super::target_spec::TargetSpec;
 use super::wait::wait_for;
 use super::wait_condition::Condition;
-use crate::output::page_report::page_report;
+use super::page_view::current_page_view;
 use crate::session::Session;
 use crate::view::find_matches::find_matches;
 use crate::view::node_line::quote_text;
-use crate::view::view_mode::ViewMode;
 
 const READ_LIMIT: usize = 4_000;
 const FOUND_SHOWN: usize = 10;
@@ -56,7 +55,7 @@ pub(crate) fn open_step(
     );
     let mut data = json!({ "action": "open", "url": info.url, "title": info.title });
     if last {
-        let report = page_report(&session.capture()?, ViewMode::Interactive);
+        let report = current_page_view(session)?;
         text.push('\n');
         text.push_str(&report.text);
         data["page"] = report.data;
@@ -183,7 +182,7 @@ pub(crate) fn js_step(
 
 /// `snap`: a snapshot of the page, as `tabref snap` prints it.
 pub(crate) fn snap_step(session: &mut Session) -> Result<StepDone, AppError> {
-    let report = page_report(&session.capture()?, ViewMode::Interactive);
+    let report = current_page_view(session)?;
     Ok(StepDone {
         text: format!("ok snap\n{}", report.text),
         data: report.data,

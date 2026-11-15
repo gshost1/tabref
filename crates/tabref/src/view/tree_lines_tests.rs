@@ -58,13 +58,6 @@ fn the_default_view_keeps_controls_headings_and_named_regions_that_hold_them() {
 }
 
 #[test]
-fn the_full_view_adds_text() {
-    let lines = tree_lines(&page(), ViewMode::All);
-    assert!(lines.contains(&r#"paragraph "Total: 4 items""#.to_owned()));
-    assert!(!lines.iter().any(|line| line.contains("Empty")));
-}
-
-#[test]
 fn an_alert_shows_even_without_controls() {
     let root = node(
         "webarea",

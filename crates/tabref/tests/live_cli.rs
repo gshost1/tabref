@@ -44,9 +44,9 @@ fn open_prints_a_snapshot_and_actions_read_back() {
         "{}",
         opened.stdout
     );
-    assert!(opened.stdout.contains("heading \"Checkout\""));
+    assert!(opened.stdout.contains("# Checkout"));
 
-    let email = opened.ref_for("textfield \"Email\"");
+    let email = opened.ref_for("textbox Email");
     let filled = tabref.ok(&["fill", &email, "ada@example.test"]);
     assert!(
         filled.stdout.contains("-> \"ada@example.test\""),
@@ -54,7 +54,7 @@ fn open_prints_a_snapshot_and_actions_read_back() {
         filled.stdout
     );
 
-    let gift = opened.ref_for("checkbox \"Gift wrap\"");
+    let gift = opened.ref_for("checkbox Gift wrap");
     assert!(tabref.ok(&["check", &gift]).stdout.starts_with("checked"));
     assert!(
         tabref
@@ -63,7 +63,7 @@ fn open_prints_a_snapshot_and_actions_read_back() {
             .contains("already checked")
     );
 
-    let size = opened.ref_for("combobox \"Size\"");
+    let size = opened.ref_for("select Size");
     assert!(
         tabref
             .ok(&["select", &size, "Large"])
@@ -79,7 +79,7 @@ fn open_prints_a_snapshot_and_actions_read_back() {
     );
     let found = tabref.ok(&["find", "Sent ada"]);
     assert!(
-        found.stdout.contains("paragraph \"Sent ada@example.test\""),
+        found.stdout.contains("Sent ada@example.test"),
         "{}",
         found.stdout
     );
@@ -96,7 +96,7 @@ fn a_click_that_navigates_prints_the_new_page_and_old_refs_go_stale() {
     }
     let (tabref, url) = shop();
     let opened = tabref.ok(&["open", &url]);
-    let finish = opened.ref_for("link \"Finish\"");
+    let finish = opened.ref_for("Finish -> /done");
     let clicked = tabref.ok(&["click", &finish]);
     assert!(
         clicked.stdout.contains("page \"Done\""),
@@ -130,7 +130,7 @@ fn a_changed_element_is_stale_instead_of_clicked() {
     }
     let (tabref, url) = shop();
     let opened = tabref.ok(&["open", &url]);
-    let save = opened.ref_for("button \"Save\"");
+    let save = opened.ref_for("button Save");
     tabref.ok(&[
         "js",
         "document.getElementById('greet').textContent = 'Delete'",
@@ -150,7 +150,7 @@ fn dialogs_are_accepted_and_new_tabs_become_current() {
     }
     let (tabref, url) = shop();
     let opened = tabref.ok(&["open", &url]);
-    let save = opened.ref_for("button \"Save\"");
+    let save = opened.ref_for("button Save");
     let alerted = tabref.ok(&["click", &save]);
     assert!(
         alerted.stdout.contains("dialog alert \"Saved!\" accepted"),
@@ -158,7 +158,7 @@ fn dialogs_are_accepted_and_new_tabs_become_current() {
         alerted.stdout
     );
 
-    let elsewhere = opened.ref_for("link \"Finish elsewhere\"");
+    let elsewhere = opened.ref_for("Finish elsewhere");
     let popped = tabref.ok(&["click", &elsewhere]);
     assert!(
         popped.stdout.contains("opened a new tab"),

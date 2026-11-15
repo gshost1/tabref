@@ -6,11 +6,10 @@ use tabref_core::{AccessibilityNode, AppError};
 use super::acted::Acted;
 use super::page_url::short_url;
 use crate::output::outcome::Outcome;
-use crate::output::page_report::page_report;
+use super::page_view::current_page_view;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
 use crate::view::node_line::{node_line, quote_text};
-use crate::view::view_mode::ViewMode;
 
 const CHANGE_BUDGET: usize = 600;
 const NEW_SHOWN: usize = 8;
@@ -94,7 +93,7 @@ fn effect_block(
     });
     if let Some(tab) = &effects.new_tab {
         lines.push("opened a new tab, now the current tab".to_owned());
-        let report = page_report(&session.capture()?, ViewMode::Interactive);
+        let report = current_page_view(session)?;
         lines.push(report.text);
         merge(&mut data, json!({ "new_tab": tab, "page": report.data }));
         return Ok((lines, data));
@@ -104,7 +103,7 @@ fn effect_block(
     };
     merge(&mut data, json!({ "url": page.url, "title": page.title }));
     if effects.settled.navigated && effects.url_before != page.url {
-        let report = page_report(&session.capture()?, ViewMode::Interactive);
+        let report = current_page_view(session)?;
         lines.push(report.text);
         merge(&mut data, json!({ "page": report.data }));
         return Ok((lines, data));

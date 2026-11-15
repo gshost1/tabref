@@ -8,9 +8,8 @@ use super::do_expand::expand;
 use super::do_step::run_step;
 use super::step_words::split_steps;
 use crate::output::outcome::Outcome;
-use crate::output::page_report::page_report;
+use super::page_view::current_page_view;
 use crate::session::Session;
-use crate::view::view_mode::ViewMode;
 
 /// How the batch runs: each step's time limit, and whether results print
 /// as text while the steps run or as one JSON envelope at the end.
@@ -94,8 +93,7 @@ fn failed(
         message.push_str(&format!("; the {skipped} step(s) after it did not run"));
     }
     error.message = message;
-    if let Ok(captured) = session.capture() {
-        let report = page_report(&captured, ViewMode::Interactive);
+    if let Ok(report) = current_page_view(session) {
         let detail = match error.platform_detail.take() {
             Some(cdp) => format!("{cdp}\n{}", report.text),
             None => report.text,
