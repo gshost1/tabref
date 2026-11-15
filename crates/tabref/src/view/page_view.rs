@@ -3,6 +3,7 @@ use tabref_core::AppError;
 use tabref_page::{Block, OutlineInput, PageOutline, build_outline, build_outline_at};
 
 use super::block_renderer::BlockRenderer;
+use super::block_titles::title_of;
 use super::budget::fit;
 use super::main_content::{has_main, main_block, text_size};
 use super::node_line::quote_text;
@@ -45,6 +46,13 @@ pub(crate) fn page_view(
             renderer.render_block(dialog, 0);
         } else if *scope == ViewScope::Page {
             renderer.render_dialog(dialog);
+        } else {
+            let title = title_of(dialog);
+            renderer.push(
+                0,
+                format!("{title} covers the page: tabref snap shows its buttons"),
+                None,
+            );
         }
     }
     renderer.render_children(body, 0);

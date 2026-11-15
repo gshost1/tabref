@@ -87,8 +87,12 @@ impl OutlineBuilder<'_> {
             .and_then(|trees| trees.get(document))
             .map(|tree| tree.url.clone())
             .unwrap_or_default();
-        block.label =
-            origin_of(&frame_url).map(|origin| origin.trim_start_matches("https://").to_owned());
+        block.label = origin_of(&frame_url).map(|origin| {
+            origin
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .to_owned()
+        });
         let body = self
             .captures
             .get(capture)
@@ -116,6 +120,9 @@ impl OutlineBuilder<'_> {
             && keeps_as_dialog(node, &block)
         {
             block.kind = BlockKind::Dialog;
+            if let Some(heading) = first_heading_text(&block) {
+                block.label = Some(heading);
+            }
             self.dialogs.push(block);
             return;
         }
@@ -130,5 +137,26 @@ fn holds_input(block: &Block) -> bool {
         Item::Control(control) => FORM_ROLES.contains(&control.role.as_str()),
         Item::Block(inner) => holds_input(inner),
         _ => false,
+    })
+}
+
+/// The text of the first heading in `block`, for naming a frame lifted as a
+/// dialog.
+fn first_heading_text(block: &Block) -> Option<String> {
+    block.items.iter().find_map(|item| match item {
+        Item::Block(inner) if matches!(inner.kind, BlockKind::Heading(_)) => {
+            let text: String = inner
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Text(run) => Some(run.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let text = super::text_runs::squash(&text);
+            (!text.is_empty()).then_some(text)
+        }
+        Item::Block(inner) => first_heading_text(inner),
+        _ => None,
     })
 }

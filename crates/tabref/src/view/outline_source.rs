@@ -40,6 +40,11 @@ pub(crate) fn outline_input(
     if let Some(tree) = tree {
         collect_refs(tree, &mut refs, &mut frame_targets);
     }
+    if tree.is_none() {
+        for target in iframe_targets(session) {
+            frame_targets.entry(target).or_insert(false);
+        }
+    }
     frame_targets.remove(&page.target_id);
     let mut frames = HashMap::new();
     for (target, asks_input) in frame_targets {
@@ -108,4 +113,32 @@ fn is_large(trees: &[tabref_page::DomTree], owner: i64, viewport: [f64; 2]) -> b
         .filter_map(|tree| tree.find_backend(owner).and_then(|index| tree.node(index)))
         .filter_map(|node| node.layout.as_ref())
         .any(|layout| area > 0.0 && layout.area() >= LARGE_FRAME_SHARE * area)
+}
+
+/// The browser's out-of-process iframe targets, for a view taken without a
+/// snapshot, which has no refs to name them. Which page holds each one is
+/// settled by asking the page for its owner element.
+fn iframe_targets(session: &mut Session) -> Vec<String> {
+    let deadline = session.deadline();
+    let Ok(reply) =
+        session
+            .connection()
+            .call("Target.getTargets", serde_json::json!({}), None, deadline)
+    else {
+        return Vec::new();
+    };
+    reply
+        .get("targetInfos")
+        .and_then(serde_json::Value::as_array)
+        .map(|targets| {
+            targets
+                .iter()
+                .filter(|target| {
+                    target.get("type").and_then(serde_json::Value::as_str) == Some("iframe")
+                })
+                .filter_map(|target| target.get("targetId").and_then(serde_json::Value::as_str))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
