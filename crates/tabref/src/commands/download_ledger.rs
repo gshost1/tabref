@@ -1,3 +1,4 @@
+#![cfg_attr(windows, allow(dead_code))]
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::PathBuf;
 

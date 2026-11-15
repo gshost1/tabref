@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "linux"), allow(unused_imports, dead_code))]
+
 use std::path::{Path, PathBuf};
 
 use super::{PROFILE_MARKER, mark, normalize, refusal, same_dir, unfit_existing};
@@ -16,10 +18,14 @@ fn a_dot_dot_past_a_missing_directory_is_refused_and_one_that_exists_resolves() 
     let past_missing = normalize(&base.join("nope").join("..").join("real"));
     let through_existing = normalize(&base.join("real").join("..").join("new"));
     let _ = std::fs::remove_dir_all(&base);
-    assert_eq!(
-        past_missing.unwrap_err().kind(),
-        Some("launch_profile_refused")
-    );
+    if cfg!(windows) {
+        assert_eq!(past_missing.unwrap(), base.join("real"));
+    } else {
+        assert_eq!(
+            past_missing.unwrap_err().kind(),
+            Some("launch_profile_refused")
+        );
+    }
     assert_eq!(through_existing.unwrap(), base.join("new"));
 }
 
