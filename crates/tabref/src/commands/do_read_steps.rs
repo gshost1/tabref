@@ -10,6 +10,7 @@ use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_elemen
 
 use super::act_target::resolve_target;
 use super::batch_step::BatchStep;
+use super::download_lines::{download_json, download_line};
 use super::downloads;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open::normalize_url;
@@ -94,10 +95,11 @@ fn opened_line(
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
     let _ = downloads::enable(session, deadline);
     let navigated = navigate(session.connection(), page, url, navigation);
-    let started = downloads::after_action(session, deadline, downloads::grace_after(&navigated));
+    let grace = downloads::grace_after(&navigated);
+    let started = downloads::after_action(session, page, None, deadline, grace);
     if !started.is_empty() {
-        let lines: Vec<String> = started.iter().map(downloads::download_line).collect();
-        let data: Vec<Value> = started.iter().map(downloads::download_json).collect();
+        let lines: Vec<String> = started.iter().map(download_line).collect();
+        let data: Vec<Value> = started.iter().map(download_json).collect();
         let text = format!("ok open {url}: {}", lines.join("; "));
         return Ok((
             text,
@@ -128,15 +130,18 @@ pub(crate) fn expect_step(
     deadline: Deadline,
 ) -> Result<StepDone, AppError> {
     let condition = Condition::from_words(step.args())?;
-    let detail = wait_for(session, &condition, deadline, false)?;
+    let (detail, extra) = wait_for(session, &condition, deadline, false)?;
     let mut text = format!("ok {}", step.source);
-    if let Condition::Url(_) = condition {
-        text.push_str(&format!(" ({})", short_url(&detail, &detail)));
+    match condition {
+        Condition::Url(_) => text.push_str(&format!(" ({})", short_url(&detail, &detail))),
+        Condition::Download => text.push_str(&format!(": {detail}")),
+        _ => {}
     }
-    Ok(StepDone {
-        text,
-        data: json!({ "action": "expect", "condition": condition.describe() }),
-    })
+    let mut data = json!({ "action": "expect", "condition": condition.describe() });
+    if let (Some(object), Value::Object(more)) = (data.as_object_mut(), extra) {
+        object.extend(more);
+    }
+    Ok(StepDone { text, data })
 }
 
 /// `read` prints the page's text, cut at 4,000 characters; `read TARGET`

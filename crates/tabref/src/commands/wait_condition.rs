@@ -1,6 +1,8 @@
 use tabref_core::AppError;
 use tabref_page::Word;
 
+use super::wait_flags::WaitFlags;
+
 /// What `wait` waits for, and what a `do` batch's `expect` checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Condition {
@@ -14,20 +16,15 @@ pub(crate) enum Condition {
 impl Condition {
     /// The one condition the flags name; none, or more than one, is
     /// `INVALID_ARGS`.
-    pub(crate) fn from_flags(
-        text: Option<&str>,
-        gone: Option<&str>,
-        url: Option<&str>,
-        (idle, download): (bool, bool),
-    ) -> Result<Self, AppError> {
+    pub(crate) fn from_flags(flags: &WaitFlags<'_>) -> Result<Self, AppError> {
         let mut named = Vec::new();
-        named.extend(text.map(|text| Self::Text(text.to_owned())));
-        named.extend(gone.map(|text| Self::Gone(text.to_owned())));
-        named.extend(url.map(|url| Self::Url(url_part(url))));
-        if idle {
+        named.extend(flags.text.map(|text| Self::Text(text.to_owned())));
+        named.extend(flags.gone.map(|text| Self::Gone(text.to_owned())));
+        named.extend(flags.url.map(|url| Self::Url(url_part(url))));
+        if flags.idle {
             named.push(Self::Idle);
         }
-        if download {
+        if flags.download {
             named.push(Self::Download);
         }
         match named.len() {

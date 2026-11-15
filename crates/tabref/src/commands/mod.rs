@@ -10,6 +10,8 @@ pub(crate) mod do_expand;
 pub(crate) mod do_read_steps;
 pub(crate) mod do_step;
 pub(crate) mod download_folder;
+pub(crate) mod download_ledger;
+pub(crate) mod download_lines;
 pub(crate) mod download_place;
 pub(crate) mod downloads;
 pub(crate) mod fill;
@@ -18,6 +20,7 @@ pub(crate) mod hover;
 pub(crate) mod js;
 pub(crate) mod new_tab;
 pub(crate) mod open;
+pub(crate) mod open_request;
 pub(crate) mod page_url;
 pub(crate) mod page_view;
 pub(crate) mod press;
@@ -35,6 +38,7 @@ pub(crate) mod type_text;
 pub(crate) mod upload;
 pub(crate) mod wait;
 pub(crate) mod wait_condition;
+pub(crate) mod wait_flags;
 
 use tabref_cdp::LaunchOptions;
 use tabref_core::AppError;
@@ -86,8 +90,19 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             url,
             new_tab,
             download_dir,
+            no_download_dir,
+            download_max_mb,
             ..
-        } => open::run(session, url, (*new_tab, download_dir.as_deref())),
+        } => open::run(
+            session,
+            url,
+            &open_request::OpenRequest {
+                new_tab: *new_tab,
+                download_dir: download_dir.clone(),
+                clear_download_dir: *no_download_dir,
+                download_max_mb: *download_max_mb,
+            },
+        ),
         Command::Snap {
             all,
             root,
@@ -145,12 +160,13 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             download,
         } => wait::run(
             session,
-            wait_condition::Condition::from_flags(
-                text.as_deref(),
-                gone.as_deref(),
-                url.as_deref(),
-                (*idle, *download),
-            )?,
+            wait_condition::Condition::from_flags(&wait_flags::WaitFlags {
+                text: text.as_deref(),
+                gone: gone.as_deref(),
+                url: url.as_deref(),
+                idle: *idle,
+                download: *download,
+            })?,
         ),
         Command::Js { expression } => js::run(session, expression),
         Command::Do {

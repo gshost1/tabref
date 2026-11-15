@@ -5,8 +5,10 @@ use serde_json::{Value, json};
 use tabref_cdp::is_timeout;
 use tabref_core::{AppError, Deadline};
 
+use super::download_origin::DownloadOrigin;
 use super::download_record::DownloadRecord;
 use super::download_state::DownloadState;
+use super::download_timing::DownloadTiming;
 use crate::{CdpConnection, CdpEvent};
 
 const WILL_BEGIN: &str = "Browser.downloadWillBegin";
@@ -32,6 +34,22 @@ pub fn enable_downloads(
     };
     connection
         .call("Browser.setDownloadBehavior", params, None, deadline)
+        .map(|_| ())
+}
+
+/// Gives the browser back its own download behaviour, with no events for
+/// this connection, so the user's later downloads stay theirs.
+pub fn restore_downloads(
+    connection: &mut CdpConnection,
+    deadline: Deadline,
+) -> Result<(), AppError> {
+    connection
+        .call(
+            "Browser.setDownloadBehavior",
+            json!({ "behavior": "default" }),
+            None,
+            deadline,
+        )
         .map(|_| ())
 }
 
@@ -68,6 +86,23 @@ pub fn next_download_event(
     }
 }
 
+/// Stops the download `guid`. A download that already ended is left as it
+/// is.
+pub fn cancel_download(
+    connection: &mut CdpConnection,
+    guid: &str,
+    deadline: Deadline,
+) -> Result<(), AppError> {
+    connection
+        .call(
+            "Browser.cancelDownload",
+            json!({ "guid": guid }),
+            None,
+            deadline,
+        )
+        .map(|_| ())
+}
+
 /// Whether `event` is one of the browser's own download events.
 pub(crate) fn is_download_event(event: &CdpEvent) -> bool {
     event.session_id.is_none() && (event.method == WILL_BEGIN || event.method == PROGRESS)
@@ -86,12 +121,19 @@ pub(crate) fn apply_event(records: &mut Vec<DownloadRecord>, event: &CdpEvent, n
         if records.iter().all(|record| record.guid != guid) {
             records.push(DownloadRecord {
                 guid: guid.to_owned(),
-                source: (text(params, "url"), text(params, "suggestedFilename")),
+                origin: DownloadOrigin {
+                    url: text(params, "url"),
+                    suggested_name: text(params, "suggestedFilename"),
+                    frame_id: text(params, "frameId"),
+                },
                 state: DownloadState::InProgress,
                 bytes: 0,
+                expected: 0,
                 path: None,
-                started_ms: now,
-                finished_ms: None,
+                timing: DownloadTiming {
+                    started_ms: now,
+                    finished_ms: None,
+                },
             });
         }
         return;
@@ -99,11 +141,14 @@ pub(crate) fn apply_event(records: &mut Vec<DownloadRecord>, event: &CdpEvent, n
     let Some(record) = records.iter_mut().find(|record| record.guid == guid) else {
         return;
     };
-    if record.state != DownloadState::InProgress {
+    if !record.running() {
         return;
     }
     if let Some(bytes) = params.get("receivedBytes").and_then(Value::as_u64) {
         record.bytes = bytes;
+    }
+    if let Some(total) = params.get("totalBytes").and_then(Value::as_u64) {
+        record.expected = total;
     }
     if let Some(path) = params.get("filePath").and_then(Value::as_str) {
         record.path = Some(path.to_owned());
@@ -112,11 +157,9 @@ pub(crate) fn apply_event(records: &mut Vec<DownloadRecord>, event: &CdpEvent, n
         .get("state")
         .and_then(Value::as_str)
         .and_then(DownloadState::from_cdp)
+        && state != DownloadState::InProgress
     {
-        record.state = state;
-        if state != DownloadState::InProgress {
-            record.finished_ms = Some(now);
-        }
+        record.finish(state, now);
     }
 }
 

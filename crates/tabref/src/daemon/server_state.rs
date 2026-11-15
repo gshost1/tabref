@@ -6,6 +6,7 @@ use tabref_core::AppError;
 
 use super::activity::Activity;
 use super::tab_locks::TabLocks;
+use crate::commands::downloads;
 use crate::session::Session;
 use crate::session::session_options::SessionOptions;
 use crate::session::tab_claim::TabClaim;
@@ -91,6 +92,25 @@ impl ServerState {
             "attached_tabs": attached,
             "busy_tabs": self.locks.held_count(),
         })
+    }
+
+    /// Folds the download events the idle connections got since their last
+    /// command, so a download that lands between commands is named.
+    pub(crate) fn tend_downloads(&self) {
+        if let Ok(mut pool) = self.pool.lock() {
+            for session in pool.iter_mut() {
+                downloads::tend(session);
+            }
+        }
+    }
+
+    /// Cancels the downloads still running, before the daemon exits.
+    pub(crate) fn retire_downloads(&self) {
+        if let Ok(mut pool) = self.pool.lock() {
+            for session in pool.iter_mut() {
+                downloads::retire(session);
+            }
+        }
     }
 
     fn take_idle(&self) -> Option<Session> {

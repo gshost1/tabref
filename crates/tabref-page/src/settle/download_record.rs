@@ -1,36 +1,32 @@
 use serde::{Deserialize, Serialize};
 
+use super::download_origin::DownloadOrigin;
 use super::download_state::DownloadState;
+use super::download_timing::DownloadTiming;
 
-/// One download the browser announced: its id, the address it came from
-/// and the file name the server suggested, where it stands, the bytes
-/// received, where the file is once known, and when it began and finished
-/// (milliseconds since the Unix epoch).
+/// One download the browser announced: its id, where it came from, where it
+/// stands, the bytes received and the size the server announced (0 when it
+/// did not), where the file is once known, and when it ran.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadRecord {
     pub guid: String,
-    pub source: (String, String),
+    pub origin: DownloadOrigin,
     pub state: DownloadState,
     pub bytes: u64,
+    pub expected: u64,
     pub path: Option<String>,
-    pub started_ms: u64,
-    pub finished_ms: Option<u64>,
+    pub timing: DownloadTiming,
 }
 
 impl DownloadRecord {
-    /// The address the download came from.
-    pub fn url(&self) -> &str {
-        &self.source.0
+    /// Whether the download is still receiving.
+    pub fn running(&self) -> bool {
+        self.state == DownloadState::InProgress
     }
 
-    /// The file name the server suggested.
-    pub fn suggested_name(&self) -> &str {
-        &self.source.1
-    }
-
-    /// How long the download took, once it finished.
-    pub fn elapsed_ms(&self) -> Option<u64> {
-        self.finished_ms
-            .map(|finished| finished.saturating_sub(self.started_ms))
+    /// Marks the download finished in `state` at `now`.
+    pub fn finish(&mut self, state: DownloadState, now: u64) {
+        self.state = state;
+        self.timing.finished_ms = Some(now);
     }
 }

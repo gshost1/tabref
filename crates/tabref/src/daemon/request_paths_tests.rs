@@ -10,7 +10,30 @@ fn open(url: &str) -> Command {
         headed: false,
         new_tab: false,
         download_dir: None,
+        no_download_dir: false,
+        download_max_mb: None,
     }
+}
+
+#[test]
+fn a_relative_download_folder_is_sent_as_the_one_where_the_command_was_typed() {
+    let here = std::env::current_dir().unwrap();
+    let mut typed = open("example.com");
+    if let Command::Open { download_dir, .. } = &mut typed {
+        *download_dir = Some(PathBuf::from("dl"));
+    }
+    let paths = resolved_paths(&typed).unwrap();
+    assert_eq!(paths[1], here.join("dl").to_string_lossy());
+
+    let mut parsed = typed;
+    if let Command::Open { download_dir, .. } = &mut parsed {
+        *download_dir = Some(PathBuf::from("/dl"));
+    }
+    apply_paths(&mut parsed, Some(paths));
+    let Command::Open { download_dir, .. } = parsed else {
+        unreachable!()
+    };
+    assert_eq!(download_dir, Some(here.join("dl")));
 }
 
 #[test]

@@ -6,9 +6,11 @@ use tabref_core::{AppError, Deadline};
 use tabref_page::{DownloadRecord, PageInfo};
 
 use super::action_report::set;
-use super::download_folder::choose_folder;
+use super::download_folder::{choose_cap, choose_folder, clear_folder};
+use super::download_lines::{download_json, download_line};
 use super::downloads;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
+use super::open_request::OpenRequest;
 use super::page_url::resolve_url;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -27,18 +29,24 @@ const SNAPSHOT_RESERVE_MS: u64 = 1_000;
 /// browser may take until one second before the deadline to start the new
 /// document, as a browser that has just started can hold its first page
 /// load for seconds. An address that downloads reports the saved file and
-/// leaves the page as it was. `download_dir` chooses where this browser's
-/// downloads land from now on.
+/// leaves the page as it was. The request may also choose or forget where
+/// this browser's downloads land, and their size cap, from now on.
 pub(crate) fn run(
     session: &mut Session,
     url: &str,
-    (new_tab, download_dir): (bool, Option<&Path>),
+    request: &OpenRequest,
 ) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
-    if let Some(dir) = download_dir {
+    if let Some(dir) = &request.download_dir {
         choose_folder(session, dir)?;
     }
-    if new_tab {
+    if request.clear_download_dir {
+        clear_folder(session);
+    }
+    if let Some(megabytes) = request.download_max_mb {
+        choose_cap(session, megabytes)?;
+    }
+    if request.new_tab {
         let url = new_tab_address(session, url)?;
         let (index, page) = open_tab(session, deadline)?;
         let mut report =
@@ -81,7 +89,8 @@ fn load(
         deadline.capped(Duration::from_millis(commit)),
         deadline.capped(Duration::from_millis(load)),
     );
-    let started = downloads::after_action(session, deadline, downloads::grace_after(&navigated));
+    let grace = downloads::grace_after(&navigated);
+    let started = downloads::after_action(session, page, None, deadline, grace);
     if !started.is_empty() {
         return Ok(downloaded(&started));
     }
@@ -108,8 +117,8 @@ fn load(
 /// An `open` whose address downloaded: one line per download, the page
 /// left as it was.
 fn downloaded(started: &[DownloadRecord]) -> Outcome {
-    let lines: Vec<String> = started.iter().map(downloads::download_line).collect();
-    let data: Vec<serde_json::Value> = started.iter().map(downloads::download_json).collect();
+    let lines: Vec<String> = started.iter().map(download_line).collect();
+    let data: Vec<serde_json::Value> = started.iter().map(download_json).collect();
     Outcome::new(
         lines.join("\n"),
         serde_json::json!({ "opened": "download", "downloads": data }),

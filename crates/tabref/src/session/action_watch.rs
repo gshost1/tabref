@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tabref_cdp::{CdpEvent, wait_for_load};
+use tabref_cdp::{CdpEvent, is_protocol_error, is_target_gone, wait_for_load};
 use tabref_core::{AppError, Deadline};
 use tabref_page::{PageInfo, WatchedAction, follow_late_navigation};
 
@@ -37,16 +37,16 @@ impl Session {
 
     /// Waits for the watched action to settle and reports its effects. A
     /// tab the action opened becomes the current tab once it has loaded, or
-    /// three seconds have passed.
+    /// three seconds have passed; one already gone again, as a popup that
+    /// only downloads, is no new tab.
     pub(crate) fn finish_action(
         &mut self,
         watched: &WatchedAction,
         deadline: Deadline,
     ) -> Result<ActionEffects, AppError> {
         let (settled, page) = watched.finish(self.connection(), deadline)?;
-        let downloads = downloads::after_action(self, deadline, Duration::ZERO);
         let opener = watched.session.target_id.clone();
-        let new_tab = self
+        let opened = self
             .connection()
             .drain_events(|event| is_page_opened_by(event, &opener))
             .last()
@@ -54,11 +54,25 @@ impl Session {
             .and_then(Value::as_str)
             .map(str::to_owned);
         self.connection().discard_events(is_target_event);
-        if let Some(tab) = &new_tab {
-            self.use_tab(tab)?;
-            let page = self.attach(tab)?;
-            let _ = wait_for_load(self.connection(), &page, deadline.capped(NEW_TAB_LOAD));
-        }
+        let downloads = downloads::after_action(
+            self,
+            &watched.session,
+            opened.as_deref(),
+            deadline,
+            Duration::ZERO,
+        );
+        let new_tab = match opened {
+            Some(tab) => match self.attach(&tab) {
+                Ok(page) => {
+                    self.use_tab(&tab)?;
+                    let _ = wait_for_load(self.connection(), &page, deadline.capped(NEW_TAB_LOAD));
+                    Some(tab)
+                }
+                Err(error) if is_target_gone(&error) || is_protocol_error(&error) => None,
+                Err(error) => return Err(error),
+            },
+            None => None,
+        };
         Ok(ActionEffects {
             settled,
             new_tab,

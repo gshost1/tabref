@@ -10,22 +10,20 @@ use crate::cli::command::Command;
 use crate::commands::open::normalize_url;
 
 /// The command's path arguments, resolved in this process's directory: the
-/// address `open` navigates to, the files `upload` sets. `None` for a
-/// command that takes no path.
+/// address `open` navigates to and its download folder, the files `upload`
+/// sets. `None` for a command that takes no path.
 pub(crate) fn resolved_paths(command: &Command) -> Option<Vec<String>> {
     match command {
-        Command::Open { url, .. } => Some(vec![normalize_url(url)]),
-        Command::Upload { files, .. } => Some(
-            files
-                .iter()
-                .map(|file| {
-                    std::path::absolute(file)
-                        .unwrap_or_else(|_| file.clone())
-                        .to_string_lossy()
-                        .into_owned()
-                })
-                .collect(),
-        ),
+        Command::Open {
+            url, download_dir, ..
+        } => {
+            let mut paths = vec![normalize_url(url)];
+            paths.extend(download_dir.iter().map(|dir| absolute_text(dir)));
+            Some(paths)
+        }
+        Command::Upload { files, .. } => {
+            Some(files.iter().map(|file| absolute_text(file)).collect())
+        }
         _ => None,
     }
 }
@@ -42,9 +40,15 @@ pub(crate) fn apply_paths(command: &mut Command, paths: Option<Vec<String>>) {
         return;
     };
     match command {
-        Command::Open { url, .. } => {
-            if let Some(resolved) = paths.into_iter().next() {
+        Command::Open {
+            url, download_dir, ..
+        } => {
+            let mut paths = paths.into_iter();
+            if let Some(resolved) = paths.next() {
                 *url = resolved;
+            }
+            if let Some(dir) = paths.next() {
+                *download_dir = Some(PathBuf::from(dir));
             }
         }
         Command::Upload { files, .. } => {
@@ -52,6 +56,13 @@ pub(crate) fn apply_paths(command: &mut Command, paths: Option<Vec<String>>) {
         }
         _ => {}
     }
+}
+
+fn absolute_text(path: &std::path::Path) -> String {
+    std::path::absolute(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]

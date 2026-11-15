@@ -17,8 +17,14 @@ pub(crate) enum Command {
         #[arg(long)]
         new_tab: bool,
         /// Save this browser's downloads in DIR from now on
-        #[arg(long, value_name = "DIR", value_parser = absolute_path)]
+        #[arg(long, value_name = "DIR", conflicts_with = "no_download_dir")]
         download_dir: Option<PathBuf>,
+        /// Forget the folder --download-dir chose
+        #[arg(long)]
+        no_download_dir: bool,
+        /// Cancel a download past this many megabytes (default 500)
+        #[arg(long, value_name = "MB")]
+        download_max_mb: Option<u64>,
     },
     /// Print the page view: text in reading order, controls with refs
     Snap {
@@ -171,12 +177,6 @@ pub(crate) enum Command {
         #[arg(value_parser = ["start", "status", "stop"])]
         action: String,
     },
-}
-
-/// `text` as an absolute path, made so where the command was typed, as a
-/// daemon runs it from another directory.
-fn absolute_path(text: &str) -> Result<PathBuf, String> {
-    std::path::absolute(text).map_err(|error| error.to_string())
 }
 
 impl Command {

@@ -17,7 +17,7 @@ fn a_download_is_recorded_once_and_followed_to_completion() {
     let mut records = Vec::new();
     let begin = event(
         "Browser.downloadWillBegin",
-        json!({ "guid": "g1", "url": "http://a.test/r.csv", "suggestedFilename": "r.csv" }),
+        json!({ "guid": "g1", "url": "http://a.test/r.csv", "suggestedFilename": "r.csv", "frameId": "F1" }),
     );
     apply_event(&mut records, &begin, 1_000);
     apply_event(&mut records, &begin, 1_100);
@@ -39,12 +39,13 @@ fn a_download_is_recorded_once_and_followed_to_completion() {
     );
     assert_eq!(records.len(), 1);
     let record = &records[0];
-    assert_eq!(record.url(), "http://a.test/r.csv");
-    assert_eq!(record.suggested_name(), "r.csv");
+    assert_eq!(record.origin.url, "http://a.test/r.csv");
+    assert_eq!(record.origin.suggested_name, "r.csv");
     assert_eq!(record.state, DownloadState::Completed);
     assert_eq!(record.bytes, 24);
     assert_eq!(record.path.as_deref(), Some("/d/g1"));
-    assert_eq!(record.elapsed_ms(), Some(340));
+    assert_eq!(record.timing.elapsed_ms(), Some(340));
+    assert_eq!(record.origin.frame_id, "F1");
 }
 
 #[test]

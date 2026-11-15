@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 const PARTIAL_SUFFIX: &str = ".crdownload";
 const FALLBACK_NAME: &str = "download";
 const MAX_COPIES: u32 = 1000;
+const MAX_NAME_BYTES: usize = 240;
 
 /// The size of the finished guid-named file in `dir`, or `None` while it
 /// is missing or still being written (`<guid>.crdownload`). A symbolic link
@@ -43,7 +44,7 @@ pub(crate) fn place(dir: &Path, guid: &str, suggested: &str) -> std::io::Result<
                 return Ok(target);
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) if !target.exists() => {
+            Err(_) if std::fs::symlink_metadata(&target).is_err() => {
                 std::fs::rename(&source, &target)?;
                 return Ok(target);
             }
@@ -57,7 +58,10 @@ pub(crate) fn place(dir: &Path, guid: &str, suggested: &str) -> std::io::Result<
 }
 
 /// A file name that stays inside the folder: the last path component,
-/// control and reserved characters replaced, never empty or only dots.
+/// control and reserved characters replaced, never empty or only dots, and
+/// short enough for any file system once a copy number is added (240
+/// bytes; a longer stem is cut on a character boundary, the extension
+/// kept).
 pub(crate) fn safe_file_name(suggested: &str) -> String {
     let last = suggested.rsplit(['/', '\\']).next().unwrap_or_default();
     let cleaned: String = last
@@ -74,7 +78,25 @@ pub(crate) fn safe_file_name(suggested: &str) -> String {
     if trimmed.is_empty() || trimmed.chars().all(|ch| ch == '.') {
         return FALLBACK_NAME.to_owned();
     }
-    trimmed.to_owned()
+    shortened(trimmed)
+}
+
+fn shortened(name: &str) -> String {
+    if name.len() <= MAX_NAME_BYTES {
+        return name.to_owned();
+    }
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() && extension.len() < 32 => {
+            (stem, format!(".{extension}"))
+        }
+        _ => (name, String::new()),
+    };
+    let room = MAX_NAME_BYTES - extension.len();
+    let mut cut = room.min(stem.len());
+    while !stem.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{extension}", &stem[..cut])
 }
 
 /// `name` for the first copy, then `stem (n).ext`.
