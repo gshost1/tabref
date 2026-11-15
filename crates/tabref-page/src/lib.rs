@@ -6,6 +6,7 @@
 //! press another element would intercept, and read back what they changed.
 
 mod act;
+mod outline;
 mod page;
 mod settle;
 mod tree;
@@ -28,6 +29,27 @@ pub use act::scroll_by::scroll_by;
 pub use act::select_option::select_option;
 pub use act::upload::upload_files;
 pub use act::upload_outcome::UploadOutcome;
+pub use outline::block::Block;
+pub use outline::block_kind::BlockKind;
+pub use outline::build::{build_outline, build_outline_at};
+pub use outline::control::Control;
+pub use outline::dom_capture::{capture_dom, frame_owner_in, read_viewport};
+pub use outline::dom_node::DomNode;
+pub use outline::dom_parse::parse_capture;
+pub use outline::dom_tree::DomTree;
+pub use outline::form_state::FormState;
+pub use outline::frame_stats::FrameStats;
+pub use outline::item::Item;
+pub use outline::node_kind::NodeKind;
+pub use outline::node_layout::NodeLayout;
+pub use outline::outline_input::OutlineInput;
+pub use outline::page_outline::PageOutline;
+pub use outline::ref_label::RefLabel;
+pub use outline::select_option::SelectOption;
+pub use outline::text_match::TextMatch;
+pub use outline::text_runs::{collapse_run, cut_chars, squash};
+pub use outline::text_search::search_text;
+pub use outline::url_resolve::{origin_of, resolve_href, short_href};
 pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
 pub use page::page_scroll::scroll_page;
