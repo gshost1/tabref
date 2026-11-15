@@ -7,7 +7,7 @@ use tabref_core::{AppError, Deadline, DeliverySemantics};
 use tabref_page::{wait_for_text, wait_for_url};
 
 use super::download_lines::{download_json, download_line};
-use super::downloads::wait_download;
+use super::download_wait::wait_download;
 use super::wait_condition::Condition;
 use crate::output::outcome::Outcome;
 use crate::session::Session;

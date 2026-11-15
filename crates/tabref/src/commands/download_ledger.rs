@@ -1,19 +1,19 @@
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions, TryLockError};
 use std::path::PathBuf;
 
 use tabref_core::{AppError, read_bounded, write_atomic};
-use tabref_page::DownloadRecord;
 
 use super::download_folder::state_name;
+use super::kept_download::KeptDownload;
 use crate::session::Session;
 
 const KEPT: usize = 50;
 const MAX_BYTES: u64 = 64 * 1024;
 
-/// The downloads of one browser endpoint that no command has reported
-/// finished yet, oldest first: those still running, and those that
-/// finished while no command watched. Every change runs under a file lock
-/// shared by the tabref processes on this state directory.
+/// The downloads one browser endpoint's commands have seen, oldest first,
+/// each marked with whether a result reported it. Every change runs under
+/// a file lock shared by the tabref processes on this state directory, and
+/// the file is written only when a change altered it.
 #[derive(Debug, Clone)]
 pub(crate) struct DownloadLedger {
     path: PathBuf,
@@ -30,33 +30,73 @@ impl DownloadLedger {
         }
     }
 
-    /// Runs `change` on the kept downloads under the lock and keeps the
-    /// newest 50 it leaves.
+    /// Runs `change` on the kept downloads under the lock, waiting for it,
+    /// and keeps the newest 50 it leaves.
     pub(crate) fn with<T>(
         &self,
-        change: impl FnOnce(&mut Vec<DownloadRecord>) -> T,
+        change: impl FnOnce(&mut Vec<KeptDownload>) -> T,
     ) -> Result<T, AppError> {
-        let lock = OpenOptions::new()
+        let lock = self.lock_file()?;
+        lock.lock()?;
+        self.change(change)
+    }
+
+    /// [`with`](Self::with) when the lock is free right now; `None` when
+    /// another process holds it, so a background chore never blocks.
+    pub(crate) fn try_with<T>(
+        &self,
+        change: impl FnOnce(&mut Vec<KeptDownload>) -> T,
+    ) -> Result<Option<T>, AppError> {
+        let lock = self.lock_file()?;
+        match lock.try_lock() {
+            Ok(()) => self.change(change).map(Some),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Error(error)) => Err(error.into()),
+        }
+    }
+
+    fn lock_file(&self) -> Result<File, AppError> {
+        Ok(OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
-            .open(&self.lock)?;
-        lock.lock()?;
-        let mut records: Vec<DownloadRecord> = read_bounded(&self.path, MAX_BYTES)
+            .open(&self.lock)?)
+    }
+
+    fn change<T>(&self, change: impl FnOnce(&mut Vec<KeptDownload>) -> T) -> Result<T, AppError> {
+        let before: Vec<KeptDownload> = read_bounded(&self.path, MAX_BYTES)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
+        let mut records = before.clone();
         let result = change(&mut records);
         let kept = &records[records.len().saturating_sub(KEPT)..];
-        write_atomic(&self.path, serde_json::to_string(kept)?.as_bytes())?;
+        if kept != before.as_slice() {
+            write_atomic(&self.path, serde_json::to_string(kept)?.as_bytes())?;
+        }
         Ok(result)
     }
 }
 
-/// Puts `record` into `records`, replacing the one with its guid.
-pub(crate) fn merge(records: &mut Vec<DownloadRecord>, record: DownloadRecord) {
-    match records.iter_mut().find(|kept| kept.guid == record.guid) {
-        Some(kept) => *kept = record,
-        None => records.push(record),
+/// Puts `entry` into `kept`, joining it with the entry of its guid: the
+/// newer state of the download unless the kept one already finished, and
+/// the marks of both.
+pub(crate) fn merge(kept: &mut Vec<KeptDownload>, entry: KeptDownload) {
+    let Some(old) = kept
+        .iter_mut()
+        .find(|old| old.record.guid == entry.record.guid)
+    else {
+        kept.push(entry);
+        return;
+    };
+    if old.record.running() || !entry.record.running() {
+        old.record = entry.record;
     }
+    old.reported |= entry.reported;
+    old.watched |= entry.watched;
+    old.batch = entry.batch.or(old.batch);
 }
+
+#[cfg(test)]
+#[path = "download_ledger_tests.rs"]
+mod tests;

@@ -1,7 +1,6 @@
 use tabref_page::{DownloadOrigin, DownloadRecord, DownloadState, DownloadTiming};
 
 use super::past_cap;
-use crate::commands::download_ledger::merge;
 use crate::commands::download_lines::{download_line, file_name};
 
 fn record(guid: &str, bytes: u64, expected: u64) -> DownloadRecord {
@@ -25,18 +24,6 @@ fn a_download_passes_the_cap_by_what_it_received_or_announced() {
     assert!(!past_cap(&record("g", 10, 0), 100));
     assert!(past_cap(&record("g", 101, 0), 100));
     assert!(past_cap(&record("g", 10, 2_000), 100));
-}
-
-#[test]
-fn a_kept_download_is_replaced_by_its_guid() {
-    let mut kept = vec![record("a", 1, 0), record("b", 1, 0)];
-    let mut newer = record("a", 9, 0);
-    newer.state = DownloadState::Completed;
-    merge(&mut kept, newer);
-    merge(&mut kept, record("c", 1, 0));
-    assert_eq!(kept.len(), 3);
-    assert_eq!(kept[0].bytes, 9);
-    assert_eq!(kept[2].guid, "c");
 }
 
 #[test]

@@ -6,7 +6,7 @@ use tabref_core::AppError;
 
 use super::activity::Activity;
 use super::tab_locks::TabLocks;
-use crate::commands::downloads;
+use crate::commands::{download_tend, downloads};
 use crate::session::Session;
 use crate::session::session_options::SessionOptions;
 use crate::session::tab_claim::TabClaim;
@@ -51,15 +51,19 @@ impl ServerState {
         while let Some(mut session) = self.take_idle() {
             let claim = TabClaim::new(Arc::clone(&self.locks), owner, Arc::clone(cancel));
             if session.begin(options, Some(claim)).is_ok() {
+                downloads::begin_command(&session);
                 return Ok(session);
             }
         }
         let claim = TabClaim::new(Arc::clone(&self.locks), owner, Arc::clone(cancel));
-        Session::open_claimed(options, Some(claim))
+        let session = Session::open_claimed(options, Some(claim))?;
+        downloads::begin_command(&session);
+        Ok(session)
     }
 
     /// Returns a session after its command, unless its connection broke.
     pub(crate) fn checkin(&self, mut session: Session) {
+        downloads::end_command(&mut session);
         session.end();
         if session.is_broken() {
             return;
@@ -99,7 +103,7 @@ impl ServerState {
     pub(crate) fn tend_downloads(&self) {
         if let Ok(mut pool) = self.pool.lock() {
             for session in pool.iter_mut() {
-                downloads::tend(session);
+                download_tend::tend(session);
             }
         }
     }
@@ -108,7 +112,7 @@ impl ServerState {
     pub(crate) fn retire_downloads(&self) {
         if let Ok(mut pool) = self.pool.lock() {
             for session in pool.iter_mut() {
-                downloads::retire(session);
+                download_tend::retire(session);
             }
         }
     }

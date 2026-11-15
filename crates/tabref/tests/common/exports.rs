@@ -54,6 +54,12 @@ fn answer(mut stream: TcpStream) {
             vec![7_u8; SLOW_BYTES],
             2_000,
         ),
+        "/bigslow.bin" => (
+            "application/octet-stream",
+            Some("bigslow.bin"),
+            vec![2_u8; BIG_BYTES],
+            2_000,
+        ),
         "/big.bin" => (
             "application/octet-stream",
             Some("big.bin"),

@@ -32,10 +32,8 @@ impl Session {
         Ok(())
     }
 
-    /// Ends the daemon command: a browser tabref did not launch gets its own
-    /// download behaviour back, and the command's tab claims are released.
+    /// Ends the daemon command: its tab claims are released.
     pub(crate) fn end(&mut self) {
-        crate::commands::downloads::end_command(self);
         self.scope.claim = None;
         self.connection.set_cancel(None);
     }

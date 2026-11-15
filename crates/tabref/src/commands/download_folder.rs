@@ -15,18 +15,16 @@ const MB: u64 = 1024 * 1024;
 
 /// Saves `dir` (absolute, created private when new) as this browser's
 /// download folder. tabref's state directory, or a folder inside it, is
-/// refused, through symbolic links too: a page could otherwise save a file
-/// named like tabref's own state there.
+/// refused before anything is created, with symbolic links resolved: a page
+/// could otherwise save a file named like tabref's own state there. A
+/// dangling link is refused too.
 pub(crate) fn choose_folder(session: &mut Session, dir: &Path) -> Result<PathBuf, AppError> {
     let absolute = std::path::absolute(dir)?;
     let root = session.store().base_dir().to_path_buf();
-    if within(&absolute, &root) {
+    if within(&absolute, &root)? {
         return Err(state_folder(&absolute));
     }
     create_private_dir(&absolute)?;
-    if within(&absolute, &root) {
-        return Err(state_folder(&absolute));
-    }
     let name = state_name(session, "download-dir");
     session
         .store()
@@ -65,37 +63,67 @@ pub(crate) fn launched_here(session: &mut Session) -> bool {
     load_launched(session.store()).is_some_and(|browser| browser.port == port)
 }
 
-/// Whether a folder was chosen with `open --download-dir`.
-pub(crate) fn folder_chosen(session: &mut Session) -> bool {
-    let name = state_name(session, "download-dir");
-    session.store().read_state(&name).is_some()
-}
-
 /// The folder this browser's downloads land in, or `None` when the
-/// browser keeps its own.
+/// browser keeps its own. A chosen folder is checked again each time, so
+/// one swapped for a link into the state directory is never used.
 pub(crate) fn download_folder(session: &mut Session) -> Option<PathBuf> {
     let name = state_name(session, "download-dir");
+    let root = session.store().base_dir().to_path_buf();
     if let Some(chosen) = session.store().read_state(&name) {
-        return Some(PathBuf::from(chosen.trim()));
+        let chosen = PathBuf::from(chosen.trim());
+        let safe = within(&chosen, &root).is_ok_and(|inside| !inside);
+        return safe.then_some(chosen);
     }
     if !launched_here(session) {
         return None;
     }
-    let folder = session.store().base_dir().join("downloads");
+    let folder = root.join("downloads");
     create_private_dir(&folder).ok()?;
-    Some(folder)
+    let real = std::fs::symlink_metadata(&folder).is_ok_and(|meta| meta.is_dir());
+    real.then_some(folder)
 }
 
-/// Whether `dir` is `root` or inside it, as written and, once both exist,
-/// with their symbolic links resolved.
-pub(crate) fn within(dir: &Path, root: &Path) -> bool {
-    let root_absolute = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
+/// Whether `dir` is `root` or inside it, as written and with symbolic
+/// links resolved, for a `dir` that need not exist yet: its nearest
+/// existing ancestor is resolved. A dangling link on the way is
+/// `INVALID_ARGS`.
+pub(crate) fn within(dir: &Path, root: &Path) -> Result<bool, AppError> {
+    let root_absolute = std::path::absolute(root)?;
     if dir.starts_with(&root_absolute) {
-        return true;
+        return Ok(true);
     }
-    match (dir.canonicalize(), root.canonicalize()) {
-        (Ok(dir), Ok(root)) => dir.starts_with(root),
-        _ => false,
+    let real_root = root
+        .canonicalize()
+        .unwrap_or_else(|_| root_absolute.clone());
+    Ok(resolved(dir)?.starts_with(real_root))
+}
+
+/// `dir` with its nearest existing ancestor's links resolved and the rest
+/// appended as written.
+fn resolved(dir: &Path) -> Result<PathBuf, AppError> {
+    let mut existing = dir.to_path_buf();
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(meta) = std::fs::symlink_metadata(&existing) {
+            if meta.file_type().is_symlink() && std::fs::metadata(&existing).is_err() {
+                return Err(AppError::invalid_args(format!(
+                    "{} is a link to a folder that does not exist; choose another download folder",
+                    existing.display()
+                )));
+            }
+            let mut real = existing.canonicalize()?;
+            for part in rest.iter().rev() {
+                real.push(part);
+            }
+            return Ok(real);
+        }
+        match (existing.file_name(), existing.parent()) {
+            (Some(name), Some(parent)) => {
+                rest.push(name.to_os_string());
+                existing = parent.to_path_buf();
+            }
+            _ => return Ok(dir.to_path_buf()),
+        }
     }
 }
 

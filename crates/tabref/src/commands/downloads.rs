@@ -1,31 +1,38 @@
-//! Downloads around actions, between commands and in `wait --download`:
-//! the browser's download events turned on for a command, the downloads an
-//! action started followed for a moment, capped and named, and those it
-//! did not see finish kept for a later wait. A browser tabref did not launch
-//! is pointed at a chosen folder only while a command runs.
+//! Downloads around actions: the browser's download events turned on for a
+//! command (and, for a browser tabref did not launch, off again when the
+//! last command on it ends), and the downloads an action started followed
+//! for a moment, capped and named, each kept with a mark of whether the
+//! action reported it.
 
+use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
-use tabref_cdp::{PageSession, list_frames};
-use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
+use tabref_cdp::{CdpConnection, PageSession, list_frames};
+use tabref_core::{AppError, Deadline};
 use tabref_page::{
     DownloadRecord, DownloadState, cancel_download, enable_downloads, next_download_event,
     note_downloads, now_ms, restore_downloads,
 };
 
-use super::download_folder::{download_cap, download_folder, folder_chosen, launched_here};
+use super::download_folder::{download_cap, download_folder, launched_here};
 use super::download_ledger::{DownloadLedger, merge};
-use super::download_lines::{download_json, download_line};
 use super::download_place::{landed_size, place};
+use super::kept_download::KeptDownload;
 use crate::session::Session;
-use serde_json::json;
 
 const LANDING: Duration = Duration::from_millis(3_000);
-const WAIT_POLL: Duration = Duration::from_millis(50);
 const NAVIGATION_GRACE: Duration = Duration::from_millis(1_000);
-const TENDING: u64 = 300;
+const RESTORING: u64 = 300;
 const MB: u64 = 1024 * 1024;
+
+static ACTIVE: Mutex<BTreeMap<u16, usize>> = Mutex::new(BTreeMap::new());
+
+thread_local! {
+    static BATCH: Cell<Option<u64>> = const { Cell::new(None) };
+}
 
 /// Turns the browser's download events on, pointed at this browser's
 /// download folder when it has one.
@@ -34,16 +41,45 @@ pub(crate) fn enable(session: &mut Session, deadline: Deadline) -> Result<(), Ap
     enable_downloads(session.connection(), folder.as_deref(), deadline)
 }
 
-/// At the end of a daemon command: a browser tabref did not launch gets
-/// its own download behaviour back, so the user's later downloads never
-/// land in tabref's folder. A download already running keeps its file.
+/// Notes that a daemon command started on this session's browser.
+pub(crate) fn begin_command(session: &Session) {
+    if let Ok(mut active) = ACTIVE.lock() {
+        *active.entry(session.endpoint().port()).or_default() += 1;
+    }
+}
+
+/// Notes that a daemon command ended. When it was the last one running on
+/// a browser tabref did not launch, that browser gets its default download
+/// behaviour back with no events, so the user's own downloads are never
+/// redirected, capped or reported. A download already running keeps its
+/// file.
 pub(crate) fn end_command(session: &mut Session) {
-    if launched_here(session) || !folder_chosen(session) {
+    let port = session.endpoint().port();
+    let last = ACTIVE.lock().is_ok_and(|mut active| {
+        let count = active.entry(port).or_default();
+        *count = count.saturating_sub(1);
+        *count == 0
+    });
+    if !last || launched_here(session) {
         return;
     }
-    if let Ok(deadline) = Deadline::after(TENDING) {
+    if let Ok(deadline) = Deadline::after(RESTORING) {
         let _ = restore_downloads(session.connection(), deadline);
     }
+}
+
+/// Runs `steps` as one batch: a download a step reports may still be
+/// returned by that batch's `expect download`.
+pub(crate) fn in_batch<T>(batch: u64, steps: impl FnOnce() -> T) -> T {
+    let outer = BATCH.with(|cell| cell.replace(Some(batch)));
+    let result = steps();
+    BATCH.with(|cell| cell.set(outer));
+    result
+}
+
+/// The batch this thread runs, if any.
+pub(crate) fn current_batch() -> Option<u64> {
+    BATCH.with(Cell::get)
 }
 
 /// How long to wait for a download to announce itself after a
@@ -60,9 +96,9 @@ pub(crate) fn grace_after(navigated: &Result<(), AppError>) -> Duration {
 /// three seconds (at most half of what is left of `deadline`), stopped at
 /// the size cap and named once it lands. With `grace`, a download that has
 /// not announced itself yet is waited for that long. A download another
-/// tab's page started is not this action's: it is kept for a later wait,
-/// as is one still running. `opened` is a tab the action opened, whose
-/// downloads count as the action's. A failure here never fails the action.
+/// tab's page started is not this action's and is kept unreported. `opened`
+/// is a tab the action opened, whose downloads count as the action's. A
+/// failure here never fails the action.
 pub(crate) fn after_action(
     session: &mut Session,
     tab: &PageSession,
@@ -81,16 +117,22 @@ pub(crate) fn after_action(
     }
     let cap = download_cap(session);
     let folder = download_folder(session);
+    let elsewhere = other_tabs(session, tab, opened, deadline);
     let landing = deadline.capped(LANDING.min(deadline.remaining() / 2));
     loop {
+        let (mut here, rest): (Vec<_>, Vec<_>) = records
+            .into_iter()
+            .partition(|record| !elsewhere.contains(&record.origin.frame_id));
         enforce_cap(
             session.connection(),
-            &mut records,
+            &mut here,
             cap,
             folder.as_deref(),
             deadline,
         );
-        if !records.iter().any(DownloadRecord::running) {
+        let running = here.iter().any(DownloadRecord::running);
+        records = here.into_iter().chain(rest).collect();
+        if !running {
             break;
         }
         if !next_download_event(session.connection(), &mut records, landing).unwrap_or(false) {
@@ -100,135 +142,41 @@ pub(crate) fn after_action(
     for record in &mut records {
         name_landed(record, folder.as_deref());
     }
-    let elsewhere = other_tabs(session, tab, opened, deadline);
-    let (here, kept): (Vec<_>, Vec<_>) = records
-        .into_iter()
-        .partition(|record| !elsewhere.contains(&record.origin.frame_id));
+    let batch = current_batch();
+    let kept: Vec<KeptDownload> = records
+        .iter()
+        .map(|record| {
+            let here = !elsewhere.contains(&record.origin.frame_id);
+            KeptDownload {
+                record: record.clone(),
+                reported: here && !record.running(),
+                watched: here,
+                batch: batch.filter(|_| here),
+            }
+        })
+        .collect();
     let ledger = DownloadLedger::of(session);
     let _ = ledger.with(|ledger| {
-        for record in here.iter().filter(|record| record.running()) {
-            merge(ledger, record.clone());
-        }
-        for record in kept {
-            merge(ledger, record);
+        for entry in kept {
+            merge(ledger, entry);
         }
     });
-    here
+    records
+        .into_iter()
+        .filter(|record| !elsewhere.contains(&record.origin.frame_id))
+        .collect()
 }
 
-/// Between daemon commands: folds the download events this connection
-/// got into the kept list, stops a download past the cap, and names every
-/// one that landed, so no download stays under its guid.
-pub(crate) fn tend(session: &mut Session) {
-    let Ok(deadline) = Deadline::after(TENDING) else {
-        return;
-    };
-    let folder = download_folder(session);
-    let cap = download_cap(session);
-    let ledger = DownloadLedger::of(session);
-    let _ = ledger.with(|records| {
-        let _ = note_downloads(session.connection(), records, deadline);
-        enforce_cap(
-            session.connection(),
-            records,
-            cap,
-            folder.as_deref(),
-            deadline,
-        );
-        for record in records.iter_mut() {
-            land_from_disk(record, folder.as_deref());
-            name_landed(record, folder.as_deref());
-        }
-    });
-}
-
-/// When the daemon retires: cancels the downloads still running, as no
-/// process will be left to name them.
-pub(crate) fn retire(session: &mut Session) {
-    let Ok(deadline) = Deadline::after(TENDING) else {
-        return;
-    };
-    let ledger = DownloadLedger::of(session);
-    let _ = ledger.with(|records| {
-        for record in records.iter_mut().filter(|record| record.running()) {
-            let _ = cancel_download(session.connection(), &record.guid, deadline);
-            record.finish(DownloadState::Canceled, now_ms());
-        }
-    });
-}
-
-/// Waits within `deadline` for the oldest download no command has
-/// reported finished, and returns it: one an earlier command left running
-/// (found in the folder when its events were missed), one that finished
-/// between commands, or one that starts during the wait.
-pub(crate) fn wait_download(
-    session: &mut Session,
-    deadline: Deadline,
-) -> Result<DownloadRecord, AppError> {
-    enable(session, deadline)?;
-    let folder = download_folder(session);
-    let cap = download_cap(session);
-    let ledger = DownloadLedger::of(session);
-    loop {
-        let done = ledger.with(|records| {
-            let _ = note_downloads(session.connection(), records, deadline);
-            enforce_cap(
-                session.connection(),
-                records,
-                cap,
-                folder.as_deref(),
-                deadline,
-            );
-            for record in records.iter_mut() {
-                land_from_disk(record, folder.as_deref());
-                name_landed(record, folder.as_deref());
-            }
-            let finished = records.iter().position(|record| !record.running());
-            match finished {
-                Some(index) => Ok(records.remove(index)),
-                None => Err(records.iter().find(|record| record.running()).cloned()),
-            }
-        })?;
-        match done {
-            Ok(record) => return finished(record),
-            Err(running) if deadline.is_expired() => {
-                return Err(no_download(deadline, running.as_ref()));
-            }
-            Err(_) => std::thread::sleep(WAIT_POLL.min(deadline.remaining())),
-        }
-    }
-}
-
-fn finished(record: DownloadRecord) -> Result<DownloadRecord, AppError> {
-    match record.state {
-        DownloadState::Canceled | DownloadState::TooLarge { .. } => Err(AppError::new(
-            ErrorCode::ActionFailed,
-            download_line(&record),
-        )
-        .with_details(json!({ "kind": "download_canceled", "download": download_json(&record) }))
-        .with_disposition(DeliverySemantics::delivered_unverified())),
-        _ => Ok(record),
-    }
-}
-
-fn no_download(deadline: Deadline, running: Option<&DownloadRecord>) -> AppError {
-    let waited = deadline.elapsed().as_millis();
-    let message = match running {
-        Some(record) => format!("{} after {waited} ms", download_line(record)),
-        None => format!("no download started or finished within {waited} ms"),
-    };
-    AppError::timeout(message)
-        .with_suggestion(
-            "Click the control that starts the download first, or pass a longer --timeout",
-        )
-        .with_details(json!({ "kind": "download_timeout", "timeout_ms": deadline.timeout_ms() }))
+/// Whether the download received, or announced, more than `cap` bytes.
+pub(crate) fn past_cap(record: &DownloadRecord, cap: u64) -> bool {
+    record.bytes.max(record.expected) > cap
 }
 
 /// Stops every download past `cap` bytes, received or announced: a
 /// running one is canceled, and one that finished before tabref saw it
 /// pass the cap has its file in `folder` removed.
-fn enforce_cap(
-    connection: &mut tabref_cdp::CdpConnection,
+pub(crate) fn enforce_cap(
+    connection: &mut CdpConnection,
     records: &mut [DownloadRecord],
     cap: u64,
     folder: Option<&Path>,
@@ -241,13 +189,14 @@ fn enforce_cap(
                 let _ = cancel_download(connection, &record.guid, deadline);
             }
             DownloadState::Completed => {
-                let file = record.path.clone().or_else(|| {
-                    folder.map(|dir| dir.join(&record.guid).to_string_lossy().into_owned())
-                });
-                if let Some(file) =
-                    file.filter(|file| folder.is_some_and(|dir| Path::new(file).starts_with(dir)))
-                {
-                    let _ = std::fs::remove_file(file);
+                if let Some(dir) = folder {
+                    let file = record
+                        .path
+                        .clone()
+                        .unwrap_or_else(|| dir.join(&record.guid).to_string_lossy().into_owned());
+                    if Path::new(&file).starts_with(dir) {
+                        let _ = std::fs::remove_file(file);
+                    }
                 }
                 record.path = None;
             }
@@ -257,9 +206,33 @@ fn enforce_cap(
     }
 }
 
-/// Whether the download received, or announced, more than `cap` bytes.
-pub(crate) fn past_cap(record: &DownloadRecord, cap: u64) -> bool {
-    record.bytes.max(record.expected) > cap
+/// Marks a running download finished when its file landed in `folder`,
+/// for one whose events this process never saw.
+pub(crate) fn land_from_disk(record: &mut DownloadRecord, folder: Option<&Path>) {
+    if !record.running() {
+        return;
+    }
+    if let Some(size) = folder.and_then(|dir| landed_size(dir, &record.guid)) {
+        record.bytes = size;
+        record.finish(DownloadState::Completed, now_ms());
+    }
+}
+
+/// Gives a landed guid-named download its suggested name in `folder`; one
+/// the browser saved under its own name keeps it.
+pub(crate) fn name_landed(record: &mut DownloadRecord, folder: Option<&Path>) {
+    let Some(folder) = folder else {
+        return;
+    };
+    if record.state != DownloadState::Completed {
+        return;
+    }
+    let guid_path = folder.join(&record.guid).to_string_lossy().into_owned();
+    if record.path.as_deref().is_some_and(|path| path != guid_path) {
+        return;
+    }
+    let placed = place(folder, &record.guid, &record.origin.suggested_name);
+    record.path = Some(placed.map_or(guid_path, |path| path.to_string_lossy().into_owned()));
 }
 
 /// The ids of the other open tabs, whose main frames carry them: a
@@ -285,35 +258,6 @@ fn other_tabs(
                 .collect()
         })
         .unwrap_or_default()
-}
-
-/// Marks a running download finished when its file landed in `folder`,
-/// for one whose events this process never saw.
-fn land_from_disk(record: &mut DownloadRecord, folder: Option<&Path>) {
-    if !record.running() {
-        return;
-    }
-    if let Some(size) = folder.and_then(|dir| landed_size(dir, &record.guid)) {
-        record.bytes = size;
-        record.finish(DownloadState::Completed, now_ms());
-    }
-}
-
-/// Gives a landed guid-named download its suggested name in `folder`; one
-/// the browser saved under its own name keeps it.
-fn name_landed(record: &mut DownloadRecord, folder: Option<&Path>) {
-    let Some(folder) = folder else {
-        return;
-    };
-    if record.state != DownloadState::Completed {
-        return;
-    }
-    let guid_path = folder.join(&record.guid).to_string_lossy().into_owned();
-    if record.path.as_deref().is_some_and(|path| path != guid_path) {
-        return;
-    }
-    let placed = place(folder, &record.guid, &record.origin.suggested_name);
-    record.path = Some(placed.map_or(guid_path, |path| path.to_string_lossy().into_owned()));
 }
 
 #[cfg(test)]
