@@ -493,6 +493,8 @@ def main():
         print(f"SKIP {why}" if why else f"arm {arm} ready", flush=True)
         if why is None:
             ready.append(arm)
+    if not ready:
+        raise SystemExit("no arm is ready")
     Path(a.out).mkdir(parents=True, exist_ok=True)
     started = False
     try:
