@@ -78,7 +78,7 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
 /// Runs `command` against `session`, in-process or inside the daemon.
 pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
-        Command::Open { url, .. } => open::run(session, url),
+        Command::Open { url, new_tab, .. } => open::run(session, url, *new_tab),
         Command::Snap {
             all,
             root,

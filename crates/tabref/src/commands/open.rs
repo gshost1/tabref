@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::time::Duration;
 
-use tabref_cdp::navigate_by;
-use tabref_core::AppError;
+use tabref_cdp::{activate_target, create_background_tab, navigate_by};
+use tabref_core::{AppError, Deadline};
 use tabref_page::PageInfo;
 
 use super::action_report::set;
@@ -16,13 +16,15 @@ use crate::view::view_scope::ViewScope;
 const SCHEMES: &[&str] = &["about:", "data:", "file:", "chrome:", "javascript:"];
 const SNAPSHOT_RESERVE_MS: u64 = 1_000;
 
-/// Navigates the current tab to `url` and prints the loaded page's view,
-/// so reading it costs no second command. A page that has not fired `load` after three quarters of the
+/// Navigates the current tab to `url`, or a new tab that becomes the
+/// current one when `new_tab` is set, and prints the loaded page's view,
+/// so reading it costs no second command. A relative address resolves
+/// against the page it was given from. A page that has not fired `load` after three quarters of the
 /// deadline is snapshotted as it stands, with a note. The browser may take
 /// until one second before the deadline to start the new document, as a
 /// browser that has just started can hold its first page load for seconds.
-pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError> {
-    let page = session.page()?;
+pub(crate) fn run(session: &mut Session, url: &str, new_tab: bool) -> Result<Outcome, AppError> {
+    let mut page = session.page()?;
     let deadline = session.deadline();
     let url = normalize_url(url);
     let url = if is_relative(&url) {
@@ -30,6 +32,14 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
         resolve_url(&current, &url)
     } else {
         url
+    };
+    let opened = match new_tab {
+        true => {
+            let index = open_tab(session, deadline)?;
+            page = session.page()?;
+            Some(index)
+        }
+        false => None,
     };
     let remaining = deadline.remaining_ms();
     let load = remaining * 3 / 4;
@@ -55,12 +65,30 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
         report
             .push_line("note: the page had not finished loading; snap again if parts are missing");
     }
+    if let Some(index) = opened {
+        report.text = format!("new tab [{index}]\n{}", report.text);
+        set(&mut report.data, "new_tab", serde_json::json!(index));
+    }
     set(
         &mut report.data,
         "load_finished",
         serde_json::json!(!unfinished),
     );
     Ok(report)
+}
+
+/// Opens a blank tab, brings it to the front and makes it the current tab,
+/// for an address to load in. Returns its index, as `tabref tabs` lists
+/// it.
+pub(crate) fn open_tab(session: &mut Session, deadline: Deadline) -> Result<usize, AppError> {
+    let tab = create_background_tab(session.connection(), "about:blank", deadline)?;
+    activate_target(session.connection(), &tab, deadline)?;
+    session.use_tab(&tab)?;
+    let tabs = session.tabs()?;
+    Ok(tabs
+        .iter()
+        .position(|listed| listed.target_id == tab)
+        .unwrap_or(tabs.len().saturating_sub(1)))
 }
 
 /// A navigation the browser did not start in time, for `open` alone:

@@ -10,7 +10,7 @@ use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_elemen
 
 use super::act_target::resolve_target;
 use super::batch_step::BatchStep;
-use super::open::normalize_url;
+use super::open::{normalize_url, open_tab};
 use super::page_url::{resolve_url, short_url};
 use super::page_view::current_page_view;
 use super::step_done::StepDone;
@@ -33,14 +33,26 @@ pub(crate) fn open_step(
     last: bool,
     deadline: Deadline,
 ) -> Result<StepDone, AppError> {
-    let [address] = args else {
-        return Err(AppError::invalid_args(
-            "open takes one address, as in: open /admin/",
-        ));
+    let (new_tab, address) = match args {
+        [flag, address] if !flag.quoted && flag.text == "--new-tab" => (true, address),
+        [address] => (false, address),
+        _ => {
+            return Err(AppError::invalid_args(
+                "open takes one address, as in: open /admin/ or open --new-tab /help",
+            ));
+        }
     };
-    let page = session.page()?;
+    let mut page = session.page()?;
     let current = PageInfo::read(session.connection(), &page.target_id, deadline)?.url;
     let url = normalize_url(&resolve_url(&current, &address.text));
+    let opened = match new_tab {
+        true => {
+            let index = open_tab(session, deadline)?;
+            page = session.page()?;
+            Some(index)
+        }
+        false => None,
+    };
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
     match navigate(session.connection(), &page, &url, navigation) {
         Ok(()) => {}
@@ -54,6 +66,10 @@ pub(crate) fn open_step(
         quote_text(&info.title)
     );
     let mut data = json!({ "action": "open", "url": info.url, "title": info.title });
+    if let Some(index) = opened {
+        text.push_str(&format!(" (new tab [{index}])"));
+        data["new_tab"] = json!(index);
+    }
     if last {
         let report = current_page_view(session)?;
         text.push('\n');

@@ -13,6 +13,9 @@ pub(crate) enum Command {
         /// With --launch: show the browser window instead of running headless
         #[arg(long)]
         headed: bool,
+        /// Open the address in a new tab, which becomes the current tab
+        #[arg(long)]
+        new_tab: bool,
     },
     /// Print the page view: text in reading order, controls with refs
     Snap {
