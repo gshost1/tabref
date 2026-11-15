@@ -73,8 +73,10 @@ fn two_launches_on_a_new_profile_share_one_browser() {
 
     assert!(
         a.status.success() && b.status.success(),
-        "{}{}",
+        "{}{}{}{}",
+        String::from_utf8_lossy(&a.stdout),
         String::from_utf8_lossy(&a.stderr),
+        String::from_utf8_lossy(&b.stdout),
         String::from_utf8_lossy(&b.stderr)
     );
     assert!(pids.0.is_some());

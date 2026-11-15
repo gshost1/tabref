@@ -22,18 +22,23 @@ fn spellings_that_dodge_the_refusals_are_refused_too() {
     let home = harness_home("profile-dodge");
     let config = harness_home("profile-dodge-config");
     let foreign = harness_home("profile-dodge-foreign");
+    let parent = home.parent().unwrap();
+    let home_name = home.file_name().unwrap();
+    let missing = parent.join(format!("{}-missing", home_name.to_string_lossy()));
     let dirs = Dirs {
-        homes: vec![home.clone(), config.clone(), foreign.clone()],
+        homes: vec![
+            home.clone(),
+            config.clone(),
+            foreign.clone(),
+            missing.clone(),
+        ],
     };
     std::fs::create_dir_all(config.join("google-chrome")).unwrap();
     std::fs::write(foreign.join("Local State"), "{}").unwrap();
     std::fs::set_permissions(&foreign, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let parent = home.parent().unwrap();
-    let home_name = home.file_name().unwrap();
     let cases = [
         config.join("chromium").join("..").join("google-chrome"),
-        parent
-            .join("missing")
+        missing
             .join("nope")
             .join("..")
             .join("..")
@@ -47,10 +52,7 @@ fn spellings_that_dodge_the_refusals_are_refused_too() {
         .iter()
         .map(|dir| launch_on(&home, &config, dir))
         .collect();
-    let made = (
-        config.join("chromium").exists(),
-        parent.join("missing").exists(),
-    );
+    let made = (config.join("chromium").exists(), missing.exists());
     drop(dirs);
 
     for (dir, run) in cases.iter().zip(&runs) {

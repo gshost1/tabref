@@ -86,6 +86,9 @@ pub(crate) fn prepare_profile(dir: &Path, deadline: Deadline) -> Result<(PathBuf
     }
     if !dir.exists() {
         create_private_dir(&dir)?;
+        if let Some(error) = unfit_existing(&dir) {
+            return Err(error);
+        }
     }
     mark(&dir)?;
     let dir = std::fs::canonicalize(&dir)?;
@@ -149,9 +152,6 @@ pub(crate) fn unfit_existing(dir: &Path) -> Option<AppError> {
 
 fn mark(dir: &Path) -> Result<(), AppError> {
     let marker = dir.join(PROFILE_MARKER);
-    if marker.exists() {
-        return Ok(());
-    }
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -159,9 +159,14 @@ fn mark(dir: &Path) -> Result<(), AppError> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options.open(marker)?;
-    std::io::Write::write_all(&mut file, b"a browser profile tabref made\n")?;
-    Ok(())
+    match options.open(marker) {
+        Ok(mut file) => {
+            std::io::Write::write_all(&mut file, b"a browser profile tabref made\n")?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn lock(dir: &Path, deadline: Deadline) -> Result<File, AppError> {

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{PROFILE_MARKER, normalize, refusal, same_dir, unfit_existing};
+use super::{PROFILE_MARKER, mark, normalize, refusal, same_dir, unfit_existing};
 
 fn temp(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("tabref-lp-{name}-{}", std::process::id()));
@@ -146,4 +146,13 @@ fn a_directory_others_may_write_is_refused() {
     std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
     let _ = std::fs::remove_dir_all(&base);
     assert!(open.unwrap().contains("writable by others"));
+}
+
+#[test]
+fn a_profile_another_launch_just_marked_is_marked_again_without_error() {
+    let base = temp("mark");
+    let first = mark(&base);
+    let second = mark(&base);
+    let _ = std::fs::remove_dir_all(&base);
+    assert!(first.is_ok() && second.is_ok(), "{second:?}");
 }
