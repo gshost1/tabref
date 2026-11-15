@@ -121,3 +121,11 @@ class Answers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PwGuideReadable(unittest.TestCase):
+    def test_pw_gets_its_skills_folder_and_no_other_arm_does(self):
+        from harness import arms
+        self.assertEqual(arms.web_extra_args("pw"), ["--add-dir", str(arms.skills_dir())])
+        for arm in ("tabref", "ab", "bh", "ad-14"):
+            self.assertEqual(arms.web_extra_args(arm), [])

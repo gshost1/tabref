@@ -366,6 +366,7 @@ class Runner:
             env["AGENT_BROWSER_SOCKET_DIR"] = ab_sock
         cmd = [str(core.claude_bin()), "-p", prompt, "--safe-mode", "--tools", "Bash", "--allowedTools",
                *arms.web_allowed_tools(arm), "--append-system-prompt", arms.web_system_prompt(arm, cdp_port),
+               *arms.web_extra_args(arm),
                "--model", a.model, "--output-format", "stream-json", "--verbose", "--no-session-persistence"]
         t0 = time.time()
         since = t0 - 1

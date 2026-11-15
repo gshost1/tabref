@@ -45,5 +45,12 @@ def web_allowed_tools(arm):
     return base + ["Bash(cat:*)", f"Bash({WEB_TOOL[arm]}:*)"]
 
 
+def web_extra_args(arm):
+    """pw's guide is a file outside the run's folder. Claude Code refuses `cat` there even with Bash(cat:*) allowed
+    ("requires approval"), so every pw run of the earlier passes worked without its guide. Adding the skills folder
+    as a working directory lets it read the guide the prompt names; the other arms print theirs from their CLI."""
+    return ["--add-dir", str(skills_dir())] if arm == "pw" else []
+
+
 def skills_dir():
     return Path(_c.SKILLS)
