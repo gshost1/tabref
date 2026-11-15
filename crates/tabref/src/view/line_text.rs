@@ -132,11 +132,14 @@ fn words(text: &str) -> usize {
         .count()
 }
 
-/// For each item, whether it is a text run that only repeats the name of
-/// the control beside it, as a `<label>` around a field does.
-pub(crate) fn label_echoes(items: &[Item]) -> Vec<bool> {
+/// For each item, the text a run keeps once the name of the control just
+/// before or after it is taken off its edge, as a `<label>` around a field
+/// repeats it; `None` for an item that stays as it is.
+pub(crate) fn label_echoes(items: &[Item]) -> Vec<Option<String>> {
     let name_at = |position: usize| match items.get(position) {
-        Some(Item::Control(control)) => Some(normalized(&control.name)),
+        Some(Item::Control(control)) if !control.name.trim().is_empty() => {
+            Some(squash(&control.name))
+        }
         _ => None,
     };
     items
@@ -144,16 +147,45 @@ pub(crate) fn label_echoes(items: &[Item]) -> Vec<bool> {
         .enumerate()
         .map(|(position, item)| {
             let Item::Text(run) = item else {
-                return false;
+                return None;
             };
-            let text = normalized(run);
-            !text.is_empty()
-                && (name_at(position + 1).as_deref() == Some(text.as_str())
-                    || position.checked_sub(1).and_then(name_at).as_deref() == Some(text.as_str()))
+            let mut text = squash(run);
+            let before = position.checked_sub(1).and_then(name_at);
+            let after = name_at(position + 1);
+            let mut changed = false;
+            if let Some(name) = before {
+                if let Some(rest) = strip_prefix_ignoring_case(&text, &name) {
+                    text = rest;
+                    changed = true;
+                }
+            }
+            if let Some(name) = after {
+                if let Some(rest) = strip_suffix_ignoring_case(&text, &name) {
+                    text = rest;
+                    changed = true;
+                }
+            }
+            changed.then(|| {
+                format!(
+                    " {} ",
+                    text.trim_matches(|c: char| c.is_whitespace() || c == ':')
+                )
+            })
         })
         .collect()
 }
 
-fn normalized(text: &str) -> String {
-    squash(text).trim_end_matches(':').trim().to_lowercase()
+fn strip_prefix_ignoring_case(text: &str, prefix: &str) -> Option<String> {
+    let head = text.get(..prefix.len())?;
+    let rest = &text[prefix.len()..];
+    (head.eq_ignore_ascii_case(prefix) && (rest.is_empty() || rest.starts_with([' ', ':'])))
+        .then(|| rest.to_owned())
+}
+
+fn strip_suffix_ignoring_case(text: &str, suffix: &str) -> Option<String> {
+    let base = text.trim_end_matches(':').trim_end();
+    let cut = base.len().checked_sub(suffix.len())?;
+    let (kept, tail) = (base.get(..cut)?, base.get(cut..)?);
+    (tail.eq_ignore_ascii_case(suffix) && (kept.is_empty() || kept.ends_with(' ')))
+        .then(|| kept.to_owned())
 }

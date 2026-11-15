@@ -208,14 +208,22 @@ impl<'a> BlockRenderer<'a> {
         }
     }
 
-    fn flush_run(&mut self, block: &Block, echoes: &[bool], run: &mut Vec<usize>, depth: usize) {
+    fn flush_run(
+        &mut self,
+        block: &Block,
+        echoes: &[Option<String>],
+        run: &mut Vec<usize>,
+        depth: usize,
+    ) {
         if run.is_empty() {
             return;
         }
         let items: Vec<Item> = run
             .drain(..)
-            .filter(|position| !echoes.get(*position).copied().unwrap_or(false))
-            .filter_map(|position| block.items.get(position).cloned())
+            .filter_map(|position| match echoes.get(position).cloned().flatten() {
+                Some(kept) => Some(Item::Text(kept)),
+                None => block.items.get(position).cloned(),
+            })
             .collect();
         let mut line = LineText::new(self.options, is_prose(&items));
         for item in &items {
@@ -253,8 +261,9 @@ impl<'a> BlockRenderer<'a> {
         let echoes = label_echoes(&block.items);
         for (position, item) in block.items.iter().enumerate() {
             let Item::Block(inner) = item else {
-                if !echoes.get(position).copied().unwrap_or(false) {
-                    line.push_item(item);
+                match echoes.get(position).cloned().flatten() {
+                    Some(kept) => line.push_item(&Item::Text(kept)),
+                    None => line.push_item(item),
                 }
                 continue;
             };

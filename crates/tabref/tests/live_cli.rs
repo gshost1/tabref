@@ -158,7 +158,7 @@ fn dialogs_are_accepted_and_new_tabs_become_current() {
         alerted.stdout
     );
 
-    let elsewhere = opened.ref_for("Finish elsewhere ->");
+    let elsewhere = opened.ref_for("Finish elsewhere");
     let popped = tabref.ok(&["click", &elsewhere]);
     assert!(
         popped.stdout.contains("opened a new tab"),
