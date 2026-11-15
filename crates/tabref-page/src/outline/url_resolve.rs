@@ -23,10 +23,7 @@ pub fn resolve_href(base: &str, href: &str) -> String {
     if href.starts_with('#') {
         return format!("{base_no_fragment}{href}");
     }
-    let base_path = base_path_full
-        .split(['?', '#'])
-        .next()
-        .unwrap_or_default();
+    let base_path = base_path_full.split(['?', '#']).next().unwrap_or_default();
     if href.starts_with('?') {
         let path = if base_path.is_empty() { "/" } else { base_path };
         return format!("{origin}{path}{href}");
@@ -80,7 +77,10 @@ fn has_scheme(href: &str) -> bool {
         && scheme
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-        && scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
         && !href[..colon].contains('/')
 }
 

@@ -104,7 +104,10 @@ fn cap_chrome(lines: Vec<ViewLine>, report: &mut CutReport) -> Vec<ViewLine> {
         if *place == CHROME_LINES + 1 {
             capped.push(ViewLine {
                 depth: line.depth,
-                text: format!("… {} more lines here: tabref snap --all", total - CHROME_LINES),
+                text: format!(
+                    "… {} more lines here: tabref snap --all",
+                    total - CHROME_LINES
+                ),
                 heading: None,
                 chrome: Some(group),
             });

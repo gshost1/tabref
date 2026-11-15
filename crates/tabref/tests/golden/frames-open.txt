@@ -1,0 +1,5 @@
+page "Frames" http://127.0.0.1:PORT/frames
+# Story
+The council approved the new bridge on Tuesday.
+frames: 3 not shown: 3 cross-origin (ads, widgets)
+-- 2 lines, 56 chars, all shown

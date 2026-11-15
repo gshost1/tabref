@@ -7,7 +7,13 @@ use super::walk_context::WalkContext;
 
 const MAX_FRAME_DEPTH: usize = 4;
 const LARGE_FRAME_SHARE: f64 = 0.25;
-const FORM_ROLES: &[&str] = &["textfield", "combobox", "checkbox", "radiobutton", "listbox"];
+const FORM_ROLES: &[&str] = &[
+    "textfield",
+    "combobox",
+    "checkbox",
+    "radiobutton",
+    "listbox",
+];
 
 impl OutlineBuilder<'_> {
     /// Reads the document an `<iframe>` shows into a frame block, or counts
@@ -22,7 +28,11 @@ impl OutlineBuilder<'_> {
         let Some(node) = tree.node(index) else {
             return;
         };
-        let Some(layout) = node.layout.as_ref().filter(|layout| layout.visible && !layout.is_tiny()) else {
+        let Some(layout) = node
+            .layout
+            .as_ref()
+            .filter(|layout| layout.visible && !layout.is_tiny())
+        else {
             self.frames.tiny += 1;
             return;
         };
@@ -32,7 +42,11 @@ impl OutlineBuilder<'_> {
         }
         let area_share = {
             let [width, height] = self.input.viewport;
-            if width > 0.0 && height > 0.0 { layout.area() / (width * height) } else { 0.0 }
+            if width > 0.0 && height > 0.0 {
+                layout.area() / (width * height)
+            } else {
+                0.0
+            }
         };
         let owner = (tree.target_id.clone(), node.backend_id);
         let (target, cross_target) = if let Some(document) = node.form.content_document {
@@ -42,7 +56,11 @@ impl OutlineBuilder<'_> {
             (capture, true)
         };
         let Some((capture, document)) = target else {
-            let page_origin = self.captures.first().and_then(|trees| trees.first()).and_then(|tree| origin_of(&tree.url));
+            let page_origin = self
+                .captures
+                .first()
+                .and_then(|trees| trees.first())
+                .and_then(|tree| origin_of(&tree.url));
             let src = node.attr("src").unwrap_or_default();
             if origin_of(src).is_some() && origin_of(src) != page_origin {
                 self.frames.cross_origin += 1;
@@ -67,7 +85,8 @@ impl OutlineBuilder<'_> {
             .and_then(|trees| trees.get(document))
             .map(|tree| tree.url.clone())
             .unwrap_or_default();
-        block.label = origin_of(&frame_url).map(|origin| origin.trim_start_matches("https://").to_owned());
+        block.label =
+            origin_of(&frame_url).map(|origin| origin.trim_start_matches("https://").to_owned());
         let body = self
             .captures
             .get(capture)
@@ -78,8 +97,13 @@ impl OutlineBuilder<'_> {
             self.frames.empty += 1;
             return;
         }
-        let page_origin = self.captures.first().and_then(|trees| trees.first()).and_then(|tree| origin_of(&tree.url));
-        let cross_origin = cross_target || origin_of(&frame_url) != page_origin;
+        let page_origin = self
+            .captures
+            .first()
+            .and_then(|trees| trees.first())
+            .and_then(|tree| origin_of(&tree.url));
+        let frame_origin = origin_of(&frame_url);
+        let cross_origin = cross_target || (frame_origin.is_some() && frame_origin != page_origin);
         if cross_origin && area_share < LARGE_FRAME_SHARE && !has_field(&block) {
             self.frames.cross_origin += 1;
             return;

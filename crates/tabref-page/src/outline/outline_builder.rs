@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::block::Block;
 use super::block_kind::BlockKind;
+use super::container::is_container;
 use super::control_build::control_of;
 use super::dom_tree::DomTree;
 use super::element_kind::{is_block_display, is_sectioning, is_skipped, semantic_kind};
@@ -14,7 +15,6 @@ use super::repeat_key::repeat_key;
 use super::shown_map::ShownMap;
 use super::text_runs::collapse_run;
 use super::walk_context::WalkContext;
-use super::container::is_container;
 
 const MAX_DEPTH: usize = 256;
 
@@ -80,7 +80,10 @@ impl<'a> OutlineBuilder<'a> {
             return;
         };
         for child in &node.children {
-            if tree.node(*child).is_some_and(|child| child.tag() == "SUMMARY") {
+            if tree
+                .node(*child)
+                .is_some_and(|child| child.tag() == "SUMMARY")
+            {
                 self.visit(context, *child, into);
             }
         }
@@ -99,7 +102,11 @@ impl<'a> OutlineBuilder<'a> {
         match &node.kind {
             NodeKind::Text(text) => {
                 if node.is_shown() {
-                    let run = if context.in_pre { text.clone() } else { collapse_run(text) };
+                    let run = if context.in_pre {
+                        text.clone()
+                    } else {
+                        collapse_run(text)
+                    };
                     push_text(into, &run);
                 }
             }
@@ -150,7 +157,8 @@ impl<'a> OutlineBuilder<'a> {
             control = Some(found);
         }
         let kind = semantic_kind(node, context.in_section).or_else(|| {
-            (node.layout.is_some() && is_block_display(node.display())).then_some(BlockKind::Generic)
+            (node.layout.is_some() && is_block_display(node.display()))
+                .then_some(BlockKind::Generic)
         });
         let inner = WalkContext {
             in_section: context.in_section || is_sectioning(node),

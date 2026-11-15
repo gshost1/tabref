@@ -83,16 +83,22 @@ impl Run {
             .unwrap_or_else(|error| panic!("not JSON ({error}): {}\n{}", self.stdout, self.stderr))
     }
 
-    /// The first ref on the line that contains `needle`.
+    /// The ref nearest before the first `needle` on its line: the ref of
+    /// the control token (`[@s1:e4 button Save]`) that holds `needle`.
     pub fn ref_for(&self, needle: &str) -> String {
-        let line = self
+        let at = self
             .stdout
-            .lines()
-            .find(|line| line.contains(needle))
-            .unwrap_or_else(|| panic!("no line with {needle}:\n{}", self.stdout));
-        line.split_whitespace()
-            .find(|word| word.starts_with("@s"))
-            .unwrap_or_else(|| panic!("no ref on: {line}"))
+            .find(needle)
+            .unwrap_or_else(|| panic!("no {needle} in:\n{}", self.stdout));
+        let line_start = self.stdout[..at].rfind('\n').map_or(0, |end| end + 1);
+        let start = self.stdout[line_start..at]
+            .rfind("@s")
+            .map(|offset| line_start + offset)
+            .unwrap_or_else(|| panic!("no ref before {needle} in:\n{}", self.stdout));
+        self.stdout[start..]
+            .split(|c: char| c.is_whitespace() || c == ']')
+            .next()
+            .unwrap_or_default()
             .to_owned()
     }
 }

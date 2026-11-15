@@ -80,7 +80,10 @@ impl<'a> BlockRenderer<'a> {
                 self.chrome = Some(self.chrome_groups);
             }
         }
-        match self.pack(block).filter(|line| line.chars().count() <= LINE_MAX) {
+        match self
+            .pack(block)
+            .filter(|line| line.chars().count() <= LINE_MAX)
+        {
             Some(line) => self.push(depth, format!("{title}: {line}"), None),
             None => {
                 self.push(depth, format!("{title}:"), None);
@@ -103,12 +106,19 @@ impl<'a> BlockRenderer<'a> {
                 }
             }
         }
-        let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+        let lines: Vec<&str> = text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
         for line in lines.iter().take(PRE_LINES) {
             self.push(depth, format!("| {}", line.trim_end()), None);
         }
         if lines.len() > PRE_LINES {
-            self.push(depth, format!("| … {} more lines", lines.len() - PRE_LINES), None);
+            self.push(
+                depth,
+                format!("| … {} more lines", lines.len() - PRE_LINES),
+                None,
+            );
         }
     }
 
@@ -124,7 +134,7 @@ impl<'a> BlockRenderer<'a> {
             }
         }
         let echoes = label_echoes(&block.items);
-        let mut members: Vec<(&str, usize, usize)> = Vec::new();
+        let mut members: Vec<(&str, usize, usize, bool)> = Vec::new();
         let mut run: Vec<usize> = Vec::new();
         for (position, item) in block.items.iter().enumerate() {
             let Item::Block(inner) = item else {
@@ -135,9 +145,17 @@ impl<'a> BlockRenderer<'a> {
             let nested = inner.key.is_some() && inner.key == block.key;
             let before = self.lines.len();
             self.render_block(inner, if nested { depth + 1 } else { depth });
-            let repeated = inner.key.as_deref().filter(|key| totals.get(key).copied().unwrap_or(0) >= 2);
+            let repeated = inner
+                .key
+                .as_deref()
+                .filter(|key| totals.get(key).copied().unwrap_or(0) >= 2);
             if let Some(key) = repeated {
-                members.push((key, before, self.lines.len()));
+                members.push((
+                    key,
+                    before,
+                    self.lines.len(),
+                    inner.blocks().next().is_some(),
+                ));
             }
         }
         self.flush_run(block, &echoes, &mut run, depth);
@@ -145,25 +163,32 @@ impl<'a> BlockRenderer<'a> {
         keys.sort_unstable();
         keys.dedup();
         for key in keys {
-            let ranges: Vec<(usize, usize)> = members
+            let group: Vec<&(&str, usize, usize, bool)> = members
                 .iter()
                 .filter(|member| member.0 == key && member.2 > member.1)
-                .map(|member| (member.1, member.2))
                 .collect();
-            self.mark_group(&ranges, depth);
+            let structured = group.iter().any(|member| member.3);
+            let ranges: Vec<(usize, usize)> =
+                group.iter().map(|member| (member.1, member.2)).collect();
+            self.mark_group(&ranges, depth, structured);
         }
     }
 
-    /// Marks the members of one repeated group: `- ` before each when every
-    /// member is one line, else `(k/N) ` before each member's first line
-    /// with its other lines indented. A group whose members open with a
-    /// heading is left alone: the headings already divide it.
-    fn mark_group(&mut self, ranges: &[(usize, usize)], depth: usize) {
+    /// Marks the members of one repeated group: `(k/N) ` before each
+    /// member's first line, its other lines indented, when the members have
+    /// parts of their own (a sense with its examples, a comment with its
+    /// replies); else `- ` before each one-line member. A group whose members
+    /// open with a heading is left alone: the headings already divide it.
+    fn mark_group(&mut self, ranges: &[(usize, usize)], depth: usize, structured: bool) {
         let total = ranges.len();
-        if total < 2 || ranges.iter().any(|(start, _)| self.lines[*start].heading.is_some()) {
+        if total < 2
+            || ranges
+                .iter()
+                .any(|(start, _)| self.lines[*start].heading.is_some())
+        {
             return;
         }
-        let multi = ranges.iter().any(|(start, end)| end - start > 1);
+        let multi = structured || ranges.iter().any(|(start, end)| end - start > 1);
         for (place, (start, end)) in ranges.iter().enumerate() {
             if !multi {
                 let first = &mut self.lines[*start];
@@ -172,7 +197,9 @@ impl<'a> BlockRenderer<'a> {
                 }
                 continue;
             }
-            self.lines[*start].text.insert_str(0, &format!("({}/{total}) ", place + 1));
+            self.lines[*start]
+                .text
+                .insert_str(0, &format!("({}/{total}) ", place + 1));
             for line in self.lines.iter_mut().take(*end).skip(start + 1) {
                 if line.depth >= depth {
                     line.depth += 1;
@@ -200,7 +227,11 @@ impl<'a> BlockRenderer<'a> {
     }
 
     fn prose_limit(&self) -> usize {
-        if self.options.reading { READ_PROSE_MAX } else { PROSE_MAX }
+        if self.options.reading {
+            READ_PROSE_MAX
+        } else {
+            PROSE_MAX
+        }
     }
 
     /// The block on one line, or `None` when it holds a table, a heading,
@@ -246,7 +277,11 @@ impl<'a> BlockRenderer<'a> {
         if bounded && parts > 0 && text.chars().count() > LINE_MAX {
             return None;
         }
-        Some(if bounded { cut_chars(&text, self.prose_limit()) } else { text })
+        Some(if bounded {
+            cut_chars(&text, self.prose_limit())
+        } else {
+            text
+        })
     }
 
     fn pack_list(&self, block: &Block) -> Option<String> {
@@ -263,7 +298,12 @@ impl<'a> BlockRenderer<'a> {
 fn folds_never(kind: &BlockKind) -> bool {
     matches!(
         kind,
-        BlockKind::Heading(_) | BlockKind::Table | BlockKind::Landmark(_) | BlockKind::Dialog | BlockKind::Frame | BlockKind::Pre
+        BlockKind::Heading(_)
+            | BlockKind::Table
+            | BlockKind::Landmark(_)
+            | BlockKind::Dialog
+            | BlockKind::Frame
+            | BlockKind::Pre
     )
 }
 
@@ -297,3 +337,7 @@ pub(crate) fn title_of(block: &Block) -> String {
         (_, None) => base,
     }
 }
+
+#[cfg(test)]
+#[path = "block_renderer_tests.rs"]
+mod tests;

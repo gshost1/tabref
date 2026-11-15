@@ -33,6 +33,8 @@ pub(crate) mod ref_label;
 pub(crate) mod repeat_key;
 pub(crate) mod select_option;
 pub(crate) mod shown_map;
+#[cfg(test)]
+pub(crate) mod test_dom;
 pub(crate) mod text_match;
 pub(crate) mod text_runs;
 pub(crate) mod text_search;

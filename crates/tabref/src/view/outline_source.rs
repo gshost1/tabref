@@ -2,23 +2,36 @@ use std::collections::{BTreeSet, HashMap};
 
 use tabref_core::capability::CLICK;
 use tabref_core::{AccessibilityNode, AppError};
-use tabref_page::{ElementToken, OutlineInput, RefLabel, capture_dom, frame_owner_in, read_viewport};
+use tabref_page::{
+    ElementToken, OutlineInput, RefLabel, capture_dom, frame_owner_in, read_viewport,
+};
 
 use crate::session::Session;
 
 const FALLBACK_VIEWPORT: [f64; 2] = [1280.0, 800.0];
-const FIELD_ROLES: &[&str] = &["textfield", "combobox", "checkbox", "radiobutton", "listbox", "switch"];
+const FIELD_ROLES: &[&str] = &[
+    "textfield",
+    "combobox",
+    "checkbox",
+    "radiobutton",
+    "listbox",
+    "switch",
+];
 
 /// Everything an outline of the current tab is built from: the DOM of the
 /// page's own target, the DOM of each out-of-process iframe that holds a
 /// field to fill in (other cross-origin frames, such as ads, are counted
 /// but not read), the viewport, and the refs of `tree` keyed by the target
 /// and backend node id their element tokens name.
-pub(crate) fn outline_input(session: &mut Session, tree: Option<&AccessibilityNode>) -> Result<OutlineInput, AppError> {
+pub(crate) fn outline_input(
+    session: &mut Session,
+    tree: Option<&AccessibilityNode>,
+) -> Result<OutlineInput, AppError> {
     let page = session.page()?;
     let deadline = session.deadline();
     let trees = capture_dom(session.connection(), &page, deadline)?;
-    let viewport = read_viewport(session.connection(), &page, deadline).unwrap_or(FALLBACK_VIEWPORT);
+    let viewport =
+        read_viewport(session.connection(), &page, deadline).unwrap_or(FALLBACK_VIEWPORT);
     let mut refs = HashMap::new();
     let mut field_targets = BTreeSet::new();
     if let Some(tree) = tree {
@@ -63,7 +76,12 @@ fn collect_refs(
                     name: node.display_name().map(str::to_owned),
                     value: node.identity.value.clone(),
                     states: node.presentation.states.clone(),
-                    clickable: node.role != "cell" && node.presentation.available_actions.iter().any(|action| action == CLICK),
+                    clickable: node.role != "cell"
+                        && node
+                            .presentation
+                            .available_actions
+                            .iter()
+                            .any(|action| action == CLICK),
                 },
             );
         }

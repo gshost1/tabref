@@ -16,7 +16,9 @@ impl BlockRenderer<'_> {
         let mut text = String::new();
         let mut controls: Vec<&Control> = Vec::new();
         gather(dialog, &mut text, &mut controls);
-        let has_field = controls.iter().any(|control| FIELD_ROLES.contains(&control.role.as_str()));
+        let has_field = controls
+            .iter()
+            .any(|control| FIELD_ROLES.contains(&control.role.as_str()));
         if has_field || controls.len() > DIALOG_CONTROLS {
             self.render_block(dialog, 0);
             return;

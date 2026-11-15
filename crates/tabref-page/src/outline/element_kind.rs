@@ -16,7 +16,10 @@ pub(crate) fn is_skipped(node: &DomNode) -> bool {
     node.form.pseudo
         || SKIPPED_TAGS.contains(&node.tag())
         || node.attr("aria-hidden") == Some("true")
-        || (node.tag() == "INPUT" && node.attr("type").is_some_and(|kind| kind.eq_ignore_ascii_case("hidden")))
+        || (node.tag() == "INPUT"
+            && node
+                .attr("type")
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("hidden")))
 }
 
 /// The element's first ARIA role token, lower-cased.

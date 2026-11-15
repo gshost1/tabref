@@ -40,7 +40,11 @@ pub(crate) fn footer_line(report: &CutReport, stats: &CutStats) -> String {
     } else {
         format!("{size} chars")
     };
-    format!("-- {shown}; cut: {}; more: {}", cut.join(", "), more.join(" | "))
+    format!(
+        "-- {shown}; cut: {}; more: {}",
+        cut.join(", "),
+        more.join(" | ")
+    )
 }
 
 /// One line for the frames the view left out, or `None` when it left none.
@@ -48,7 +52,10 @@ pub(crate) fn frames_line(outline: &PageOutline, unreadable: usize) -> Option<St
     let frames = outline.frames;
     let mut parts = Vec::new();
     if frames.cross_origin > 0 {
-        parts.push(format!("{} cross-origin (ads, widgets)", frames.cross_origin));
+        parts.push(format!(
+            "{} cross-origin (ads, widgets)",
+            frames.cross_origin
+        ));
     }
     if frames.tiny > 0 {
         parts.push(format!("{} tiny or hidden", frames.tiny));

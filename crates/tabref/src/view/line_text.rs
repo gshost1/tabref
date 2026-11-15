@@ -56,9 +56,11 @@ impl<'a> LineText<'a> {
     pub(crate) fn push_control(&mut self, control: &Control) {
         let reading = self.options.reading && !control.has_state("collapsed");
         let short = control.name.split_whitespace().count() <= FOLDED_LINK_WORDS;
-        let as_word = reading || (self.prose && control.is_link() && short && !control.name.is_empty());
+        let as_word =
+            reading || (self.prose && control.is_link() && short && !control.name.is_empty());
         if as_word {
             self.push_word(&control_reading(control));
+            self.after_control = true;
             return;
         }
         let repeated = control

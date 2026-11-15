@@ -7,7 +7,11 @@ use super::node_kind::NodeKind;
 pub fn collapse_run(text: &str) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.is_empty() {
-        return if text.is_empty() { String::new() } else { " ".to_owned() };
+        return if text.is_empty() {
+            String::new()
+        } else {
+            " ".to_owned()
+        };
     }
     let mut out = String::with_capacity(text.len());
     if text.starts_with(char::is_whitespace) {
@@ -25,27 +29,48 @@ pub fn squash(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The text inside the node at `index`, shown or not, on one line. Script
-/// and style text is left out.
+const BOX_TAGS: &[&str] = &[
+    "BR", "P", "DIV", "LI", "TD", "TH", "TR", "DT", "DD", "H1", "H2", "H3", "H4", "H5", "H6",
+    "SECTION", "ARTICLE", "OPTION",
+];
+
+/// The text inside the node at `index`, shown or not, on one line. Text
+/// runs join as the page set them; a box of its own (a block, an inline
+/// block, a line break) is set off by spaces. Script and style text is left
+/// out.
 pub(crate) fn subtree_text(tree: &DomTree, index: usize) -> String {
     let mut out = String::new();
-    let mut pending = vec![index];
+    let mut pending: Vec<Option<usize>> = vec![Some(index)];
     let mut seen = 0usize;
-    while let Some(current) = pending.pop() {
+    while let Some(step) = pending.pop() {
         seen += 1;
-        if seen > 20_000 {
+        if seen > 40_000 {
             break;
         }
+        let Some(current) = step else {
+            out.push(' ');
+            continue;
+        };
         let Some(node) = tree.node(current) else {
             continue;
         };
         match &node.kind {
-            NodeKind::Text(text) => {
-                out.push_str(text);
-                out.push(' ');
-            }
+            NodeKind::Text(text) => out.push_str(text),
             NodeKind::Element(tag) if matches!(tag.as_str(), "SCRIPT" | "STYLE" | "TEMPLATE") => {}
-            _ => pending.extend(node.children.iter().rev()),
+            NodeKind::Element(tag) => {
+                let boxed = BOX_TAGS.contains(&tag.as_str())
+                    || (node.layout.is_some()
+                        && node.display() != "inline"
+                        && node.display() != "contents");
+                if boxed {
+                    pending.push(None);
+                }
+                pending.extend(node.children.iter().rev().map(|child| Some(*child)));
+                if boxed {
+                    pending.push(None);
+                }
+            }
+            _ => pending.extend(node.children.iter().rev().map(|child| Some(*child))),
         }
     }
     squash(&out)

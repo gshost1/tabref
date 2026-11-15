@@ -20,7 +20,7 @@ pub(crate) struct ViewOptions {
 /// simple page is far under it.
 pub(crate) const SNAP_BUDGET: usize = 14_000;
 pub(crate) const ALL_BUDGET: usize = 80_000;
-pub(crate) const READ_BUDGET: usize = 40_000;
+pub(crate) const READ_BUDGET: usize = 24_000;
 
 impl ViewOptions {
     pub(crate) fn snap(page_url: &str, all: bool, rows: RowWindow) -> Self {

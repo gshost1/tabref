@@ -6,7 +6,12 @@ use super::view_line::ViewLine;
 pub(crate) fn section_lines(lines: Vec<ViewLine>, wanted: &str) -> Option<Vec<ViewLine>> {
     let needle = wanted.trim().to_lowercase();
     let start = lines.iter().position(|line| {
-        line.heading.is_some() && line.text.trim_start_matches('#').to_lowercase().contains(&needle)
+        line.heading.is_some()
+            && line
+                .text
+                .trim_start_matches('#')
+                .to_lowercase()
+                .contains(&needle)
     })?;
     let level = lines[start].heading;
     let end = lines[start + 1..]

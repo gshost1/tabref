@@ -5,13 +5,13 @@ use tabref_page::{Block, OutlineInput, PageOutline, build_outline, build_outline
 use super::block_renderer::BlockRenderer;
 use super::budget::fit;
 use super::main_content::{has_main, main_block};
+use super::node_line::quote_text;
 use super::ref_style::RefStyle;
 use super::section::section_lines;
 use super::view_footer::{footer_line, frames_line};
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
 use super::view_scope::ViewScope;
-use super::node_line::quote_text;
 use super::view_subject::ViewSubject;
 use crate::output::outcome::Outcome;
 
@@ -26,8 +26,12 @@ pub(crate) fn page_view(
     scope: &ViewScope,
 ) -> Result<Outcome, AppError> {
     let outline = match scope {
-        ViewScope::Element { target_id, backend_id } => build_outline_at(input, target_id, *backend_id)
-            .ok_or_else(|| AppError::stale_ref_because("that element is no longer in the page".to_owned()))?,
+        ViewScope::Element {
+            target_id,
+            backend_id,
+        } => build_outline_at(input, target_id, *backend_id).ok_or_else(|| {
+            AppError::stale_ref_because("that element is no longer in the page".to_owned())
+        })?,
         _ => build_outline(input),
     };
     let mut renderer = BlockRenderer::new(options);
@@ -63,7 +67,11 @@ pub(crate) fn page_view(
 }
 
 fn header(subject: &ViewSubject<'_>, options: &ViewOptions) -> String {
-    let mut text = format!("page {} {}", quote_text(subject.info.title.trim()), subject.info.url);
+    let mut text = format!(
+        "page {} {}",
+        quote_text(subject.info.title.trim()),
+        subject.info.url
+    );
     if let (RefStyle::Short, Some(snapshot)) = (options.refs, subject.snapshot_id) {
         if subject.ref_count > 0 {
             text.push_str(&format!(" · refs eN = @{snapshot}:eN"));

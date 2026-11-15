@@ -89,8 +89,10 @@ fn role_word(control: &Control) -> &str {
 }
 
 fn shows_value(control: &Control) -> bool {
-    !matches!(control.role.as_str(), "link" | "button" | "checkbox" | "radiobutton" | "switch")
-        && control.value.as_deref() != Some(control.name.as_str())
+    !matches!(
+        control.role.as_str(),
+        "link" | "button" | "checkbox" | "radiobutton" | "switch"
+    ) && control.value.as_deref() != Some(control.name.as_str())
 }
 
 fn option_list(control: &Control) -> String {

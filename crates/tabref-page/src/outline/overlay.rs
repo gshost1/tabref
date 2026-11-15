@@ -55,13 +55,21 @@ fn count(block: &Block, text: &mut usize, buttons: &mut usize) {
 /// points at, or, for a dialog, its first heading.
 pub(crate) fn dialog_label(tree: &DomTree, index: usize) -> Option<String> {
     let node = tree.node(index)?;
-    if let Some(label) = node.attr("aria-label").map(squash).filter(|label| !label.is_empty()) {
+    if let Some(label) = node
+        .attr("aria-label")
+        .map(squash)
+        .filter(|label| !label.is_empty())
+    {
         return Some(cut_chars(&label, LABEL_LIMIT));
     }
     if let Some(ids) = node.attr("aria-labelledby") {
         let text: Vec<String> = ids
             .split_whitespace()
-            .filter_map(|id| tree.nodes.iter().position(|other| other.attr("id") == Some(id)))
+            .filter_map(|id| {
+                tree.nodes
+                    .iter()
+                    .position(|other| other.attr("id") == Some(id))
+            })
             .map(|labelled| subtree_text(tree, labelled))
             .filter(|text| !text.is_empty())
             .collect();
@@ -69,7 +77,12 @@ pub(crate) fn dialog_label(tree: &DomTree, index: usize) -> Option<String> {
             return Some(cut_chars(&text.join(" "), LABEL_LIMIT));
         }
     }
-    if !is_dialog_markup(node) && node.layout.as_ref().is_none_or(|layout| layout.position != "fixed") {
+    if !is_dialog_markup(node)
+        && node
+            .layout
+            .as_ref()
+            .is_none_or(|layout| layout.position != "fixed")
+    {
         return None;
     }
     first_heading(tree, index).map(|heading| cut_chars(&heading, LABEL_LIMIT))

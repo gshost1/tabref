@@ -10,30 +10,85 @@ use super::url_resolve::resolve_href;
 const SHOWN_STATES: &[&str] = &["checked", "disabled", "expanded", "pressed", "selected"];
 
 const TYPED_INPUTS: &[&str] = &[
-    "date", "time", "datetime-local", "month", "week", "number", "range", "file", "password",
-    "email", "color",
+    "date",
+    "time",
+    "datetime-local",
+    "month",
+    "week",
+    "number",
+    "range",
+    "file",
+    "password",
+    "email",
+    "color",
 ];
 
 const NOT_CONTROLS: &[&str] = &[
-    "cell", "row", "column", "heading", "list", "listitem", "table", "grid", "statictext",
-    "image", "paragraph", "region", "main", "navigation", "banner", "contentinfo",
-    "complementary", "article", "document", "webarea", "group", "generic", "form", "search",
-    "dialog", "alertdialog", "alert", "status", "note", "term", "definition", "separator",
+    "cell",
+    "row",
+    "column",
+    "heading",
+    "list",
+    "listitem",
+    "table",
+    "grid",
+    "statictext",
+    "image",
+    "paragraph",
+    "region",
+    "main",
+    "navigation",
+    "banner",
+    "contentinfo",
+    "complementary",
+    "article",
+    "document",
+    "webarea",
+    "group",
+    "generic",
+    "form",
+    "search",
+    "dialog",
+    "alertdialog",
+    "alert",
+    "status",
+    "note",
+    "term",
+    "definition",
+    "separator",
 ];
 
 const CONTROL_ROLES: &[&str] = &[
-    "button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "menuitemcheckbox",
-    "menuitemradio", "option", "textbox", "searchbox", "combobox", "slider", "spinbutton",
+    "button",
+    "link",
+    "checkbox",
+    "radio",
+    "switch",
+    "tab",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "textbox",
+    "searchbox",
+    "combobox",
+    "slider",
+    "spinbutton",
 ];
 
 /// The control the element at `index` is, named and described as the
 /// accessibility snapshot has it when it has a ref. An element is a control
 /// when it has a ref, is a link with an address, a form field, a button or
 /// a `<summary>`, or has a control role.
-pub(crate) fn control_of(tree: &DomTree, index: usize, label: Option<&RefLabel>) -> Option<Control> {
+pub(crate) fn control_of(
+    tree: &DomTree,
+    index: usize,
+    label: Option<&RefLabel>,
+) -> Option<Control> {
     let node = tree.node(index)?;
     let dom_role = dom_role(node);
-    let label = label.filter(|label| label.clickable || !NOT_CONTROLS.contains(&label.role.as_str()));
+    let label =
+        label.filter(|label| label.clickable || !NOT_CONTROLS.contains(&label.role.as_str()));
     if label.is_none() && dom_role.is_none() {
         return None;
     }
@@ -44,7 +99,12 @@ pub(crate) fn control_of(tree: &DomTree, index: usize, label: Option<&RefLabel>)
     let href = node
         .attr("href")
         .filter(|_| node.tag() == "A" || node.tag() == "AREA")
-        .filter(|href| !href.trim_start().to_ascii_lowercase().starts_with("javascript:"))
+        .filter(|href| {
+            !href
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("javascript:")
+        })
         .map(|href| resolve_href(base_of(tree), href));
     let options = if node.tag() == "SELECT" {
         select_options(tree, index)
@@ -143,7 +203,10 @@ fn image_alt(tree: &DomTree, index: usize) -> Option<String> {
     node.children.iter().find_map(|child| {
         let child_node = tree.node(*child)?;
         if child_node.tag() == "IMG" {
-            return child_node.attr("alt").map(squash).filter(|alt| !alt.is_empty());
+            return child_node
+                .attr("alt")
+                .map(squash)
+                .filter(|alt| !alt.is_empty());
         }
         image_alt(tree, *child)
     })
@@ -176,8 +239,15 @@ fn select_options(tree: &DomTree, index: usize) -> Vec<SelectOption> {
         match node.tag() {
             "OPTION" => {
                 let text = subtree_text(tree, current);
-                let label = node.attr("label").map(squash).filter(|label| !label.is_empty()).unwrap_or(text);
-                let value = node.attr("value").map(str::to_owned).unwrap_or_else(|| label.clone());
+                let label = node
+                    .attr("label")
+                    .map(squash)
+                    .filter(|label| !label.is_empty())
+                    .unwrap_or(text);
+                let value = node
+                    .attr("value")
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| label.clone());
                 options.push(SelectOption {
                     label,
                     value,

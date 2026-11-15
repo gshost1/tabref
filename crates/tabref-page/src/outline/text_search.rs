@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use super::block_kind::BlockKind;
 use super::control_build::control_of;
 use super::dom_tree::DomTree;
 use super::element_kind::{is_block_display, is_skipped, semantic_kind};
@@ -8,9 +9,8 @@ use super::node_kind::NodeKind;
 use super::outline_input::OutlineInput;
 use super::text_match::TextMatch;
 use super::text_runs::{squash, subtree_text};
-use super::block_kind::BlockKind;
 
-const LINE_WINDOW: usize = 220;
+const LINE_WINDOW: usize = 160;
 const CONTROL_SCAN: usize = 400;
 const ATTRIBUTES: &[&str] = &["aria-label", "title", "alt", "placeholder", "value"];
 
@@ -28,19 +28,23 @@ pub fn search_text(input: &OutlineInput, needle: &str, keep: usize) -> (Vec<Text
     let mut total = 0usize;
     let trees = input.trees.iter().chain(input.frames.values().flatten());
     for tree in trees {
-        search_tree(input, tree, &needle, keep, &mut found, &mut total);
+        let (more, count) = search_tree(input, tree, &needle, keep.saturating_sub(found.len()));
+        found.extend(more);
+        total += count;
     }
     (found, total)
 }
 
+/// The matches in one document, at most `room` of them described, and how
+/// many there are in all.
 fn search_tree(
     input: &OutlineInput,
     tree: &DomTree,
     needle: &str,
-    keep: usize,
-    found: &mut Vec<TextMatch>,
-    total: &mut usize,
-) {
+    room: usize,
+) -> (Vec<TextMatch>, usize) {
+    let mut found = Vec::new();
+    let mut total = 0usize;
     let mut headings: Vec<(u8, String)> = Vec::new();
     let mut matched_blocks: HashSet<usize> = HashSet::new();
     let skipped = skipped_nodes(tree);
@@ -69,11 +73,13 @@ fn search_tree(
         if !matched_blocks.insert(block) {
             continue;
         }
-        *total += 1;
-        if found.len() >= keep {
+        total += 1;
+        if found.len() >= room {
             continue;
         }
-        let in_heading = headings.last().is_some_and(|(_, heading)| heading.to_lowercase().contains(needle))
+        let in_heading = headings
+            .last()
+            .is_some_and(|(_, heading)| heading.to_lowercase().contains(needle))
             && is_heading_text(tree, index);
         let section = headings
             .iter()
@@ -86,17 +92,24 @@ fn search_tree(
             line: window(&subtree_text(tree, block), needle, &text),
             control: control_near(input, tree, index, block),
             hidden,
-            expander: if hidden { expander_for(input, tree, index) } else { None },
+            expander: if hidden {
+                expander_for(input, tree, index)
+            } else {
+                None
+            },
         });
     }
+    (found, total)
 }
 
 fn skipped_nodes(tree: &DomTree) -> HashSet<usize> {
     let mut skipped = HashSet::new();
     for (index, node) in tree.nodes.iter().enumerate() {
         let parent_skipped = node.parent.is_some_and(|parent| skipped.contains(&parent));
-        let own = matches!(node.tag(), "SCRIPT" | "STYLE" | "NOSCRIPT" | "TEMPLATE" | "HEAD" | "SVG")
-            || (is_skipped(node) && node.tag() != "IMG" && node.tag() != "INPUT");
+        let own = matches!(
+            node.tag(),
+            "SCRIPT" | "STYLE" | "NOSCRIPT" | "TEMPLATE" | "HEAD" | "SVG"
+        ) || (is_skipped(node) && node.tag() != "IMG" && node.tag() != "INPUT");
         if parent_skipped || own {
             skipped.insert(index);
         }
@@ -112,7 +125,8 @@ fn is_heading_text(tree: &DomTree, index: usize) -> bool {
 }
 
 /// The nearest ancestor that is a block of its own: by meaning, by layout,
-/// or, for content that has no layout, by tag.
+/// or, for content that has no layout, by tag. A table cell gives way to
+/// its row, so a match in a cell reads with the rest of the row.
 fn block_of(tree: &DomTree, index: usize) -> usize {
     for ancestor in tree.ancestors(index) {
         let Some(node) = tree.node(ancestor) else {
@@ -123,8 +137,16 @@ fn block_of(tree: &DomTree, index: usize) -> usize {
         }
         let laid_out_block = node.layout.is_some() && is_block_display(node.display());
         let tag_block = node.layout.is_none()
-            && matches!(node.tag(), "DIV" | "P" | "LI" | "TD" | "TH" | "DD" | "DT" | "SECTION" | "ARTICLE" | "TR");
-        if semantic_kind(node, false).is_some() || laid_out_block || tag_block {
+            && matches!(
+                node.tag(),
+                "DIV" | "P" | "LI" | "DD" | "DT" | "SECTION" | "ARTICLE" | "TR"
+            );
+        let laid_out_block = laid_out_block && !matches!(node.tag(), "TD" | "TH");
+        let kind = semantic_kind(node, false);
+        if matches!(kind, Some(BlockKind::Cell | BlockKind::HeaderCell)) {
+            continue;
+        }
+        if kind.is_some() || laid_out_block || tag_block {
             return ancestor;
         }
     }
@@ -182,7 +204,9 @@ fn control_near(
             break;
         }
         if current != block {
-            if let Some(control) = control_of(tree, current, label_of(current)).filter(|control| control.ref_text.is_some()) {
+            if let Some(control) = control_of(tree, current, label_of(current))
+                .filter(|control| control.ref_text.is_some())
+            {
                 return Some(control);
             }
         }

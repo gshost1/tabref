@@ -1,12 +1,37 @@
 use super::dom_node::DomNode;
 
 const STATE_CLASSES: &[&str] = &[
-    "active", "selected", "current", "open", "closed", "odd", "even", "first", "last", "hidden",
-    "show", "shown", "in", "visible", "collapsed", "expanded", "disabled", "focus", "hover",
+    "active",
+    "selected",
+    "current",
+    "open",
+    "closed",
+    "odd",
+    "even",
+    "first",
+    "last",
+    "hidden",
+    "show",
+    "shown",
+    "in",
+    "visible",
+    "collapsed",
+    "expanded",
+    "disabled",
+    "focus",
+    "hover",
 ];
 
 const KEYED_TAGS: &[&str] = &[
-    "LI", "TR", "ARTICLE", "DT", "DD", "DETAILS", "SECTION", "FIGURE", "BLOCKQUOTE",
+    "LI",
+    "TR",
+    "ARTICLE",
+    "DT",
+    "DD",
+    "DETAILS",
+    "SECTION",
+    "FIGURE",
+    "BLOCKQUOTE",
 ];
 
 /// The shape key that marks siblings as repeats of one another: the tag

@@ -16,7 +16,10 @@ impl BlockRenderer<'_> {
             let packed: Option<Vec<String>> = items.iter().map(|item| self.pack(item)).collect();
             if let Some(parts) = packed {
                 let joined = parts.join(" · ");
-                if items.len() > 1 && joined.chars().count() <= LINE_MAX && parts.iter().all(|part| part.chars().count() <= 60) {
+                if items.len() > 1
+                    && joined.chars().count() <= LINE_MAX
+                    && parts.iter().all(|part| part.chars().count() <= 60)
+                {
                     self.push(depth, joined, None);
                     return;
                 }
@@ -53,12 +56,20 @@ impl BlockRenderer<'_> {
     pub(crate) fn render_table(&mut self, block: &Block, depth: usize) {
         let mut rows = Vec::new();
         collect_rows(block, &mut rows);
-        let widest = rows.iter().map(|row| row.blocks().count()).max().unwrap_or(0);
+        let widest = rows
+            .iter()
+            .map(|row| row.blocks().count())
+            .max()
+            .unwrap_or(0);
         let cells: Vec<Vec<String>> = rows
             .iter()
             .map(|row| row.blocks().map(|cell| self.pack_unbounded(cell)).collect())
             .collect();
-        let layout = widest < 2 || cells.iter().flatten().any(|cell| cell.chars().count() > CELL_MAX);
+        let layout = widest < 2
+            || cells
+                .iter()
+                .flatten()
+                .any(|cell| cell.chars().count() > CELL_MAX);
         if rows.is_empty() || layout {
             self.render_children(block, depth);
             return;
@@ -73,18 +84,31 @@ impl BlockRenderer<'_> {
             .map(|caption| format!(" \"{}\"", cut_chars(&self.pack_unbounded(caption), 80)))
             .unwrap_or_default();
         let head = if header {
-            cells.first().map(|cells| cells.join(" | ")).unwrap_or_default()
+            cells
+                .first()
+                .map(|cells| cells.join(" | "))
+                .unwrap_or_default()
         } else {
             String::new()
         };
         let noun = if body_rows == 1 { "row" } else { "rows" };
-        self.push(depth, format!("table{caption} {body_rows} {noun}: {head}").trim_end().to_owned(), None);
+        self.push(
+            depth,
+            format!("table{caption} {body_rows} {noun}: {head}")
+                .trim_end()
+                .to_owned(),
+            None,
+        );
         let windowed = body_rows > DEFAULT_ROWS;
         for (position, row) in cells.iter().skip(usize::from(header)).enumerate() {
             if windowed && !self.options.rows.contains(position + 1) {
                 continue;
             }
-            let text = row.iter().map(|cell| cut_chars(cell, CELL_MAX)).collect::<Vec<_>>().join(" | ");
+            let text = row
+                .iter()
+                .map(|cell| cut_chars(cell, CELL_MAX))
+                .collect::<Vec<_>>()
+                .join(" | ");
             self.push(depth + 1, text, None);
         }
         if windowed {

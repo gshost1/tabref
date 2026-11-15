@@ -40,7 +40,10 @@ pub(crate) fn is_hidden_at(tree: &DomTree, index: usize) -> bool {
 }
 
 fn has_laid_out_descendant(tree: &DomTree, index: usize) -> bool {
-    let mut pending: Vec<usize> = tree.node(index).map(|node| node.children.clone()).unwrap_or_default();
+    let mut pending: Vec<usize> = tree
+        .node(index)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
     let mut seen = 0usize;
     while let Some(current) = pending.pop() {
         seen += 1;
@@ -74,10 +77,10 @@ pub(crate) fn expander_for(input: &OutlineInput, tree: &DomTree, index: usize) -
             continue;
         };
         if node.tag() == "DETAILS" && node.attr("open").is_none() {
-            let summary = node
-                .children
-                .iter()
-                .find(|child| tree.node(**child).is_some_and(|child| child.tag() == "SUMMARY"));
+            let summary = node.children.iter().find(|child| {
+                tree.node(**child)
+                    .is_some_and(|child| child.tag() == "SUMMARY")
+            });
             if let Some(control) = summary.and_then(|summary| control_at(*summary)) {
                 return Some(control);
             }
@@ -93,10 +96,10 @@ pub(crate) fn expander_for(input: &OutlineInput, tree: &DomTree, index: usize) -
             }
         }
     }
-    let outermost = chain
-        .iter()
-        .rev()
-        .find(|ancestor| tree.node(**ancestor).is_some_and(|node| matches!(node.kind, NodeKind::Element(_)) && node.layout.is_none()))?;
+    let outermost = chain.iter().rev().find(|ancestor| {
+        tree.node(**ancestor)
+            .is_some_and(|node| matches!(node.kind, NodeKind::Element(_)) && node.layout.is_none())
+    })?;
     preceding_collapsed(tree, *outermost, &control_at)
 }
 

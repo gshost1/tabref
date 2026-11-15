@@ -10,7 +10,14 @@ use crate::view::view_options::ViewOptions;
 use crate::view::view_scope::ViewScope;
 
 const FIELD_ROLES: &[&str] = &[
-    "textfield", "combobox", "checkbox", "radiobutton", "switch", "slider", "incrementor", "listbox",
+    "textfield",
+    "combobox",
+    "checkbox",
+    "radiobutton",
+    "switch",
+    "slider",
+    "incrementor",
+    "listbox",
 ];
 
 /// Prints text in reading order: the page's main content (the `main`
@@ -43,15 +50,29 @@ pub(crate) fn run(
 
 fn read_field(session: &mut Session, target: &RefTarget) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
-    let reading = read_element(session.connection(), &target.session, &target.token, deadline)?;
-    let mut out = format!("{}", target.label());
+    let reading = read_element(
+        session.connection(),
+        &target.session,
+        &target.token,
+        deadline,
+    )?;
+    let mut out = target.label();
     if let Some(value) = reading.value.as_deref() {
         out.push_str(&format!(" = \"{value}\""));
     }
     if let Some(checked) = reading.checked {
-        out.push_str(if checked { " (checked)" } else { " (not checked)" });
+        out.push_str(if checked {
+            " (checked)"
+        } else {
+            " (not checked)"
+        });
     }
-    if let Some(text) = reading.text.as_deref().map(str::trim).filter(|text| !text.is_empty()) {
+    if let Some(text) = reading
+        .text
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
         out.push_str(&format!("\n{text}"));
     }
     Ok(Outcome::new(

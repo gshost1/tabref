@@ -14,9 +14,9 @@ impl NodeLayout {
         self.bounds[2].max(0.0) * self.bounds[3].max(0.0)
     }
 
-    /// At most one pixel in either direction: a tracking pixel or text
-    /// hidden for screen readers only.
+    /// At most five pixels in either direction: a tracking pixel (with the
+    /// two-pixel border an `<iframe>` gets by default) or a hidden slot.
     pub fn is_tiny(&self) -> bool {
-        self.bounds[2] <= 1.0 || self.bounds[3] <= 1.0
+        self.bounds[2] <= 5.0 || self.bounds[3] <= 5.0
     }
 }

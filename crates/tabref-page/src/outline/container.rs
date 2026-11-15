@@ -23,7 +23,10 @@ pub(crate) fn is_container(
     let Some(node) = tree.node(index) else {
         return false;
     };
-    if matches!(node.tag(), "INPUT" | "SELECT" | "TEXTAREA" | "SUMMARY" | "OPTION") {
+    if matches!(
+        node.tag(),
+        "INPUT" | "SELECT" | "TEXTAREA" | "SUMMARY" | "OPTION"
+    ) {
         return false;
     }
     let mut pending: Vec<usize> = node.children.clone();
@@ -38,7 +41,8 @@ pub(crate) fn is_container(
         };
         let nested_ref = refs.contains_key(&(tree.target_id.clone(), inner.backend_id));
         let nested_link = inner.tag() == "A" && inner.attr("href").is_some();
-        if inner.is_shown() && (CONTAINER_TAGS.contains(&inner.tag()) || nested_ref || nested_link) {
+        if inner.is_shown() && (CONTAINER_TAGS.contains(&inner.tag()) || nested_ref || nested_link)
+        {
             return true;
         }
         pending.extend(inner.children.iter().copied());

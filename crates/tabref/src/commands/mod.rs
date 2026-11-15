@@ -59,7 +59,9 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
 fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
         Command::Open { url, .. } => open::run(session, url),
-        Command::Snap { all, root, rows } => snap::run(session, *all, root.as_deref(), rows.as_deref()),
+        Command::Snap { all, root, rows } => {
+            snap::run(session, *all, root.as_deref(), rows.as_deref())
+        }
         Command::Click { target } => click::run(session, target),
         Command::Fill { target, text } => fill::run(session, target, text),
         Command::Select { target, option } => select::run(session, target, option),

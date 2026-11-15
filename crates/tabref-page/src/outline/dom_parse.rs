@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::dom_node::DomNode;
 use super::capture_strings::Strings;
+use super::dom_node::DomNode;
 use super::dom_tree::DomTree;
 use super::node_kind::NodeKind;
 use super::node_layout::NodeLayout;
@@ -98,7 +98,10 @@ fn read_attributes(pairs: Option<&Value>, strings: &Strings<'_>) -> Vec<(String,
         .filter_map(|pair| {
             let name = strings.get(pair.first()?)?;
             let value = pair.get(1).and_then(|value| strings.get(value));
-            Some((name.to_ascii_lowercase(), value.unwrap_or_default().to_owned()))
+            Some((
+                name.to_ascii_lowercase(),
+                value.unwrap_or_default().to_owned(),
+            ))
         })
         .collect()
 }
