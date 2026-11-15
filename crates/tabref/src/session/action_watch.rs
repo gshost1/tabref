@@ -3,12 +3,13 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tabref_cdp::{CdpEvent, wait_for_load};
 use tabref_core::{AppError, Deadline};
-use tabref_page::WatchedAction;
+use tabref_page::{PageInfo, WatchedAction, follow_late_navigation};
 
 use super::Session;
 use super::action_effects::ActionEffects;
 
 const NEW_TAB_LOAD: Duration = Duration::from_millis(3_000);
+const LATE_WINDOW: Duration = Duration::from_millis(60);
 
 impl Session {
     /// Starts watching `tab_id` for what the next action sets off: its
@@ -59,7 +60,36 @@ impl Session {
             new_tab,
             url_before: watched.mark.url.clone(),
             page,
+            main_frame: watched.main_frame.clone(),
         })
+    }
+}
+
+impl Session {
+    /// After an action that set off nothing, waits up to 60 ms for a
+    /// navigation it started late, from a timer or an async handler, and
+    /// follows it, so the next step of a batch runs on the page the action
+    /// led to. Returns that page when there was one.
+    pub(crate) fn follow_late(
+        &mut self,
+        effects: &ActionEffects,
+        deadline: Deadline,
+    ) -> Result<Option<PageInfo>, AppError> {
+        if effects.settled.navigated || effects.new_tab.is_some() || effects.main_frame.is_empty() {
+            return Ok(None);
+        }
+        let page = self.page()?;
+        let moved = follow_late_navigation(
+            self.connection(),
+            &page,
+            &effects.main_frame,
+            LATE_WINDOW,
+            deadline,
+        )?;
+        if !moved {
+            return Ok(None);
+        }
+        PageInfo::read(self.connection(), &page.target_id, deadline).map(Some)
     }
 }
 

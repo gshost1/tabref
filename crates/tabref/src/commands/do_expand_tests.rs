@@ -28,6 +28,16 @@ fn a_loop_writes_out_its_body_once_per_round_of_values() {
 }
 
 #[test]
+fn values_are_put_in_once_and_never_become_keywords_or_refs() {
+    assert_eq!(
+        sources("for a b in \"{b}\" X\nread {a}|{b}\nend"),
+        ["read {b}|X"]
+    );
+    let steps = expand(&split_steps("for t in e4\nclick {t}\nend").unwrap()).unwrap();
+    assert!(steps[0].words[1].quoted);
+}
+
+#[test]
 fn loops_nest() {
     assert_eq!(
         sources("for a in 1 2\nfor b in x\nread {a}{b}\nend\nend"),

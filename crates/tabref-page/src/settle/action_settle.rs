@@ -87,6 +87,50 @@ pub fn settle_action(
     })
 }
 
+/// Waits up to `window` for a navigation of the main frame that an action
+/// started late, after it had settled (a handler that navigates from a
+/// timer), and follows it as [`settle_action`] would. Returns whether the
+/// tab committed a new document. Page events stay on after an action, so a
+/// navigation that began in between is already buffered and costs nothing
+/// to see.
+pub fn follow_late_navigation(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    main_frame: &str,
+    window: Duration,
+    deadline: Deadline,
+) -> Result<bool, AppError> {
+    let cap = deadline.capped(SETTLE_CAP);
+    let id = session.session_id.clone();
+    let mut tracker = SettleTracker::new(main_frame);
+    let started = |event: &CdpEvent| {
+        is_page_event(event, &id)
+            && matches!(
+                event.method.as_str(),
+                "Page.frameRequestedNavigation"
+                    | "Page.frameScheduledNavigation"
+                    | "Page.frameStartedNavigating"
+                    | "Page.frameStartedLoading"
+            )
+            && event.params.get("frameId").and_then(Value::as_str) == Some(main_frame)
+    };
+    let first = match connection.wait_for_event(started, cap.capped(window)) {
+        Ok(event) => event,
+        Err(error) if is_timeout(&error) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    tracker.absorb(&first, Instant::now());
+    if !tracker.navigating() {
+        return Ok(false);
+    }
+    for event in connection.drain_events(|event| is_page_event(event, &id)) {
+        tracker.absorb(&event, Instant::now());
+    }
+    follow(connection, &id, &mut tracker, cap)?;
+    connection.discard_events(|event| is_page_event(event, &id));
+    Ok(tracker.committed())
+}
+
 fn follow(
     connection: &mut CdpConnection,
     session_id: &str,

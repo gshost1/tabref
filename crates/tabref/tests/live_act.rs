@@ -113,7 +113,7 @@ fn a_click_reports_the_counter_it_moved_and_a_noop_reports_nothing() {
     assert!(voted.stdout.contains("{3 -> 4}"), "{}", voted.stdout);
     assert!(!voted.stdout.contains("{9 ->"), "{}", voted.stdout);
     let noop = tabref.ok(&["click", "Noop"]);
-    assert_eq!(noop.stdout.trim(), r#"clicked "Noop""#);
+    assert_eq!(noop.stdout.trim(), r#"clicked "Noop" (no visible change)"#);
 }
 
 #[test]

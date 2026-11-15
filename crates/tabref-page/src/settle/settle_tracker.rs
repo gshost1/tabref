@@ -113,6 +113,10 @@ impl SettleTracker {
         }
     }
 
+    pub(crate) fn navigating(&self) -> bool {
+        self.navigating
+    }
+
     pub(crate) fn committed(&self) -> bool {
         self.committed
     }

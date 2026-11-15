@@ -66,7 +66,7 @@ pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
 pub use page::page_scroll::scroll_page;
 pub use page::page_text::page_text;
-pub use settle::action_settle::{settle_action, watch_navigation};
+pub use settle::action_settle::{follow_late_navigation, settle_action, watch_navigation};
 pub use settle::page_wait::{wait_for_text, wait_for_url};
 pub use settle::settle_outcome::SettleOutcome;
 pub use settle::watched_action::WatchedAction;

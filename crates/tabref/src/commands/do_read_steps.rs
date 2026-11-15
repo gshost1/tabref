@@ -161,13 +161,20 @@ pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone
     })
 }
 
-/// `js "EXPRESSION"`: the expression's value as compact JSON.
+/// `js "EXPRESSION"`, or `js` and the expression as written: its value as
+/// compact JSON.
 pub(crate) fn js_step(
     session: &mut Session,
-    args: &[Word],
+    step: &BatchStep,
     deadline: Deadline,
 ) -> Result<StepDone, AppError> {
-    let expression = joined(args);
+    let expression = match step.args() {
+        [only] if only.quoted => only.text.clone(),
+        _ => step
+            .source
+            .split_once(char::is_whitespace)
+            .map_or_else(String::new, |(_, rest)| rest.trim().to_owned()),
+    };
     let page = session.page()?;
     let value = evaluate(session.connection(), &page, &expression, deadline)?;
     let shown = match &value {

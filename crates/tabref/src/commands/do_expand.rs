@@ -38,6 +38,9 @@ pub(crate) fn expand(steps: &[BatchStep]) -> Result<Vec<BatchStep>, AppError> {
                 for chunk in values.chunks(names.len()) {
                     for inner in &body {
                         out.push(substitute(inner, &names, chunk));
+                        if out.len() > MAX_STEPS {
+                            return Err(too_many());
+                        }
                     }
                 }
                 index = close + 1;
@@ -48,12 +51,16 @@ pub(crate) fn expand(steps: &[BatchStep]) -> Result<Vec<BatchStep>, AppError> {
             }
         }
         if out.len() > MAX_STEPS {
-            return Err(AppError::invalid_args(format!(
-                "the batch runs more than {MAX_STEPS} steps; split it"
-            )));
+            return Err(too_many());
         }
     }
     Ok(out)
+}
+
+fn too_many() -> AppError {
+    AppError::invalid_args(format!(
+        "the batch runs more than {MAX_STEPS} steps; split it"
+    ))
 }
 
 fn matching_end(steps: &[BatchStep], start: usize) -> Result<usize, AppError> {
@@ -100,25 +107,51 @@ fn usage(step: &BatchStep) -> AppError {
     ))
 }
 
+/// The step with `{name}` replaced by its value in one pass over the
+/// written text, so a value that itself reads `{other}` stays as it is. A
+/// word that took a value is quoted, so a value never turns into a role
+/// word, a keyword or a ref.
 fn substitute(step: &BatchStep, names: &[String], values: &[String]) -> BatchStep {
     let fill = |text: &str| {
-        names
-            .iter()
-            .zip(values)
-            .fold(text.to_owned(), |text, (name, value)| {
-                text.replace(&format!("{{{name}}}"), value)
-            })
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        let mut filled = false;
+        while let Some(open) = rest.find('{') {
+            out.push_str(&rest[..open]);
+            let after = &rest[open + 1..];
+            let value = after.find('}').and_then(|close| {
+                let name = &after[..close];
+                let index = names.iter().position(|known| known == name)?;
+                Some((close, values.get(index)?))
+            });
+            match value {
+                Some((close, value)) => {
+                    out.push_str(value);
+                    rest = &after[close + 1..];
+                    filled = true;
+                }
+                None => {
+                    out.push('{');
+                    rest = after;
+                }
+            }
+        }
+        out.push_str(rest);
+        (out, filled)
     };
     BatchStep {
         words: step
             .words
             .iter()
-            .map(|word| Word {
-                text: fill(&word.text),
-                quoted: word.quoted,
+            .map(|word| {
+                let (text, filled) = fill(&word.text);
+                Word {
+                    text,
+                    quoted: word.quoted || filled,
+                }
             })
             .collect(),
-        source: fill(&step.source),
+        source: fill(&step.source).0,
         line: step.line,
     }
 }

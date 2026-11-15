@@ -6,10 +6,12 @@ use super::act_target::{ActTarget, resolve_target};
 use super::action_report::step_report;
 use super::batch_step::BatchStep;
 use super::do_read_steps::{expect_step, find_step, js_step, open_step, read_step, snap_step};
+use super::page_url::short_url;
 use super::step_done::StepDone;
 use super::target_spec::TargetSpec;
 use super::{check, click, fill, hover, press, scroll, select};
 use crate::session::Session;
+use crate::view::node_line::quote_text;
 
 const VERBS: &str = "open, click, fill, select, check, uncheck, press, hover, scroll, wait, expect, read, find, js, snap";
 const DIRECTIONS: &[&str] = &["down", "up", "left", "right"];
@@ -28,7 +30,7 @@ pub(crate) fn run_step(
         "wait" | "expect" => return expect_step(session, step, deadline),
         "read" => return read_step(session, args, deadline),
         "find" => return find_step(session, args),
-        "js" => return js_step(session, args, deadline),
+        "js" => return js_step(session, step, deadline),
         "snap" => return snap_step(session),
         "scroll" => return scroll_step(session, args, deadline),
         "click" => {
@@ -71,7 +73,20 @@ pub(crate) fn run_step(
             )));
         }
     };
-    let (text, data) = step_report(session, acted, last)?;
+    let late = match (&acted.effects, last, step.verb().as_str()) {
+        (Some(effects), false, "click" | "press") => session
+            .follow_late(effects, deadline)?
+            .map(|page| (effects.url_before.clone(), page)),
+        _ => None,
+    };
+    let (mut text, data) = step_report(session, acted, last)?;
+    if let Some((before, page)) = late {
+        text.push_str(&format!(
+            " -> {} {} (after the step settled)",
+            short_url(&before, &page.url),
+            quote_text(&page.title)
+        ));
+    }
     Ok(StepDone { text, data })
 }
 

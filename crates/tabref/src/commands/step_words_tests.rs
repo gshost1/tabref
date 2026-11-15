@@ -36,7 +36,7 @@ fn lines_and_semicolons_end_steps_and_quotes_keep_spaces() {
 
 #[test]
 fn double_quotes_take_escapes_and_single_quotes_take_text_as_it_is() {
-    let words = split_words(r#"fill "say \"hi\"\n" 'a\b' "" "x;y""#).unwrap();
+    let words = split_words(r#"fill "say \"hi\"\n" 'a\b' "" "x;y" "C:\d""#).unwrap();
     assert_eq!(
         words,
         vec![
@@ -45,6 +45,7 @@ fn double_quotes_take_escapes_and_single_quotes_take_text_as_it_is() {
             Word::quoted("a\\b"),
             Word::quoted(""),
             Word::quoted("x;y"),
+            Word::quoted("C:\\d"),
         ]
     );
 }

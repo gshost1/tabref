@@ -4,14 +4,15 @@ use tabref_page::{PageChanges, SettleOutcome};
 /// What an action set off: how its tab settled (a new document, a route
 /// change, requests, the dialogs it opened and the connection accepted),
 /// the tab it opened, which is now the current one, the address before the
-/// action, and the page's changes against how it stood before, when the
-/// page could be read afterwards.
+/// action, the page's changes against how it stood before, when the page
+/// could be read afterwards, and the tab's main frame.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ActionEffects {
     pub(crate) settled: SettleOutcome,
     pub(crate) new_tab: Option<String>,
     pub(crate) url_before: String,
     pub(crate) page: Option<PageChanges>,
+    pub(crate) main_frame: String,
 }
 
 impl ActionEffects {

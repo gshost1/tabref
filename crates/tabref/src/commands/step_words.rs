@@ -56,12 +56,16 @@ fn scan(text: &str, breaks: bool) -> Result<Vec<BatchStep>, AppError> {
                 if let Some(next) = escaped {
                     scanner.source.push(next);
                 }
-                scanner.word.push(match escaped {
-                    Some('n') => '\n',
-                    Some('t') => '\t',
-                    Some(other) => other,
-                    None => '\\',
-                });
+                match escaped {
+                    Some('n') => scanner.word.push('\n'),
+                    Some('t') => scanner.word.push('\t'),
+                    Some(other @ ('"' | '\\')) => scanner.word.push(other),
+                    Some(other) => {
+                        scanner.word.push('\\');
+                        scanner.word.push(other);
+                    }
+                    None => scanner.word.push('\\'),
+                }
             }
             Some(_) => scanner.word.push(c),
             None if c.is_whitespace() => scanner.end_word(),
