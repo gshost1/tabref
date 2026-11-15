@@ -1,5 +1,5 @@
-//! Addresses as results print them: a same-origin address as its path,
-//! query and fragment, and anything else in full.
+//! Addresses as results print them (a same-origin address as its path,
+//! query and fragment, anything else in full) and as steps give them.
 
 /// `after` as seen from `before`: `/admin/products?saved=1` when both share
 /// an origin, `after` itself otherwise.
@@ -15,13 +15,6 @@ pub(crate) fn short_url(before: &str, after: &str) -> String {
         }
         _ => after.to_owned(),
     }
-}
-
-/// Whether two addresses name the same page, query and fragment aside, as
-/// a form that posts back to its own list does.
-pub(crate) fn same_page(before: &str, after: &str) -> bool {
-    let page = |url: &str| url.split(['?', '#']).next().unwrap_or(url).to_owned();
-    page(before) == page(after)
 }
 
 /// Resolves `target` against the page at `base`: `/path`, `?query`,

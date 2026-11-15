@@ -1,4 +1,4 @@
-use super::{resolve_url, same_page, short_url};
+use super::{resolve_url, short_url};
 
 const EDIT: &str = "http://127.0.0.1:8792/admin/catalog/product/4499/edit";
 
@@ -13,15 +13,6 @@ fn a_same_origin_address_prints_as_its_path() {
         short_url(EDIT, "https://example.com/a"),
         "https://example.com/a"
     );
-}
-
-#[test]
-fn a_page_is_its_address_without_query_or_fragment() {
-    assert!(same_page(
-        "http://x/forum/f/books?sort=new",
-        "http://x/forum/f/books?sort=hot#top"
-    ));
-    assert!(!same_page("http://x/a/1/edit", "http://x/a"));
 }
 
 #[test]

@@ -277,3 +277,24 @@ fn a_role_alone_finds_the_only_control_of_that_role() {
         Ok("textfield ".into())
     );
 }
+
+#[test]
+fn text_in_no_row_leads_to_the_first_match_after_it() {
+    let tree = node(
+        "webarea",
+        "",
+        vec![
+            node("paragraph", "Does anyone know?", Vec::new()),
+            control("button", "Reply"),
+            node("paragraph", "I run this site", Vec::new()),
+            control("button", "Reply"),
+            node("paragraph", "Great news", Vec::new()),
+            control("button", "Reply"),
+        ],
+    );
+    let words = [Word::quoted("Reply"), Word::bare("in"), Word::quoted("I run this site")];
+    let found = locate(&tree, &Locator::from_words(&words).unwrap(), LocateIntent::Click).unwrap();
+    let nth = [Word::quoted("Reply"), Word::bare("nth"), Word::bare("2")];
+    let second = locate(&tree, &Locator::from_words(&nth).unwrap(), LocateIntent::Click).unwrap();
+    assert_eq!(found.token, second.token);
+}

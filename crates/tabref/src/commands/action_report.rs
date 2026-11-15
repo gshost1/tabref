@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
-use super::page_url::{same_page, short_url};
+use super::page_url::short_url;
 use crate::output::outcome::Outcome;
 use crate::output::page_report::page_report;
 use crate::session::Session;
@@ -69,7 +69,7 @@ pub(crate) fn step_report(
         if effects.settled.navigated {
             line.push_str(&format!(" {}", quote_text(&page.title)));
         }
-        let leaves = effects.settled.navigated && !same_page(&effects.url_before, &page.url);
+        let leaves = effects.settled.navigated && effects.url_before != page.url;
         if !leaves && let Some(first) = page.changes.first() {
             line.push_str(&format!("; {first}"));
             if page.changes.len() > 1 {
@@ -103,7 +103,7 @@ fn effect_block(
         return Ok((lines, data));
     };
     merge(&mut data, json!({ "url": page.url, "title": page.title }));
-    if effects.settled.navigated && !same_page(&effects.url_before, &page.url) {
+    if effects.settled.navigated && effects.url_before != page.url {
         let report = page_report(&session.capture()?, ViewMode::Interactive);
         lines.push(report.text);
         merge(&mut data, json!({ "page": report.data }));
