@@ -35,6 +35,7 @@ pub(crate) fn run_request(
     options.stdin = request.stdin;
     let mut session = state.checkout(&options, cancel)?;
     let outcome = commands::dispatch(&mut session, &cli.command);
+    let outcome = session.with_warning(outcome);
     state.checkin(session);
     outcome
 }

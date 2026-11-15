@@ -19,9 +19,22 @@ pub(crate) fn http_get_loopback(
     path: &str,
     deadline: Deadline,
 ) -> Result<String, AppError> {
+    http_get_checked(address, path, deadline, &|| Ok(()))
+}
+
+/// [`http_get_loopback`], running `before_write` once the TCP connection is
+/// up and before the request is written; its error drops the connection
+/// with nothing sent.
+pub(crate) fn http_get_checked(
+    address: SocketAddr,
+    path: &str,
+    deadline: Deadline,
+    before_write: &dyn Fn() -> Result<(), AppError>,
+) -> Result<String, AppError> {
     let port = address.port();
     let mut stream = TcpStream::connect_timeout(&address, slice(deadline)?)
         .map_err(|error| endpoint_unreachable(port, &error.to_string()))?;
+    before_write()?;
     stream
         .set_write_timeout(Some(slice(deadline)?))
         .map_err(|error| transport_failed("http", error.to_string()))?;
@@ -45,3 +58,7 @@ fn slice(deadline: Deadline) -> Result<Duration, AppError> {
     }
     Ok(deadline.remaining().max(MIN_IO_SLICE))
 }
+
+#[cfg(test)]
+#[path = "http_get_tests.rs"]
+mod tests;

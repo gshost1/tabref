@@ -1,9 +1,36 @@
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+
 use serde_json::json;
 use tabref_core::{AppError, Deadline, ErrorCode};
 
-use super::verify_connection;
+use super::{connect_held, verify_connection};
 use crate::ScriptedTransport;
+use crate::discovery::held_port::HeldPort;
 use crate::{BrowserEndpoint, CdpConnection, EndpointSource, WebSocketUrl};
+
+#[test]
+fn a_checked_port_is_reached_only_at_127_0_0_1_on_that_port() {
+    let held = HeldPort {
+        port: 9222,
+        inodes: BTreeSet::from([1]),
+        proc_root: PathBuf::from("/nonexistent"),
+    };
+    for url in [
+        "ws://127.0.0.1:9333/devtools/browser/x",
+        "ws://[::1]:9222/devtools/browser/x",
+    ] {
+        let endpoint = BrowserEndpoint {
+            websocket_url: WebSocketUrl::parse(url).unwrap(),
+            source: EndpointSource::JsonVersion,
+            product: None,
+        };
+        let Err(error) = connect_held(&endpoint, &held, Deadline::after(500).unwrap()) else {
+            panic!("{url} was connected to");
+        };
+        assert_eq!(error.kind(), Some("cdp_endpoint_mismatch"), "{url}");
+    }
+}
 
 fn endpoint(source: EndpointSource) -> BrowserEndpoint {
     BrowserEndpoint {

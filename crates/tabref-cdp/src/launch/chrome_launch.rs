@@ -10,6 +10,7 @@ use tabref_core::{
 use super::chrome_binary::find_chrome;
 use super::launch_options::LaunchOptions;
 use super::launched_browser::LaunchedBrowser;
+use super::process_start::process_start;
 use crate::read_active_port;
 
 const POLL: Duration = Duration::from_millis(25);
@@ -56,6 +57,7 @@ pub fn launch_chrome(
     })?;
     let active = wait_for_port(&mut child, &profile_dir, deadline)?;
     let pid = child.id();
+    let started = process_start(pid);
     std::thread::spawn(move || child.wait());
     Ok(LaunchedBrowser {
         pid,
@@ -63,6 +65,7 @@ pub fn launch_chrome(
         websocket_path: active.websocket_path,
         profile_dir,
         headless: !options.headed,
+        started,
     })
 }
 

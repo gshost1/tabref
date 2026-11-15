@@ -2,7 +2,8 @@ use std::net::SocketAddr;
 
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
-use super::http_get::http_get_loopback;
+use super::held_port::HeldPort;
+use super::http_get::{http_get_checked, http_get_loopback};
 use crate::{BrowserEndpoint, EndpointSource, WebSocketUrl};
 
 /// Discovers the browser endpoint behind an explicit remote-debugging port by
@@ -21,6 +22,19 @@ pub fn endpoint_from_address(
 ) -> Result<BrowserEndpoint, AppError> {
     let body = http_get_loopback(address, "/json/version", deadline)?;
     parse_version_body(address.port(), &body)
+}
+
+/// [`endpoint_from_port`] for a port the owner check vouched for: the probe
+/// goes to `127.0.0.1:<port>` and, once its TCP connection is up, is written
+/// only while the port still has the sockets the check saw (kind
+/// `cdp_endpoint_changed` otherwise, with nothing sent).
+pub fn endpoint_from_held(
+    held: &HeldPort,
+    deadline: Deadline,
+) -> Result<BrowserEndpoint, AppError> {
+    let address = SocketAddr::from(([127, 0, 0, 1], held.port));
+    let body = http_get_checked(address, "/json/version", deadline, &|| held.confirm())?;
+    parse_version_body(held.port, &body)
 }
 
 pub(crate) fn parse_version_body(port: u16, body: &str) -> Result<BrowserEndpoint, AppError> {
