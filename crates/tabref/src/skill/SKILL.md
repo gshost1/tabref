@@ -19,7 +19,6 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
 ## Acting
 `click T`, `fill T VALUE`, `select T OPTION`, `check T`, `uncheck T`, `press KEY [T]`, `hover T`, `scroll down|T`.
 `type T TEXT` adds TEXT after what the field holds (`fill` replaces it); `double-click T` clicks twice.
-`open --new-tab URL` opens URL (relative paths too) in a new tab that becomes the current one.
 T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
 `"Edit" in "<row text>"`, `"Reply" after "<text>"` (or `before`). Several or no matches fail with candidates;
 nothing is guessed. Each action prints what changed (new address, `{3 -> 4}`, field `"67.00" -> "62.00"`,
@@ -44,4 +43,5 @@ Steps: any action above, `open URL`, `expect text|gone|url X`, `read [T]`, `find
 
 ## Errors (one line, code first)
 `ELEMENT_NOT_FOUND` lists the closest names; `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`;
-`STALE_REF`: use the fresh ref it gives; `TIMEOUT`; `INVALID_ARGS`. Tabs: `tabref tabs`, `tabref tab N`.
+`STALE_REF`: use the fresh ref it gives; `TIMEOUT`; `INVALID_ARGS`. Tabs: `tabref tabs`, `tabref tab N`,
+`tabref open --new-tab URL` (relative too; the new tab becomes current).

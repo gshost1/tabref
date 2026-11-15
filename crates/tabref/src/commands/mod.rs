@@ -13,6 +13,7 @@ pub(crate) mod fill;
 pub(crate) mod find;
 pub(crate) mod hover;
 pub(crate) mod js;
+pub(crate) mod new_tab;
 pub(crate) mod open;
 pub(crate) mod page_url;
 pub(crate) mod page_view;
