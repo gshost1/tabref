@@ -14,8 +14,10 @@ mod common;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use common::{Harness, chrome_args, harness, harness_home, live, serve};
+use serde_json::Value;
 use tabref_cdp::{LaunchOptions, launch_chrome};
 use tabref_core::Deadline;
 
@@ -147,17 +149,73 @@ fn a_batch_that_fails_after_a_step_ran_is_not_safe_to_retry() {
 }
 
 /// Asks the browser's own HTTP endpoint for `path`, as a user closing a
-/// window from outside tabref would.
+/// window from outside tabref would, and returns the body of its `200`
+/// answer.
 fn devtools_get(tabref: &Harness, path: &str) -> String {
     let mut stream = TcpStream::connect(("127.0.0.1", tabref.browser.port)).unwrap();
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
     let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).unwrap();
-    let mut answer = String::new();
-    let _ = stream.read_to_string(&mut answer);
-    answer
+    let mut answer: Vec<u8> = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = stream.read(&mut chunk).unwrap_or(0);
+        if read == 0 {
+            break;
+        }
+        answer.extend_from_slice(&chunk[..read]);
+        let text = String::from_utf8_lossy(&answer).into_owned();
+        if let Some((head, body)) = text.split_once("\r\n\r\n") {
+            let length = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())?
+                })
+                .unwrap_or(usize::MAX);
+            if body.len() >= length {
+                break;
+            }
+        }
+    }
+    let text = String::from_utf8_lossy(&answer).into_owned();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((text.as_str(), ""));
+    assert!(head.starts_with("HTTP/1.1 200"), "{path}: {text}");
+    body.to_owned()
+}
+
+/// The page targets `/json/list` names.
+fn pages(tabref: &Harness) -> Vec<Value> {
+    let listed: Value = serde_json::from_str(&devtools_get(tabref, "/json/list")).unwrap();
+    listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|target| target["type"] == "page")
+        .cloned()
+        .collect()
+}
+
+/// Closes every page from outside tabref and waits, up to 5 s, until the
+/// browser lists none.
+fn close_every_page(tabref: &Harness) {
+    for page in pages(tabref) {
+        let id = page["id"].as_str().unwrap().to_owned();
+        let answer = devtools_get(tabref, &format!("/json/close/{id}"));
+        assert!(answer.contains("Target is closing"), "{answer}");
+    }
+    let started = Instant::now();
+    while !pages(tabref).is_empty() {
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            pages(tabref)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 #[test]
@@ -188,18 +246,29 @@ fn close_is_refused_in_an_app_and_its_window_stays() {
 }
 
 #[test]
-fn an_app_with_no_window_page_gets_no_blank_tab() {
+fn an_app_with_no_window_page_gets_no_blank_tab_and_lists_no_tabs() {
     if !live() {
         return;
     }
     let tabref = app_harness("app-guard-empty");
-    let listed = tabref.ok(&["--json", "tabs"]).json();
-    let id = listed["data"]["tabs"][0]["id"].as_str().unwrap().to_owned();
-    devtools_get(&tabref, &format!("/json/close/{id}"));
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    close_every_page(&tabref);
     let snap = tabref.run(&["--json", "snap"]);
     let error = &snap.json()["error"];
     assert_eq!(error["details"]["kind"], "cdp_app_has_no_page", "{error}");
-    let pages = devtools_get(&tabref, "/json/list");
-    assert!(!pages.contains("\"type\": \"page\""), "{pages}");
+    let tabs = tabref.ok(&["--json", "tabs"]).json();
+    assert_eq!(tabs["data"]["tabs"], serde_json::json!([]), "{tabs}");
+    assert!(pages(&tabref).is_empty(), "{:?}", pages(&tabref));
+}
+
+#[test]
+fn a_normal_chrome_with_no_page_gets_a_blank_tab() {
+    if !live() {
+        return;
+    }
+    let chrome = harness("app-guard-empty-chrome");
+    close_every_page(&chrome);
+    chrome.ok(&["snap"]);
+    let left = pages(&chrome);
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0]["url"], "about:blank", "{left:?}");
 }

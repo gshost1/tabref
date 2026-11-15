@@ -57,6 +57,11 @@ impl Session {
         &self.endpoint
     }
 
+    /// Keeps the user agent the browser gave, so a kept session asks once.
+    pub(crate) fn remember_user_agent(&mut self, agent: &str) {
+        self.endpoint.user_agent = Some(agent.to_owned());
+    }
+
     pub(crate) fn attached_count(&self) -> usize {
         self.attached.len()
     }

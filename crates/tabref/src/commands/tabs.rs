@@ -6,9 +6,14 @@ use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::view::node_line::quote_text;
 
-/// Lists the open tabs by index; `*` marks the current one.
+/// Lists the open tabs by index; `*` marks the current one. An app that
+/// embeds Chrome and shows no window page has no tabs, and none is current.
 pub(crate) fn run(session: &mut Session) -> Result<Outcome, AppError> {
-    let current = session.tab_id()?;
+    let current = match session.tab_id() {
+        Ok(tab) => tab,
+        Err(error) if error.kind() == Some("cdp_app_has_no_page") => String::new(),
+        Err(error) => return Err(error),
+    };
     let tabs = session.tabs()?;
     Ok(tab_list(&tabs, &current))
 }

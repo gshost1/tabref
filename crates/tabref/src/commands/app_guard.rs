@@ -70,11 +70,13 @@ pub(crate) fn app_runtime(
                 session
                     .connection()
                     .call("Browser.getVersion", json!({}), None, deadline)?;
-            version
+            let agent = version
                 .get("userAgent")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
-                .to_owned()
+                .to_owned();
+            session.remember_user_agent(&agent);
+            agent
         }
     };
     Ok(embedded_runtime(&agent).map(str::to_owned))

@@ -130,7 +130,7 @@ impl Session {
                 if let Some(runtime) = app_runtime(self, deadline)? {
                     return Err(app_has_no_page(&runtime));
                 }
-                create_background_tab(&mut self.connection, "about:blank", self.scope.deadline)?
+                create_background_tab(&mut self.connection, "about:blank", deadline)?
             }
         };
         self.use_tab(&tab)?;
