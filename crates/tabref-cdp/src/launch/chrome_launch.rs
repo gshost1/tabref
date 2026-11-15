@@ -7,11 +7,12 @@ use tabref_core::{
     new_snapshot_id,
 };
 
-use super::abandon::{THROWAWAY_PREFIX, kill_group, remove_profile_soon};
+use super::abandon::{THROWAWAY_PREFIX, kill_child_group, remove_profile_soon};
 use super::chrome_binary::find_chrome;
 use super::launch_options::LaunchOptions;
 use super::launched_browser::LaunchedBrowser;
 use super::process_start::process_start;
+use super::profile_use::ProfileUse;
 use crate::{
     ActivePort, ListenerVerdict, ProcessView, check_listener, is_chrome_family, read_active_port,
 };
@@ -83,7 +84,11 @@ pub fn launch_chrome(
         profile_dir,
         headless: !options.headed,
         started,
-        persistent: options.profile_dir.is_some(),
+        profile_use: if options.profile_dir.is_some() {
+            ProfileUse::PERSISTENT
+        } else {
+            ProfileUse::THROWAWAY
+        },
     })
 }
 
@@ -190,7 +195,7 @@ fn wait_for_port(
             .with_details(serde_json::json!({ "kind": "chrome_exited" })));
         }
         if deadline.is_expired() {
-            kill_group(child.id());
+            kill_child_group(child.id());
             let _ = child.kill();
             return Err(
                 AppError::timeout("The browser did not open DevTools before the deadline")

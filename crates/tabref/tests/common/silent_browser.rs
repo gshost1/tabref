@@ -1,8 +1,10 @@
 //! A fake browser for tests that need no real one: it writes its port to the
-//! profile's `DevToolsActivePort`, holds the port, and never answers. Used
-//! as `TABREF_CHROME` (through `silent_browser`) or started on its own in a
-//! process group of its own and recorded as tabref's launch would
-//! (`start_detached`, `launch_record`). Linux only. Included with `#[path]`.
+//! profile's `DevToolsActivePort`, holds the port, and never answers. It runs
+//! as a copy of the Python interpreter named `chrome`, so tabref takes it for
+//! a Chrome-family binary. Used as `TABREF_CHROME` (through
+//! `silent_browser`) or started on its own in a process group of its own and
+//! recorded as tabref's launch would (`start_detached`, `launch_record`).
+//! Linux only. Included with `#[path]`.
 #![allow(dead_code)]
 
 use std::os::unix::fs::PermissionsExt;
@@ -27,7 +29,11 @@ pub fn silent_browser(dir: &Path) -> PathBuf {
     let binary = dir.join("silent-browser");
     std::fs::write(
         &binary,
-        format!("#!/bin/sh\nexec python3 {} \"$@\"\n", script.display()),
+        format!(
+            "#!/bin/sh\nexec {} {} \"$@\"\n",
+            chrome(dir).display(),
+            script.display()
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -42,7 +48,8 @@ pub fn start_detached(tools: &Path, profile: &Path) -> (u32, u16) {
     let pid_file = tools.join("detached-pid");
     let _ = std::fs::remove_file(&pid_file);
     let line = format!(
-        "setsid python3 '{}' '--user-data-dir={}' </dev/null >/dev/null 2>&1 &",
+        "setsid '{}' '{}' '--user-data-dir={}' </dev/null >/dev/null 2>&1 &",
+        chrome(tools).display(),
         script(tools).display(),
         profile.display()
     );
@@ -67,15 +74,25 @@ pub fn start_detached(tools: &Path, profile: &Path) -> (u32, u16) {
     }
 }
 
-/// When process `pid` started, as tabref records it (`/proc/<pid>/stat`).
+/// When process `pid` started, as tabref records it (the boot id, then the
+/// start time from `/proc/<pid>/stat`).
 pub fn start_time(pid: u32) -> String {
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
     let after_name = &stat[stat.rfind(')').unwrap() + 1..];
-    after_name.split_whitespace().nth(19).unwrap().to_owned()
+    let start = after_name.split_whitespace().nth(19).unwrap();
+    format!("{}:{start}", boot.trim())
 }
 
-/// The launch record tabref keeps for a browser it started.
-pub fn launch_record(pid: u32, port: u16, profile: &Path, persistent: bool) -> String {
+/// The launch record tabref keeps for a browser it started (`adopted`: one
+/// it found running on the profile instead).
+pub fn launch_record(
+    pid: u32,
+    port: u16,
+    profile: &Path,
+    persistent: bool,
+    adopted: bool,
+) -> String {
     serde_json::json!({
         "pid": pid,
         "port": port,
@@ -84,8 +101,17 @@ pub fn launch_record(pid: u32, port: u16, profile: &Path, persistent: bool) -> S
         "headless": true,
         "started": start_time(pid),
         "persistent": persistent,
+        "adopted": adopted,
     })
     .to_string()
+}
+
+/// Writes `record` as `home`'s launch record, private to the user as
+/// tabref writes it (tabref ignores one that others could write).
+pub fn write_record(home: &Path, record: &str) {
+    let path = home.join("launched.json");
+    std::fs::write(&path, record).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
 
 /// Whether process `pid` is gone, waiting up to five seconds for it.
@@ -102,6 +128,21 @@ pub fn kill(pid: u32) {
     let _ = std::process::Command::new("kill")
         .args(["-KILL", &pid.to_string()])
         .status();
+}
+
+/// A copy of the Python interpreter named `chrome` in `dir`.
+fn chrome(dir: &Path) -> PathBuf {
+    let binary = dir.join("chrome");
+    if !binary.exists() {
+        let output = std::process::Command::new("python3")
+            .args(["-c", "import sys; print(sys.executable)"])
+            .output()
+            .unwrap();
+        let python = String::from_utf8(output.stdout).unwrap();
+        std::fs::copy(python.trim(), &binary).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    binary
 }
 
 fn script(dir: &Path) -> PathBuf {

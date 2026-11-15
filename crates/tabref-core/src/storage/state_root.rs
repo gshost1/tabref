@@ -46,8 +46,34 @@ fn validate_configured(path: &Path) -> Result<(), AppError> {
             "{STATE_ROOT_ENV} must be a directory: '{}'",
             path.display()
         ))),
-        _ => Ok(()),
+        Ok(meta) => make_private(path, &meta),
+        Err(_) => Ok(()),
     }
+}
+
+/// Makes an existing state directory private to the user (0700 on Unix):
+/// it holds the launch record, which names a process tabref may end. Only
+/// the directory's owner can change its mode, so a directory another user
+/// owns is refused.
+fn make_private(path: &Path, meta: &std::fs::Metadata) -> Result<(), AppError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o077 != 0 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(
+                |error| {
+                    AppError::invalid_args(format!(
+                        "{STATE_ROOT_ENV} '{}' is open to other users and could not be made \
+                         private: {error}",
+                        path.display()
+                    ))
+                },
+            )?;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (path, meta);
+    Ok(())
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ fn record(pid: u32, started: Option<String>) -> LaunchedBrowser {
         profile_dir: PathBuf::from("/nonexistent/profile"),
         headless: true,
         started,
-        persistent: false,
+        profile_use: crate::ProfileUse::THROWAWAY,
     }
 }
 
@@ -49,4 +49,33 @@ fn a_launch_record_is_alive_only_for_the_same_process() {
         Some(false)
     );
     assert_eq!(launched_alive(&record(me, None)), None);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_start_time_names_the_boot_it_was_read_in() {
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+    let start = process_start(std::process::id()).unwrap();
+    assert!(start.starts_with(&format!("{}:", boot.trim())), "{start}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_process_that_exited_but_was_not_reaped_counts_as_gone() {
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    let stat = format!("/proc/{pid}/stat");
+    let started = std::time::Instant::now();
+    while !std::fs::read_to_string(&stat).is_ok_and(|text| text.contains(") Z "))
+        && started.elapsed() < std::time::Duration::from_secs(5)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+    let raw = linux_start_time(&std::fs::read_to_string(&stat).unwrap()).unwrap();
+    let start = process_start(pid);
+    let alive = launched_alive(&record(pid, Some(format!("{}:{raw}", boot.trim()))));
+    let _ = child.wait();
+    assert_eq!(start, None);
+    assert_eq!(alive, Some(false));
 }

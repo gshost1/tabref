@@ -48,6 +48,7 @@ fn run_in(tabref: &Harness, dir: &Path, args: &[&str]) -> Run {
 fn adopt_browser(tabref: &Harness) {
     let record = serde_json::to_string(&tabref.browser).unwrap();
     std::fs::write(tabref.home.join("launched.json"), record).unwrap();
+    common::private_record(&tabref.home.join("launched.json"));
 }
 
 #[test]

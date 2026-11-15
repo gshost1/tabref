@@ -35,6 +35,8 @@ pub use launch::chrome_launch::launch_chrome;
 pub use launch::launch_options::LaunchOptions;
 pub use launch::launched_browser::LaunchedBrowser;
 pub use launch::process_start::{launched_alive, process_start};
+pub use launch::profile_use::ProfileUse;
+pub use launch::recorded_process::is_launched_browser;
 pub use target::frame_entry::FrameEntry;
 pub use target::frame_tree::{current_loader, list_frames, parse_frame_tree};
 pub use target::navigate::{navigate, navigate_by, wait_for_load};

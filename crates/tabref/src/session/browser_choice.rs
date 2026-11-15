@@ -9,7 +9,7 @@
 use tabref_core::RefStore;
 
 use super::launch_profile::{requested_profile, same_dir};
-use super::launch_record::{LAUNCH_FILE, load_launched};
+use super::launch_record::{load_launched, read_launched};
 use super::session_options::SessionOptions;
 use super::user_chrome_record::choice_in_use;
 
@@ -29,9 +29,7 @@ pub(crate) fn choice_key(store: &RefStore, options: &SessionOptions) -> Option<S
             return Some(format!("profile:{}", profile.display()));
         }
     }
-    store
-        .read_state(LAUNCH_FILE)
-        .map(|text| format!("launched:{text}"))
+    read_launched(store).map(|text| format!("launched:{text}"))
 }
 
 #[cfg(test)]
