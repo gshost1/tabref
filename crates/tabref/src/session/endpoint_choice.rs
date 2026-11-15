@@ -11,6 +11,7 @@ use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 
 use super::connected_browser::ConnectedBrowser;
 use super::endpoint_refusal::{named_warning, unverified_port};
+use super::launch_profile::{check_profile, requested_profile, running_on_profile, same_dir};
 use super::launch_record::{forget_launched, load_launched, save_launched};
 use super::session_options::SessionOptions;
 use super::user_chrome::{GONE_KIND, connect_user_chrome};
@@ -58,11 +59,14 @@ pub(crate) fn connect_browser(
             }
         });
     }
-    if let Some(found) = launched_browser(store, deadline)? {
+    let profile = requested_profile(options);
+    if let Some(found) = launched_browser(store, profile, deadline)? {
         return Ok(found);
     }
-    if let Some(found) = default_port(deadline, options.launch.is_some())? {
-        return Ok(found);
+    if profile.is_none() {
+        if let Some(found) = default_port(deadline, options.launch.is_some())? {
+            return Ok(found);
+        }
     }
     match &options.launch {
         Some(launch) => start_browser(launch, store, deadline),
@@ -91,13 +95,20 @@ fn at_checked_address(endpoint: &BrowserEndpoint, held: &HeldPort) -> bool {
     endpoint.websocket_url.socket_addr() == SocketAddr::from((Ipv4Addr::LOCALHOST, held.port))
 }
 
+/// The browser a previous `open --launch` started, unless the command asks
+/// for a `profile` that browser does not run (its record is then kept for
+/// commands that do not ask).
 fn launched_browser(
     store: &RefStore,
+    profile: Option<&Path>,
     deadline: Deadline,
 ) -> Result<Option<ConnectedBrowser>, AppError> {
     let Some(record) = load_launched(store) else {
         return Ok(None);
     };
+    if profile.is_some_and(|profile| !same_dir(profile, &record.profile_dir)) {
+        return Ok(None);
+    }
     let Ok(endpoint) = record.endpoint() else {
         forget_launched(store);
         return Ok(None);
@@ -218,7 +229,16 @@ fn start_browser(
     store: &RefStore,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
-    let browser = launch_chrome(launch, deadline)?;
+    let browser = match &launch.profile_dir {
+        Some(profile) => {
+            check_profile(profile)?;
+            match running_on_profile(profile, !launch.headed) {
+                Some(running) => running,
+                None => launch_chrome(launch, deadline)?,
+            }
+        }
+        None => launch_chrome(launch, deadline)?,
+    };
     save_launched(store, &browser)?;
     let endpoint = browser.endpoint()?;
     let connection = connect(&endpoint, deadline)?;

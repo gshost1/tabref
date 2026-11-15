@@ -61,9 +61,13 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
         Command::Open {
             launch: true,
             headed,
+            profile,
             ..
         } => Some(LaunchOptions {
             headed: *headed,
+            profile_dir: profile
+                .as_deref()
+                .map(|dir| std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf())),
             extra_args: extra_browser_args(),
             ..LaunchOptions::default()
         }),

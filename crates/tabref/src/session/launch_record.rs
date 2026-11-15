@@ -1,7 +1,7 @@
 use tabref_cdp::LaunchedBrowser;
 use tabref_core::{AppError, RefStore};
 
-const LAUNCH_FILE: &str = "launched.json";
+pub(crate) const LAUNCH_FILE: &str = "launched.json";
 
 /// The browser `open --launch` started, as the state directory remembers it.
 pub(crate) fn load_launched(store: &RefStore) -> Option<LaunchedBrowser> {

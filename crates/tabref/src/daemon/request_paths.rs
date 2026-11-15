@@ -14,7 +14,16 @@ use crate::commands::open::normalize_url;
 /// command that takes no path.
 pub(crate) fn resolved_paths(command: &Command) -> Option<Vec<String>> {
     match command {
-        Command::Open { url, .. } => Some(vec![normalize_url(url)]),
+        Command::Open { url, profile, .. } => Some(
+            std::iter::once(normalize_url(url))
+                .chain(profile.iter().map(|dir| {
+                    std::path::absolute(dir)
+                        .unwrap_or_else(|_| dir.clone())
+                        .to_string_lossy()
+                        .into_owned()
+                }))
+                .collect(),
+        ),
         Command::Upload { files, .. } => Some(
             files
                 .iter()
@@ -42,9 +51,13 @@ pub(crate) fn apply_paths(command: &mut Command, paths: Option<Vec<String>>) {
         return;
     };
     match command {
-        Command::Open { url, .. } => {
-            if let Some(resolved) = paths.into_iter().next() {
+        Command::Open { url, profile, .. } => {
+            let mut paths = paths.into_iter();
+            if let Some(resolved) = paths.next() {
                 *url = resolved;
+            }
+            if let Some(resolved) = paths.next() {
+                *profile = Some(PathBuf::from(resolved));
             }
         }
         Command::Upload { files, .. } => {

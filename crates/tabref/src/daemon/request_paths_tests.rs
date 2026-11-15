@@ -8,8 +8,30 @@ fn open(url: &str) -> Command {
         url: url.into(),
         launch: false,
         headed: false,
+        profile: None,
         new_tab: false,
     }
+}
+
+#[test]
+fn a_relative_launch_profile_reaches_the_daemon_as_the_clients_directory() {
+    let here = std::env::current_dir().unwrap();
+    let asked = Command::Open {
+        url: "example.com".into(),
+        launch: true,
+        headed: false,
+        profile: Some(PathBuf::from("profiles/work")),
+        new_tab: false,
+    };
+    let paths = resolved_paths(&asked).unwrap();
+    assert_eq!(paths[1], here.join("profiles/work").to_string_lossy());
+
+    let mut command = open("example.com");
+    apply_paths(&mut command, Some(paths));
+    let Command::Open { profile, .. } = command else {
+        unreachable!()
+    };
+    assert_eq!(profile, Some(here.join("profiles/work")));
 }
 
 #[test]

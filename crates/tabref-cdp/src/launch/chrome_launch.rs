@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use tabref_core::{
     AppError, Deadline, DeliverySemantics, ErrorCode, create_new_private_dir, create_private_dir,
@@ -11,7 +11,7 @@ use super::chrome_binary::find_chrome;
 use super::launch_options::LaunchOptions;
 use super::launched_browser::LaunchedBrowser;
 use super::process_start::process_start;
-use crate::read_active_port;
+use crate::{ActivePort, read_active_port};
 
 const POLL: Duration = Duration::from_millis(25);
 /// Variables that mark the launching process (a tabref daemon) and must not
@@ -23,10 +23,13 @@ const INHERITED_NOT: &[&str] = &[
 ];
 const WINDOW_SIZE: &str = "--window-size=1280,900";
 
-/// Starts a browser with a fresh throwaway profile and remote debugging on a
-/// port the browser picks, and waits, bounded by `deadline`, until it writes
-/// that port to the profile's `DevToolsActivePort`. The browser runs in its
-/// own process group, so it outlives this process and the shell that ran it.
+/// Starts a browser with remote debugging on a port the browser picks, and
+/// waits, bounded by `deadline`, until it writes that port to the profile's
+/// `DevToolsActivePort`. The profile is a fresh throwaway one, or the
+/// persistent `options.profile_dir` (created private to the user when new),
+/// whose `DevToolsActivePort` from an earlier run is not taken for this
+/// one's. The browser runs in its own process group, so it outlives this
+/// process and the shell that ran it.
 pub fn launch_chrome(
     options: &LaunchOptions,
     deadline: Deadline,
@@ -36,6 +39,7 @@ pub fn launch_chrome(
         None => find_chrome()?,
     };
     let profile_dir = profile_dir(options)?;
+    let launched_at = SystemTime::now();
     let mut command = Command::new(&binary);
     command
         .args(browser_args(options, &profile_dir))
@@ -55,7 +59,7 @@ pub fn launch_chrome(
         .with_details(serde_json::json!({ "kind": "chrome_spawn_failed" }))
         .with_disposition(DeliverySemantics::not_delivered())
     })?;
-    let active = wait_for_port(&mut child, &profile_dir, deadline)?;
+    let active = wait_for_port(&mut child, (&profile_dir, launched_at), deadline)?;
     let pid = child.id();
     let started = process_start(pid);
     std::thread::spawn(move || child.wait());
@@ -66,7 +70,20 @@ pub fn launch_chrome(
         profile_dir,
         headless: !options.headed,
         started,
+        persistent: options.profile_dir.is_some(),
     })
+}
+
+/// The profile's `DevToolsActivePort`, once one written at or after `since`
+/// is there; an older one is left by an earlier browser on that profile.
+pub(crate) fn written_since(profile_dir: &Path, since: SystemTime) -> Option<ActivePort> {
+    let modified = std::fs::metadata(profile_dir.join("DevToolsActivePort"))
+        .and_then(|metadata| metadata.modified())
+        .ok()?;
+    if modified < since {
+        return None;
+    }
+    read_active_port(profile_dir).ok()
 }
 
 pub(crate) fn browser_args(options: &LaunchOptions, profile_dir: &Path) -> Vec<String> {
@@ -87,6 +104,12 @@ pub(crate) fn browser_args(options: &LaunchOptions, profile_dir: &Path) -> Vec<S
 }
 
 fn profile_dir(options: &LaunchOptions) -> Result<PathBuf, AppError> {
+    if let Some(dir) = &options.profile_dir {
+        if !dir.is_dir() {
+            create_private_dir(dir)?;
+        }
+        return Ok(dir.clone());
+    }
     let root = options
         .profile_root
         .clone()
@@ -99,11 +122,11 @@ fn profile_dir(options: &LaunchOptions) -> Result<PathBuf, AppError> {
 
 fn wait_for_port(
     child: &mut Child,
-    profile_dir: &Path,
+    (profile_dir, since): (&Path, SystemTime),
     deadline: Deadline,
-) -> Result<crate::ActivePort, AppError> {
+) -> Result<ActivePort, AppError> {
     loop {
-        if let Ok(active) = read_active_port(profile_dir) {
+        if let Some(active) = written_since(profile_dir, since) {
             return Ok(active);
         }
         if let Ok(Some(status)) = child.try_wait() {

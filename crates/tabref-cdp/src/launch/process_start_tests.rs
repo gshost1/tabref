@@ -11,6 +11,7 @@ fn record(pid: u32, started: Option<String>) -> LaunchedBrowser {
         profile_dir: PathBuf::from("/nonexistent/profile"),
         headless: true,
         started,
+        persistent: false,
     }
 }
 

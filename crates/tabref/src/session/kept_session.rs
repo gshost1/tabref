@@ -6,10 +6,10 @@ use tabref_cdp::BrowserEndpoint;
 use tabref_core::AppError;
 
 use super::Session;
+use super::browser_choice::choice_key;
 use super::command_scope::CommandScope;
 use super::session_options::SessionOptions;
 use super::tab_claim::TabClaim;
-use super::user_chrome_record::choice_in_use;
 
 impl Session {
     /// Starts the next command on a kept session: a fresh deadline and tab
@@ -25,7 +25,7 @@ impl Session {
         options: &SessionOptions,
         claim: Option<TabClaim>,
     ) -> Result<(), AppError> {
-        let wanted = choice_in_use(&self.store, options).map(|(text, _)| text);
+        let wanted = choice_key(&self.store, options);
         if wanted != self.choice {
             return Err(AppError::internal(
                 "the browser choice changed since this connection was made",

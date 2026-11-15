@@ -13,6 +13,9 @@ pub(crate) enum Command {
         /// With --launch: show the browser window instead of running headless
         #[arg(long)]
         headed: bool,
+        /// With --launch: keep the browser's profile (logins, cookies) in DIR across runs
+        #[arg(long, value_name = "DIR", requires = "launch")]
+        profile: Option<PathBuf>,
         /// Open the address in a new tab, which becomes the current tab
         #[arg(long)]
         new_tab: bool,
