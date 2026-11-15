@@ -27,3 +27,16 @@ pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
 }
+
+const TIMEOUT_MS: u64 = 10_000;
+const DO_TIMEOUT_MS: u64 = 120_000;
+
+impl Cli {
+    /// The command's deadline: `--timeout`, else 10 s, or 120 s for `do`.
+    pub(crate) fn timeout_ms(&self) -> u64 {
+        self.timeout.unwrap_or(match self.command {
+            Command::Do { .. } => DO_TIMEOUT_MS,
+            _ => TIMEOUT_MS,
+        })
+    }
+}

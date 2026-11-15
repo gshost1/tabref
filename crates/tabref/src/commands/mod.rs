@@ -41,9 +41,6 @@ use crate::session::Session;
 use crate::session::session_options::SessionOptions;
 use crate::view::view_request::ViewRequest;
 
-const TIMEOUT_MS: u64 = 10_000;
-const DO_TIMEOUT_MS: u64 = 120_000;
-
 /// Runs the parsed command. Every command but `skill` runs against one
 /// [`Session`], built here and nowhere else.
 pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
@@ -71,10 +68,7 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
     SessionOptions {
         cdp: cli.cdp.clone(),
         tab: cli.tab.clone(),
-        timeout_ms: cli.timeout.unwrap_or(match cli.command {
-            Command::Do { .. } => DO_TIMEOUT_MS,
-            _ => TIMEOUT_MS,
-        }),
+        timeout_ms: cli.timeout_ms(),
         launch,
         stdin: None,
     }

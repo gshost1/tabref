@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -24,11 +23,7 @@ pub(crate) fn run(
 ) -> Result<Outcome, AppError> {
     let source = match text {
         Some(text) if text != "-" => text.to_owned(),
-        _ => {
-            let mut read = String::new();
-            std::io::stdin().read_to_string(&mut read)?;
-            read
-        }
+        _ => session.command_stdin()?,
     };
     let steps = expand(&split_steps(&source)?)?;
     if steps.is_empty() {

@@ -17,12 +17,10 @@ use crate::cli::command::Command;
 const MAX_STDIN: u64 = 960 * 1024;
 const STDIN_WAIT: Duration = Duration::from_secs(2);
 
-/// Whether `command` reads its standard input. None does yet; a command
-/// that takes its steps from stdin when none are given inline answers true
-/// for exactly that case.
+/// Whether `command` reads its standard input: `do` without inline steps,
+/// or with `-`, takes its steps from stdin.
 pub(crate) fn takes_stdin(command: &Command) -> bool {
-    let _ = command;
-    false
+    matches!(command, Command::Do { steps, .. } if steps.as_deref().is_none_or(|steps| steps == "-"))
 }
 
 /// The stdin to send with `command`, when it reads one.
