@@ -15,6 +15,8 @@ pub(crate) mod snapshot_capture;
 pub(crate) mod tab_choice;
 pub(crate) mod tab_claim;
 pub(crate) mod tab_order;
+pub(crate) mod user_chrome;
+pub(crate) mod user_chrome_record;
 
 use std::collections::HashMap;
 
@@ -31,6 +33,7 @@ use session_options::SessionOptions;
 use tab_choice::choose_tab;
 use tab_claim::TabClaim;
 use tab_order::{order_text, stable_order};
+use user_chrome_record::USER_CHROME_FILE;
 
 /// Everything one command runs against: the DevTools connection, the page
 /// sessions attached through it, the ref store and what the current command
@@ -45,6 +48,7 @@ pub(crate) struct Session {
     attached: HashMap<String, PageSession>,
     scope: CommandScope,
     warning: Option<String>,
+    choice: Option<String>,
 }
 
 impl Session {
@@ -60,6 +64,7 @@ impl Session {
     ) -> Result<Self, AppError> {
         let scope = CommandScope::new(options, claim)?;
         let store = RefStore::open()?;
+        let choice = store.read_state(USER_CHROME_FILE);
         let browser = connect_browser(options, &store, scope.deadline)?;
         let mut connection = browser.connection;
         connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
@@ -70,6 +75,7 @@ impl Session {
             attached: HashMap::new(),
             scope,
             warning: browser.warning,
+            choice,
         })
     }
 

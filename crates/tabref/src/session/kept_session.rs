@@ -9,18 +9,26 @@ use super::Session;
 use super::command_scope::CommandScope;
 use super::session_options::SessionOptions;
 use super::tab_claim::TabClaim;
+use super::user_chrome_record::USER_CHROME_FILE;
 
 impl Session {
     /// Starts the next command on a kept session: a fresh deadline and tab
     /// choice, every frame the browser sent meanwhile accounted for, and the
     /// sessions of closed tabs forgotten. Events from before the command are
     /// dropped, as a new connection would never have seen them. An error
-    /// means the connection is gone and the session must be replaced.
+    /// means the connection is gone, or the user turned `connect
+    /// --user-chrome` on or off since it was made, and the session must be
+    /// replaced.
     pub(crate) fn begin(
         &mut self,
         options: &SessionOptions,
         claim: Option<TabClaim>,
     ) -> Result<(), AppError> {
+        if self.store.read_state(USER_CHROME_FILE) != self.choice {
+            return Err(AppError::internal(
+                "the browser choice changed since this connection was made",
+            ));
+        }
         self.scope = CommandScope::new(options, claim)?;
         let cancel = self.scope.claim.as_ref().map(TabClaim::cancel_flag);
         self.connection.set_cancel(cancel);
