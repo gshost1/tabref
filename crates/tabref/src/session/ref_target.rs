@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::json;
 use tabref_cdp::PageSession;
+use tabref_core::state::{self, has_state};
 use tabref_core::{AccessibilityNode, AppError, ErrorCode, RefEntry, RefId, RefMap, is_ref_able};
 use tabref_page::{ElementToken, read_node_identity};
 
@@ -67,6 +68,20 @@ impl Session {
     /// `STALE_REF` naming the other tab when it belongs to one. A long ref's
     /// tab becomes the current tab.
     pub(crate) fn resolve_ref(&mut self, text: &str) -> Result<RefTarget, AppError> {
+        self.resolve(text, false).map(|(target, _)| target)
+    }
+
+    /// [`Session::resolve_ref`] that lets an element the page hides now
+    /// through unchecked, with `true`: a hidden element has no role or name
+    /// to compare, so the caller waits for it to show and resolves again.
+    pub(crate) fn resolve_ref_or_hidden(
+        &mut self,
+        text: &str,
+    ) -> Result<(RefTarget, bool), AppError> {
+        self.resolve(text, true)
+    }
+
+    fn resolve(&mut self, text: &str, allow_hidden: bool) -> Result<(RefTarget, bool), AppError> {
         let ref_id = match short_element(text) {
             Some(element) => self.expand_short_ref(element)?,
             None => RefId::parse(text)?,
@@ -85,8 +100,21 @@ impl Session {
             }
             Err(error) => return Err(error),
         };
+        let hidden = has_state(&live.presentation.states, state::HIDDEN);
         let live_name = live.identity.name.filter(|name| !name.is_empty());
-        if live.role != entry.role || live_name != entry.name {
+        let drifted = live.role != entry.role || live_name != entry.name;
+        if drifted && allow_hidden && hidden {
+            let target = RefTarget {
+                ref_id,
+                entry,
+                token,
+                session,
+                tab_id: map.tab_id,
+                known: Vec::new(),
+            };
+            return Ok((target, true));
+        }
+        if drifted {
             let drift = AppError::stale_ref_because(format!("{ref_id} changed since its snapshot"))
                 .with_details(json!({
                     "kind": "cdp_node_drift",
@@ -96,14 +124,15 @@ impl Session {
             return Err(self.with_fresh_candidate(drift, &ref_id, &entry));
         }
         self.use_tab(&map.tab_id)?;
-        Ok(RefTarget {
+        let target = RefTarget {
             ref_id,
             entry,
             token,
             session,
             tab_id: map.tab_id,
             known: map.refs.into_iter().map(|entry| entry.token).collect(),
-        })
+        };
+        Ok((target, false))
     }
 
     fn expand_short_ref(&mut self, element: u32) -> Result<RefId, AppError> {

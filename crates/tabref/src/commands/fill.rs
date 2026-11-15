@@ -28,6 +28,7 @@ pub(crate) fn act(
     text: &str,
     deadline: Deadline,
 ) -> Result<Acted, AppError> {
+    target.ensure_ready(session, LocateIntent::Fill, deadline)?;
     let watched = session.watch_action(&target.tab_id, deadline)?;
     let filled = fill(
         session.connection(),

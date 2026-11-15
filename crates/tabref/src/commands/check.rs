@@ -42,6 +42,7 @@ pub(crate) fn act(
             known: target.known,
         });
     }
+    target.ensure_ready(session, LocateIntent::Check, deadline)?;
     let watched = session.watch_action(&target.tab_id, deadline)?;
     let state = set_checked(
         session.connection(),

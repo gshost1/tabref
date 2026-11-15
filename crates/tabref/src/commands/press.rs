@@ -41,6 +41,7 @@ pub(crate) fn act(
 ) -> Result<Acted, AppError> {
     let (page, tab, label, known) = match target {
         Some(target) => {
+            target.ensure_ready(session, LocateIntent::Click, deadline)?;
             focus(
                 session.connection(),
                 &target.session,

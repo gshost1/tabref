@@ -26,6 +26,7 @@ pub(crate) fn act(
     target: ActTarget,
     deadline: Deadline,
 ) -> Result<Acted, AppError> {
+    target.ensure_ready(session, LocateIntent::Click, deadline)?;
     let watched = session.watch_action(&target.tab_id, deadline)?;
     let point = click(
         session.connection(),

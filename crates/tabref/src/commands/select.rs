@@ -28,6 +28,7 @@ pub(crate) fn act(
     option: &str,
     deadline: Deadline,
 ) -> Result<Acted, AppError> {
+    target.ensure_ready(session, LocateIntent::Select, deadline)?;
     let watched = session.watch_action(&target.tab_id, deadline)?;
     let chosen = select_option(
         session.connection(),
