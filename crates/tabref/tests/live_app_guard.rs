@@ -1,9 +1,9 @@
 //! Live regressions for an app that embeds Chrome for its own interface
-//! (Electron), reached over `--cdp`: tabref reads and acts on the app's own
-//! page, and `open` refuses to navigate it away, while a page on the web in
-//! the same app, or a normal Chrome on an app-like file page, still opens.
-//! No Electron app is installed here, so the fixture is headless Chrome
-//! with an Electron user agent showing a `file://` page as its interface.
+//! (Electron), reached over `--cdp`: tabref reads and acts on the app's
+//! window, and `open` refuses to navigate it away or open a new window,
+//! while a normal Chrome on a file page still opens a web page. No Electron
+//! app is installed here, so the fixture is headless Chrome with an
+//! Electron user agent whose window shows a web page, as Slack's does.
 //! Opt-in:
 //! `TABREF_LIVE=1 cargo test -p tabref --test live_app_guard -- --test-threads=1`.
 
@@ -50,14 +50,16 @@ fn app_file(tabref: &Harness) -> PathBuf {
 }
 
 #[test]
-fn an_apps_own_page_is_read_and_acted_on_but_never_navigated_away() {
+fn an_apps_window_is_read_and_acted_on_but_never_opened_over_or_beside() {
     if !live() {
         return;
     }
     let tabref = app_harness("app-guard");
-    let port = serve(&[("/help", WEB_PAGE)]);
-    let file = app_file(&tabref);
-    let shown = tabref.ok(&["open", &format!("file://{}", file.display())]);
+    let port = serve(&[("/app", APP_PAGE), ("/help", WEB_PAGE)]);
+    let base = format!("http://127.0.0.1:{port}");
+    tabref.ok(&["js", &format!("location.href = '{base}/app'; 1")]);
+    tabref.ok(&["wait", "--text", "My notes"]);
+    let shown = tabref.ok(&["snap"]);
     assert!(shown.stdout.contains("My notes"), "{}", shown.stdout);
     let clicked = tabref.ok(&["click", "New note"]);
     assert!(
@@ -66,11 +68,19 @@ fn an_apps_own_page_is_read_and_acted_on_but_never_navigated_away() {
         clicked.stdout
     );
 
-    let refused = tabref.run(&["--json", "open", &format!("http://127.0.0.1:{port}/help")]);
+    let refused = tabref.run(&["--json", "open", &format!("{base}/help")]);
     let error = &refused.json()["error"];
     assert_eq!(error["code"], "ACTION_NOT_SUPPORTED", "{error}");
     assert_eq!(error["details"]["kind"], "cdp_not_a_browser", "{error}");
     assert_eq!(error["disposition"]["delivery"], "not_delivered", "{error}");
+    let beside = tabref.run(&["open", "--new-tab", &format!("{base}/help")]);
+    assert!(
+        beside
+            .stderr
+            .starts_with("error ACTION_NOT_SUPPORTED (cdp_not_a_browser)"),
+        "{}",
+        beside.stderr
+    );
     let step = tabref.run(&["do", "open /help"]);
     assert!(
         step.stderr
@@ -78,22 +88,19 @@ fn an_apps_own_page_is_read_and_acted_on_but_never_navigated_away() {
         "{}",
         step.stderr
     );
+    let tabs = tabref.ok(&["tabs"]);
+    assert_eq!(tabs.stdout.lines().count(), 1, "{}", tabs.stdout);
     let still = tabref.ok(&["js", "document.title"]);
     assert_eq!(still.stdout.trim(), "Notes app");
 }
 
 #[test]
-fn a_web_page_in_an_app_or_a_file_page_in_chrome_still_opens() {
+fn a_file_page_in_a_normal_chrome_still_opens_a_web_page() {
     if !live() {
         return;
     }
     let port = serve(&[("/help", WEB_PAGE)]);
     let help = format!("http://127.0.0.1:{port}/help");
-    let app = app_harness("app-guard-web");
-    app.ok(&["open", &help]);
-    let again = app.ok(&["open", &format!("{help}?again=1")]);
-    assert!(again.stdout.contains("Help center"), "{}", again.stdout);
-
     let chrome = harness("app-guard-chrome");
     let file = app_file(&chrome);
     chrome.ok(&["open", &format!("file://{}", file.display())]);

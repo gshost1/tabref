@@ -6,7 +6,7 @@ use tabref_core::{AppError, Deadline};
 use tabref_page::{DownloadRecord, PageInfo};
 
 use super::action_report::set;
-use super::app_guard::refuse_app_page;
+use super::app_guard::refuse_in_app;
 use super::download_folder::{choose_cap, choose_folder, clear_folder};
 use super::download_lines::{download_json, download_line};
 use super::downloads;
@@ -38,6 +38,7 @@ pub(crate) fn run(
     request: &OpenRequest,
 ) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
+    refuse_in_app(session, deadline)?;
     if let Some(dir) = &request.download_dir {
         choose_folder(session, dir)?;
     }
@@ -57,10 +58,9 @@ pub(crate) fn run(
         return Ok(report);
     }
     let page = session.page()?;
-    let current = PageInfo::read(session.connection(), &page.target_id, deadline)?.url;
-    refuse_app_page(session, &current, deadline)?;
     let url = normalize_url(url);
     let url = if is_relative(&url) {
+        let current = PageInfo::read(session.connection(), &page.target_id, deadline)?.url;
         resolve_url(&current, &url)
     } else {
         url

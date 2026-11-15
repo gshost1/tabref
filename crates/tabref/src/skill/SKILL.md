@@ -52,5 +52,5 @@ Steps: any action above, `open URL`, `expect text|gone|url X`, `read [T]`, `find
 `ELEMENT_NOT_FOUND` lists the closest names; `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`;
 `STALE_REF`: use the fresh ref it gives; `TIMEOUT`; `INVALID_ARGS`. Tabs: `tabref tabs`, `tabref tab N`,
 `tabref open --new-tab URL` (relative too; the new tab becomes current).
-In an app built on Chrome (Electron, reached with `--cdp PORT`), `open` refuses to replace the app's own page;
-snap, click and fill work on it as on any page.
+In an app built on Chrome (Electron, reached with `--cdp PORT`), `open` and `open --new-tab` are refused, as its
+windows are the app; snap, click, fill and js work on them as on any page.
