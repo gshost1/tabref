@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "linux"), allow(unused_imports, dead_code))]
+
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
@@ -79,6 +81,7 @@ fn a_launch_record_whose_port_is_free_is_not_used() {
         profile_dir: PathBuf::from("/nonexistent/tabref-profile"),
         headless: true,
         started: tabref_cdp::process_start(std::process::id()),
+        persistent: false,
     };
     assert!(launched_check(&record).is_none());
 }

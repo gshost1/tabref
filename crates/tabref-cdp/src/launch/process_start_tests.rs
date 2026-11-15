@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "linux"), allow(unused_imports, dead_code))]
+
 use std::path::PathBuf;
 
 use super::{launched_alive, linux_start_time, process_start};
@@ -11,6 +13,7 @@ fn record(pid: u32, started: Option<String>) -> LaunchedBrowser {
         profile_dir: PathBuf::from("/nonexistent/profile"),
         headless: true,
         started,
+        persistent: false,
     }
 }
 

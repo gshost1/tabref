@@ -1,5 +1,6 @@
 pub(crate) mod action_effects;
 pub(crate) mod action_watch;
+pub(crate) mod browser_choice;
 pub(crate) mod captured_snapshot;
 pub(crate) mod command_input;
 pub(crate) mod command_scope;
@@ -8,6 +9,7 @@ pub(crate) mod connection_warning;
 pub(crate) mod endpoint_choice;
 pub(crate) mod endpoint_refusal;
 pub(crate) mod kept_session;
+pub(crate) mod launch_profile;
 pub(crate) mod launch_record;
 pub(crate) mod ref_target;
 pub(crate) mod session_options;
@@ -66,12 +68,15 @@ impl Session {
         let scope = CommandScope::new(options, claim)?;
         let store = RefStore::open()?;
         let in_use = choice_in_use(&store, options);
-        let record = in_use.as_ref().map(|(_, record)| record);
+        let record = in_use
+            .as_ref()
+            .map(|(text, record)| (text.as_str(), record));
         let browser = connect_browser(options, &store, record, scope.deadline)?;
-        let choice = in_use.map(|(text, _)| text);
+        let chosen = in_use.map(|(text, _)| text);
+        let choice = browser.choice;
         let mut connection = browser.connection;
         connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
-        connection.set_guard(choice.clone().map(|chosen| opt_in_guard(&store, chosen)));
+        connection.set_guard(chosen.map(|chosen| opt_in_guard(&store, chosen)));
         Ok(Self {
             connection,
             endpoint: browser.endpoint,

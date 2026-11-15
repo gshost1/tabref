@@ -29,6 +29,7 @@ pub use discovery::profile_lock::profile_lock_pid;
 pub use discovery::user_browser::UserBrowser;
 pub use discovery::user_data_dir::endpoint_from_user_data_dir;
 pub use discovery::websocket_url::WebSocketUrl;
+pub use launch::abandon::abandon_launch;
 pub use launch::chrome_binary::{CHROME_ENV, find_chrome};
 pub use launch::chrome_launch::launch_chrome;
 pub use launch::launch_options::LaunchOptions;

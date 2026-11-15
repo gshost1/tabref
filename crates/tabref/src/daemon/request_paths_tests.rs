@@ -8,11 +8,38 @@ fn open(url: &str) -> Command {
         url: url.into(),
         launch: false,
         headed: false,
+        profile: None,
         new_tab: false,
         download_dir: None,
         no_download_dir: false,
         download_max_mb: None,
     }
+}
+
+#[test]
+fn a_relative_launch_profile_reaches_the_daemon_as_the_clients_directory() {
+    let here = std::env::current_dir().unwrap();
+    let mut asked = open("example.com");
+    if let Command::Open { profile, .. } = &mut asked {
+        *profile = Some(PathBuf::from("profiles/work"));
+    }
+    let paths = resolved_paths(&asked).unwrap();
+
+    let mut command = open("example.com");
+    apply_paths(&mut command, Some(paths));
+    let Command::Open {
+        profile,
+        download_dir,
+        ..
+    } = command
+    else {
+        unreachable!()
+    };
+    assert_eq!(profile, Some(here.join("profiles/work")));
+    assert_eq!(
+        download_dir, None,
+        "the profile was taken for the download folder"
+    );
 }
 
 #[test]

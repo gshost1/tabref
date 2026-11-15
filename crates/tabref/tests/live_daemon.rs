@@ -238,6 +238,7 @@ fn chrome_on(port: u16) -> LaunchedBrowser {
         profile_dir,
         headless: true,
         started: None,
+        persistent: false,
     }
 }
 

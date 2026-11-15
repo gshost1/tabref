@@ -7,11 +7,14 @@ use tabref_core::{
     new_snapshot_id,
 };
 
+use super::abandon::{kill_group, remove_profile_soon};
 use super::chrome_binary::find_chrome;
 use super::launch_options::LaunchOptions;
 use super::launched_browser::LaunchedBrowser;
 use super::process_start::process_start;
-use crate::read_active_port;
+use crate::{
+    ActivePort, ListenerVerdict, ProcessView, check_listener, is_chrome_family, read_active_port,
+};
 
 const POLL: Duration = Duration::from_millis(25);
 /// Variables that mark the launching process (a tabref daemon) and must not
@@ -23,10 +26,14 @@ const INHERITED_NOT: &[&str] = &[
 ];
 const WINDOW_SIZE: &str = "--window-size=1280,900";
 
-/// Starts a browser with a fresh throwaway profile and remote debugging on a
-/// port the browser picks, and waits, bounded by `deadline`, until it writes
-/// that port to the profile's `DevToolsActivePort`. The browser runs in its
-/// own process group, so it outlives this process and the shell that ran it.
+/// Starts a browser with remote debugging on a port the browser picks, and
+/// waits, bounded by `deadline`, until it writes that port to the profile's
+/// `DevToolsActivePort`. The profile is a fresh throwaway one, or the
+/// persistent `options.profile_dir` (created private to the user when new),
+/// whose `DevToolsActivePort` from an earlier run is not taken for this
+/// one's. The browser runs in its own process group, so it outlives this
+/// process and the shell that ran it. A launch that fails ends that group
+/// when the deadline passes and removes a throwaway profile.
 pub fn launch_chrome(
     options: &LaunchOptions,
     deadline: Deadline,
@@ -36,6 +43,7 @@ pub fn launch_chrome(
         None => find_chrome()?,
     };
     let profile_dir = profile_dir(options)?;
+    let before = port_file_print(&profile_dir);
     let mut command = Command::new(&binary);
     command
         .args(browser_args(options, &profile_dir))
@@ -55,7 +63,16 @@ pub fn launch_chrome(
         .with_details(serde_json::json!({ "kind": "chrome_spawn_failed" }))
         .with_disposition(DeliverySemantics::not_delivered())
     })?;
-    let active = wait_for_port(&mut child, &profile_dir, deadline)?;
+    let active = match wait_for_port(&mut child, &profile_dir, before.as_deref(), deadline) {
+        Ok(active) => active,
+        Err(error) => {
+            let _ = child.wait();
+            if options.profile_dir.is_none() {
+                remove_profile_soon(&profile_dir);
+            }
+            return Err(error);
+        }
+    };
     let pid = child.id();
     let started = process_start(pid);
     std::thread::spawn(move || child.wait());
@@ -66,7 +83,55 @@ pub fn launch_chrome(
         profile_dir,
         headless: !options.headed,
         started,
+        persistent: options.profile_dir.is_some(),
     })
+}
+
+/// What the profile's `DevToolsActivePort` is now (contents, size, time,
+/// and on Unix its inode), so a launch can tell the file its browser writes
+/// from one an earlier browser on the profile left; `None` without a file.
+pub(crate) fn port_file_print(profile_dir: &Path) -> Option<String> {
+    let path = profile_dir.join("DevToolsActivePort");
+    let metadata = std::fs::metadata(&path).ok()?;
+    let contents = std::fs::read_to_string(&path).unwrap_or_default();
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&metadata);
+    #[cfg(not(unix))]
+    let inode = 0_u64;
+    Some(format!(
+        "{inode}:{}:{:?}:{contents}",
+        metadata.len(),
+        metadata.modified().ok()
+    ))
+}
+
+/// The profile's `DevToolsActivePort`, once it differs from `before` (what
+/// it was before the launch), so a file an earlier browser left is never
+/// taken for this one's.
+pub(crate) fn changed_port_file(profile_dir: &Path, before: Option<&str>) -> Option<ActivePort> {
+    let now = port_file_print(profile_dir)?;
+    if before == Some(now.as_str()) {
+        return None;
+    }
+    read_active_port(profile_dir).ok()
+}
+
+/// Whether the browser just started holds `port`, asked only while the child
+/// still runs (`wait_for_port`): every listener on it is the child, or a
+/// Chrome-family process of this user with this profile's
+/// `--user-data-dir`. On a platform that cannot tell who holds a port
+/// (`Unknown`, off Linux) the changed port file is taken as it is; where the
+/// socket tables cannot be read (`CantCheck`), or anything else holds the
+/// port, it is not.
+fn launched_holds(port: u16, child: u32, profile_dir: &Path) -> bool {
+    let flag = format!("--user-data-dir={}", profile_dir.display());
+    let ours = |process: &ProcessView| {
+        process.pid == child || (is_chrome_family(process) && process.args().contains(&flag))
+    };
+    matches!(
+        check_listener(port, &ours),
+        ListenerVerdict::Trusted(_) | ListenerVerdict::Unknown
+    )
 }
 
 pub(crate) fn browser_args(options: &LaunchOptions, profile_dir: &Path) -> Vec<String> {
@@ -87,6 +152,12 @@ pub(crate) fn browser_args(options: &LaunchOptions, profile_dir: &Path) -> Vec<S
 }
 
 fn profile_dir(options: &LaunchOptions) -> Result<PathBuf, AppError> {
+    if let Some(dir) = &options.profile_dir {
+        if !dir.is_dir() {
+            create_private_dir(dir)?;
+        }
+        return Ok(dir.clone());
+    }
     let root = options
         .profile_root
         .clone()
@@ -100,13 +171,17 @@ fn profile_dir(options: &LaunchOptions) -> Result<PathBuf, AppError> {
 fn wait_for_port(
     child: &mut Child,
     profile_dir: &Path,
+    before: Option<&str>,
     deadline: Deadline,
-) -> Result<crate::ActivePort, AppError> {
+) -> Result<ActivePort, AppError> {
     loop {
-        if let Ok(active) = read_active_port(profile_dir) {
-            return Ok(active);
+        let exited = child.try_wait();
+        if let (Ok(None), Some(active)) = (&exited, changed_port_file(profile_dir, before)) {
+            if launched_holds(active.port, child.id(), profile_dir) {
+                return Ok(active);
+            }
         }
-        if let Ok(Some(status)) = child.try_wait() {
+        if let Ok(Some(status)) = exited {
             return Err(AppError::new(
                 ErrorCode::ActionFailed,
                 format!("The browser exited before it opened DevTools ({status})"),
@@ -115,6 +190,7 @@ fn wait_for_port(
             .with_details(serde_json::json!({ "kind": "chrome_exited" })));
         }
         if deadline.is_expired() {
+            kill_group(child.id());
             let _ = child.kill();
             return Err(
                 AppError::timeout("The browser did not open DevTools before the deadline")

@@ -5,6 +5,7 @@ Chrome is already connected (TABREF_CDP). Output is plain text sized to read who
 grep, head or sed, and do not sleep; every command waits for the page itself.
 Only when the user asks for their own browser: `tabref connect --user-chrome` (opt-in; it drives their
 logged-in Chrome and its sessions; `tabref connect --off` stops).
+To keep logins between runs: `tabref open <url> --launch --profile DIR` (a profile of tabref's own, not yours).
 
 ## Reading
 One line per block in reading order; `#` lines are headings. Controls sit in brackets with their ref:

@@ -10,15 +10,23 @@ use crate::cli::command::Command;
 use crate::commands::open::normalize_url;
 
 /// The command's path arguments, resolved in this process's directory: the
-/// address `open` navigates to and its download folder, the files `upload`
-/// sets. `None` for a command that takes no path.
+/// address `open` navigates to, its download folder and its launch profile
+/// (each in its own place, empty when not given), the files `upload` sets.
+/// `None` for a command that takes no path.
 pub(crate) fn resolved_paths(command: &Command) -> Option<Vec<String>> {
     match command {
         Command::Open {
-            url, download_dir, ..
+            url,
+            download_dir,
+            profile,
+            ..
         } => {
-            let mut paths = vec![normalize_url(url)];
-            paths.extend(download_dir.iter().map(|dir| absolute_text(dir)));
+            let slot =
+                |dir: &Option<PathBuf>| dir.as_deref().map(absolute_text).unwrap_or_default();
+            let mut paths = vec![normalize_url(url), slot(download_dir), slot(profile)];
+            while paths.last().is_some_and(String::is_empty) {
+                paths.pop();
+            }
             Some(paths)
         }
         Command::Upload { files, .. } => {
@@ -41,14 +49,19 @@ pub(crate) fn apply_paths(command: &mut Command, paths: Option<Vec<String>>) {
     };
     match command {
         Command::Open {
-            url, download_dir, ..
+            url,
+            download_dir,
+            profile,
+            ..
         } => {
             let mut paths = paths.into_iter();
             if let Some(resolved) = paths.next() {
                 *url = resolved;
             }
-            if let Some(dir) = paths.next() {
-                *download_dir = Some(PathBuf::from(dir));
+            for slot in [download_dir, profile] {
+                if let Some(dir) = paths.next().filter(|dir| !dir.is_empty()) {
+                    *slot = Some(PathBuf::from(dir));
+                }
             }
         }
         Command::Upload { files, .. } => {

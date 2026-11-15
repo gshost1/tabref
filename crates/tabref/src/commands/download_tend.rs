@@ -1,3 +1,4 @@
+#![cfg_attr(windows, allow(dead_code))]
 //! The daemon's download chores outside commands, for a browser tabref
 //! launched only: folding the events its idle connections got, so every
 //! download that lands is named, and canceling what tabref started when
