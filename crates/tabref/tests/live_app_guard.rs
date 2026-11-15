@@ -11,6 +11,8 @@
 
 mod common;
 
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::PathBuf;
 
 use common::{Harness, chrome_args, harness, harness_home, live, serve};
@@ -142,4 +144,62 @@ fn a_batch_that_fails_after_a_step_ran_is_not_safe_to_retry() {
     let error = &run.json()["error"];
     assert_eq!(error["code"], "ELEMENT_NOT_FOUND", "{error}");
     assert_eq!(error["disposition"]["retry"], "unsafe", "{error}");
+}
+
+/// Asks the browser's own HTTP endpoint for `path`, as a user closing a
+/// window from outside tabref would.
+fn devtools_get(tabref: &Harness, path: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", tabref.browser.port)).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut answer = String::new();
+    let _ = stream.read_to_string(&mut answer);
+    answer
+}
+
+#[test]
+fn close_is_refused_in_an_app_and_its_window_stays() {
+    if !live() {
+        return;
+    }
+    let tabref = app_harness("app-guard-close");
+    let port = serve(&[("/app", APP_PAGE)]);
+    tabref.ok(&[
+        "js",
+        &format!("location.href = 'http://127.0.0.1:{port}/app'; 1"),
+    ]);
+    tabref.ok(&["wait", "--text", "My notes"]);
+    let refused = tabref.run(&["--json", "close"]);
+    let error = &refused.json()["error"];
+    assert_eq!(error["code"], "ACTION_NOT_SUPPORTED", "{error}");
+    assert_eq!(error["details"]["kind"], "cdp_not_a_browser", "{error}");
+    assert_eq!(error["details"]["runtime"], "Electron/32.1.0", "{error}");
+    let named = tabref.run(&["close", "0"]);
+    assert!(
+        named.stderr.starts_with("error ACTION_NOT_SUPPORTED"),
+        "{}",
+        named.stderr
+    );
+    let tabs = tabref.ok(&["tabs"]);
+    assert_eq!(tabs.stdout.lines().count(), 1, "{}", tabs.stdout);
+}
+
+#[test]
+fn an_app_with_no_window_page_gets_no_blank_tab() {
+    if !live() {
+        return;
+    }
+    let tabref = app_harness("app-guard-empty");
+    let listed = tabref.ok(&["--json", "tabs"]).json();
+    let id = listed["data"]["tabs"][0]["id"].as_str().unwrap().to_owned();
+    devtools_get(&tabref, &format!("/json/close/{id}"));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let snap = tabref.run(&["--json", "snap"]);
+    let error = &snap.json()["error"];
+    assert_eq!(error["details"]["kind"], "cdp_app_has_no_page", "{error}");
+    let pages = devtools_get(&tabref, "/json/list");
+    assert!(!pages.contains("\"type\": \"page\""), "{pages}");
 }

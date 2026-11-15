@@ -27,6 +27,7 @@ use tabref_cdp::{
 };
 use tabref_core::{AppError, Deadline, RefStore};
 
+use crate::commands::app_guard::{app_has_no_page, app_runtime};
 use command_scope::CommandScope;
 use endpoint_choice::connect_browser;
 use session_options::SessionOptions;
@@ -120,6 +121,10 @@ impl Session {
         let tab = match chosen {
             Some(tab) => tab,
             None => {
+                let deadline = self.scope.deadline;
+                if let Some(runtime) = app_runtime(self, deadline)? {
+                    return Err(app_has_no_page(&runtime));
+                }
                 create_background_tab(&mut self.connection, "about:blank", self.scope.deadline)?
             }
         };
