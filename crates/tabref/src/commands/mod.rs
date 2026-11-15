@@ -48,7 +48,8 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         return Ok(skill::run());
     }
     let mut session = Session::open(&session_options(cli))?;
-    dispatch(&mut session, &cli.command)
+    let outcome = dispatch(&mut session, &cli.command);
+    session.with_warning(outcome)
 }
 
 /// What the parsed command asks of its session.

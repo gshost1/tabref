@@ -237,6 +237,7 @@ fn chrome_on(port: u16) -> LaunchedBrowser {
         websocket_path: String::new(),
         profile_dir,
         headless: true,
+        started: None,
     }
 }
 

@@ -82,12 +82,78 @@ fn a_program_that_is_not_chrome_on_9222_is_refused_untouched() {
             error["details"]["kind"], "cdp_endpoint_unverified",
             "{error}"
         );
+        let named = format!("(pid {})", std::process::id());
         assert!(
-            error["suggestion"].as_str().unwrap().contains("--cdp 9222"),
+            error["message"].as_str().unwrap().contains(&named),
+            "{error}"
+        );
+        assert!(
+            error["suggestion"]
+                .as_str()
+                .unwrap()
+                .starts_with("Run 'tabref open <url> --launch'"),
             "{error}"
         );
     }
     assert_eq!(impostor.contacts(), 0, "the impostor was sent a connection");
+}
+
+#[test]
+fn a_named_port_another_program_holds_works_but_warns() {
+    if !live() {
+        return;
+    }
+    let tabref_home = common::harness("owner-named");
+    let proxy = forward_to(tabref_home.browser.port);
+    let endpoint = format!(
+        "ws://127.0.0.1:{proxy}{}",
+        tabref_home.browser.websocket_path
+    );
+    let json = tabref(
+        &tabref_home.home,
+        &["--cdp", &endpoint, "--json", "tabs"],
+        true,
+    );
+    let text = tabref(&tabref_home.home, &["--cdp", &endpoint, "tabs"], true);
+    assert!(
+        json.ok && text.ok,
+        "{}{}{}",
+        json.stderr,
+        text.stdout,
+        text.stderr
+    );
+    let warnings = json.json()["data"]["warnings"].clone();
+    let warning = warnings[0].as_str().unwrap_or_default().to_owned();
+    assert!(
+        warning.contains(&format!("port {proxy} is held by"))
+            && warning.contains(&format!("(pid {})", std::process::id())),
+        "{warnings}"
+    );
+    assert!(
+        text.stdout.starts_with(&format!("warning: port {proxy}")),
+        "{}",
+        text.stdout
+    );
+}
+
+/// A forwarder on a fresh loopback port, held by this test process, that
+/// relays every connection to `port`.
+fn forward_to(port: u16) -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let own = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for client in listener.incoming().flatten() {
+            let Ok(upstream) = std::net::TcpStream::connect(("127.0.0.1", port)) else {
+                continue;
+            };
+            let (mut client_in, mut upstream_out) =
+                (client.try_clone().unwrap(), upstream.try_clone().unwrap());
+            let (mut upstream_in, mut client_out) = (upstream, client);
+            std::thread::spawn(move || std::io::copy(&mut client_in, &mut upstream_out));
+            std::thread::spawn(move || std::io::copy(&mut upstream_in, &mut client_out));
+        }
+    });
+    own
 }
 
 #[test]

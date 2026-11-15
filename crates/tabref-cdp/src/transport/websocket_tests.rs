@@ -44,6 +44,32 @@ fn multi_megabyte_messages_round_trip_and_pings_are_skipped() {
 }
 
 #[test]
+fn a_failed_check_before_the_upgrade_sends_nothing() {
+    let (listener, url) = local_server();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        let mut buffer = [0_u8; 64];
+        stream.read(&mut buffer).unwrap_or(0)
+    });
+
+    let refused = tabref_core::AppError::internal("the port changed hands");
+    let error = WebSocketTransport::connect_checked(&url, Deadline::after(1_000).unwrap(), &|| {
+        Err(refused.clone())
+    })
+    .unwrap_err();
+
+    assert_eq!(error.message, "the port changed hands");
+    assert_eq!(
+        server.join().unwrap(),
+        0,
+        "bytes were sent before the check"
+    );
+}
+
+#[test]
 fn a_refused_upgrade_is_a_permission_error() {
     let (listener, url) = local_server();
     let server = thread::spawn(move || {

@@ -82,6 +82,17 @@ fn append(path: &Path, line: &str) {
 const CHROME: &str = "/opt/google/chrome/chrome";
 const LOOPBACK: &str = "0100007F";
 
+fn trusted(verdict: &ListenerVerdict) -> bool {
+    matches!(verdict, ListenerVerdict::Trusted(_))
+}
+
+fn holder(verdict: &ListenerVerdict) -> Option<Option<String>> {
+    match verdict {
+        ListenerVerdict::Untrusted { holder } => Some(holder.clone()),
+        _ => None,
+    }
+}
+
 #[test]
 fn nothing_listening_is_nothing() {
     let proc = FakeProc::new("nothing");
@@ -105,10 +116,11 @@ fn a_chrome_of_this_user_holding_the_port_is_trusted() {
             &["chrome", "--remote-debugging-port=9222"],
             &[555],
         );
-    assert_eq!(
-        proc.check(9222, &is_chrome_family),
-        ListenerVerdict::Trusted
-    );
+    let ListenerVerdict::Trusted(held) = proc.check(9222, &is_chrome_family) else {
+        panic!("not trusted");
+    };
+    assert_eq!(held.port, 9222);
+    assert_eq!(held.inodes.iter().copied().collect::<Vec<_>>(), [555]);
 }
 
 #[test]
@@ -120,61 +132,68 @@ fn a_browser_binary_replaced_by_an_update_still_counts() {
         &["chrome"],
         &[555],
     );
-    assert_eq!(
-        proc.check(9222, &is_chrome_family),
-        ListenerVerdict::Trusted
-    );
+    assert!(trusted(&proc.check(9222, &is_chrome_family)));
 }
 
 #[test]
-fn another_program_of_this_user_on_the_port_is_untrusted() {
+fn another_program_of_this_user_on_the_port_is_named() {
     let proc = FakeProc::new("python");
     proc.listen_v4(LOOPBACK, 9222, "0A", 555).process(
-        12,
+        1234,
         "/usr/bin/python3.14",
         &["python3", "-m", "http.server", "9222"],
         &[555],
     );
-    assert!(matches!(
-        proc.check(9222, &is_chrome_family),
-        ListenerVerdict::Untrusted(_)
-    ));
+    assert_eq!(
+        holder(&proc.check(9222, &is_chrome_family)),
+        Some(Some("python3.14 (pid 1234)".to_owned()))
+    );
 }
 
 #[test]
-fn a_listener_no_process_of_this_user_holds_is_untrusted() {
+fn a_listener_no_process_of_this_user_holds_has_no_visible_holder() {
     let proc = FakeProc::new("foreign");
     proc.listen_v4(LOOPBACK, 9222, "0A", 555)
         .process(11, CHROME, &["chrome"], &[777]);
-    assert!(matches!(
-        proc.check(9222, &is_chrome_family),
-        ListenerVerdict::Untrusted(_)
-    ));
+    assert_eq!(holder(&proc.check(9222, &is_chrome_family)), Some(None));
 }
 
 #[test]
-fn every_socket_that_could_take_the_connection_must_be_trusted() {
+fn a_socket_an_untrusted_process_also_holds_is_untrusted() {
+    let proc = FakeProc::new("shared");
+    proc.listen_v4(LOOPBACK, 9222, "0A", 555)
+        .process(11, CHROME, &["chrome"], &[555])
+        .process(12, "/usr/bin/socat", &["socat"], &[555]);
+    assert_eq!(
+        holder(&proc.check(9222, &is_chrome_family)),
+        Some(Some("socat (pid 12)".to_owned()))
+    );
+}
+
+#[test]
+fn every_listener_on_the_port_but_ipv6_loopback_must_be_trusted() {
     for (v4, v6) in [
-        ("00000000", None),
-        (LOOPBACK, Some("00000000000000000000000000000000")),
-        (LOOPBACK, Some("0000000000000000FFFF00000100007F")),
+        (Some("00000000"), None),
+        (Some("0500000A"), None),
+        (None, Some("00000000000000000000000000000000")),
+        (None, Some("0000000000000000FFFF00000100007F")),
+        (None, Some("0000000000000000FFFF000000000000")),
+        (None, Some("000080FE00000000FF005450B6AD1DFE")),
     ] {
         let proc = FakeProc::new("wildcard");
         proc.listen_v4(LOOPBACK, 9222, "0A", 555)
             .process(11, CHROME, &["chrome"], &[555])
-            .process(12, "/usr/bin/nc", &["nc", "-l", "9222"], &[556, 557]);
-        if v4 != LOOPBACK {
+            .process(12, "/usr/bin/nc", &["nc", "-l", "9222"], &[556]);
+        if let Some(v4) = v4 {
             proc.listen_v4(v4, 9222, "0A", 556);
         }
         if let Some(v6) = v6 {
-            proc.listen_v6(v6, 9222, 557);
+            proc.listen_v6(v6, 9222, 556);
         }
-        assert!(
-            matches!(
-                proc.check(9222, &is_chrome_family),
-                ListenerVerdict::Untrusted(_)
-            ),
-            "{v4} {v6:?}"
+        assert_eq!(
+            holder(&proc.check(9222, &is_chrome_family)),
+            Some(Some("nc (pid 12)".to_owned())),
+            "{v4:?} {v6:?}"
         );
     }
 }
@@ -188,6 +207,30 @@ fn a_listener_on_ipv6_loopback_alone_cannot_take_an_ipv4_connection() {
         proc.check(9222, &is_chrome_family),
         ListenerVerdict::Nothing
     );
+}
+
+#[test]
+fn unreadable_socket_tables_cannot_be_checked() {
+    let proc = FakeProc::new("unreadable");
+    std::fs::remove_file(proc.root.join("net/tcp")).unwrap();
+    assert!(matches!(
+        proc.check(9222, &is_chrome_family),
+        ListenerVerdict::CantCheck(_)
+    ));
+}
+
+#[test]
+fn a_held_port_notices_when_its_sockets_change() {
+    let proc = FakeProc::new("changed");
+    proc.listen_v4(LOOPBACK, 9222, "0A", 555)
+        .process(11, CHROME, &["chrome"], &[555]);
+    let ListenerVerdict::Trusted(held) = proc.check(9222, &is_chrome_family) else {
+        panic!("not trusted");
+    };
+    assert!(held.confirm().is_ok());
+    proc.listen_v4("00000000", 9222, "0A", 556);
+    let error = held.confirm().unwrap_err();
+    assert_eq!(error.kind(), Some("cdp_endpoint_changed"));
 }
 
 #[test]
@@ -209,11 +252,8 @@ fn a_launched_browser_is_known_by_its_profile_not_its_binary_name() {
             .iter()
             .any(|arg| arg == "--user-data-dir=/tmp/tabref-profile-b")
     };
-    assert_eq!(proc.check(40123, &ours), ListenerVerdict::Trusted);
-    assert!(matches!(
-        proc.check(40123, &other),
-        ListenerVerdict::Untrusted(_)
-    ));
+    assert!(trusted(&proc.check(40123, &ours)));
+    assert!(holder(&proc.check(40123, &other)).is_some());
 }
 
 #[test]

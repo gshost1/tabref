@@ -1,25 +1,24 @@
 //! Who owns a loopback DevTools port, checked before tabref sends it a single
 //! byte. A port answering like DevTools proves nothing: any local program can
 //! listen on 9222 or on a port a browser used to hold. On Linux, every socket
-//! that could take a connection to `127.0.0.1:<port>` (listening on
-//! 127.0.0.1, 0.0.0.0, `::` or `::ffff:127.0.0.1`) is found in
-//! `/proc/net/tcp{,6}` and matched by inode against the open sockets of this
-//! user's processes the caller trusts; one socket no trusted process holds
-//! makes the port untrusted. Elsewhere the answer is `Unknown`.
+//! listening on the port, on any address but `[::1]` (which cannot take the
+//! IPv4 connection tabref makes), is found in `/proc/net/tcp{,6}` and matched
+//! by inode against the open sockets of this user's processes. The port is
+//! trusted only when trusted processes hold every one of those sockets and no
+//! other process holds any of them; a socket no visible process holds belongs
+//! to another user or to root. Tables that cannot be read are `CantCheck`;
+//! other platforms are `Unknown`.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use super::held_port::HeldPort;
 use super::listener_verdict::ListenerVerdict;
 use super::process_view::ProcessView;
 
 const LISTEN: &str = "0A";
-const V4_REACHABLE: [&str; 2] = ["0100007F", "00000000"];
-const V6_REACHABLE: [&str; 2] = [
-    "00000000000000000000000000000000",
-    "0000000000000000FFFF00000100007F",
-];
+const V6_LOOPBACK: &str = "00000000000000000000000001000000";
 const CHROME_FAMILY: &[&str] = &[
     "chrome",
     "chromium",
@@ -39,7 +38,7 @@ pub fn check_listener(port: u16, trusted: &dyn Fn(&ProcessView) -> bool) -> List
         let proc_root = Path::new("/proc");
         match std::fs::metadata(proc_root.join("self")) {
             Ok(own) => check_in(proc_root, port, own.uid(), trusted),
-            Err(_) => ListenerVerdict::Untrusted("/proc/self could not be read".to_owned()),
+            Err(_) => ListenerVerdict::CantCheck("/proc/self could not be read".to_owned()),
         }
     }
     #[cfg(not(target_os = "linux"))]
@@ -62,33 +61,60 @@ pub(crate) fn check_in(
     uid: u32,
     trusted: &dyn Fn(&ProcessView) -> bool,
 ) -> ListenerVerdict {
-    let mut unclaimed = match listening_inodes(proc_root, port) {
+    let listening = match listening_inodes(proc_root, port) {
         Ok(inodes) => inodes,
-        Err(what) => return ListenerVerdict::Untrusted(what),
+        Err(what) => return ListenerVerdict::CantCheck(what),
     };
-    if unclaimed.is_empty() {
+    if listening.is_empty() {
         return ListenerVerdict::Nothing;
     }
     let Ok(entries) = std::fs::read_dir(proc_root) else {
-        return ListenerVerdict::Untrusted("the process list could not be read".to_owned());
+        return ListenerVerdict::CantCheck("the process list could not be read".to_owned());
     };
+    let mut claimed = BTreeSet::new();
+    let mut stranger = None;
     for entry in entries.flatten() {
         let Some(view) = own_process(&entry.path(), uid) else {
             continue;
         };
-        if !trusted(&view) {
+        let held: Vec<u64> = socket_inodes(&entry.path())
+            .into_iter()
+            .filter(|inode| listening.contains(inode))
+            .collect();
+        if held.is_empty() {
             continue;
         }
-        for inode in socket_inodes(&entry.path()) {
-            unclaimed.remove(&inode);
-        }
-        if unclaimed.is_empty() {
-            return ListenerVerdict::Trusted;
+        if trusted(&view) {
+            claimed.extend(held);
+        } else if stranger.is_none() {
+            stranger = Some(describe(&view));
         }
     }
-    ListenerVerdict::Untrusted(format!(
-        "port {port} is held by a process that is not a trusted browser of this user"
-    ))
+    if stranger.is_some() || claimed != listening {
+        return ListenerVerdict::Untrusted { holder: stranger };
+    }
+    ListenerVerdict::Trusted(HeldPort {
+        port,
+        inodes: listening,
+        proc_root: proc_root.to_path_buf(),
+    })
+}
+
+/// A process as an error names it: `python3 (pid 1234)`.
+fn describe(view: &ProcessView) -> String {
+    let name = view.exe_name();
+    let name = if name.is_empty() {
+        view.cmdline
+            .first()
+            .and_then(|arg| Path::new(arg).file_name())
+            .map_or_else(
+                || "a process".to_owned(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+    } else {
+        name
+    };
+    format!("{name} (pid {})", view.pid)
 }
 
 #[cfg(unix)]
@@ -127,19 +153,21 @@ fn socket_inodes(dir: &Path) -> Vec<u64> {
         .collect()
 }
 
-/// The inodes of every socket listening where a connection to
-/// `127.0.0.1:<port>` could land.
-fn listening_inodes(proc_root: &Path, port: u16) -> Result<HashSet<u64>, String> {
+/// The inodes of every socket listening on `port`, on any address but
+/// `[::1]`.
+pub(crate) fn listening_inodes(proc_root: &Path, port: u16) -> Result<BTreeSet<u64>, String> {
     let v4 = std::fs::read_to_string(proc_root.join("net/tcp"))
         .map_err(|_| "the TCP socket table could not be read".to_owned())?;
-    let mut inodes = reachable(&v4, port, &V4_REACHABLE);
-    if let Ok(v6) = std::fs::read_to_string(proc_root.join("net/tcp6")) {
-        inodes.extend(reachable(&v6, port, &V6_REACHABLE));
+    let mut inodes = listeners(&v4, port, None);
+    match std::fs::read_to_string(proc_root.join("net/tcp6")) {
+        Ok(v6) => inodes.extend(listeners(&v6, port, Some(V6_LOOPBACK))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("the TCP6 socket table could not be read".to_owned()),
     }
     Ok(inodes)
 }
 
-fn reachable(table: &str, port: u16, addresses: &[&str]) -> HashSet<u64> {
+fn listeners(table: &str, port: u16, except: Option<&str>) -> BTreeSet<u64> {
     table
         .lines()
         .skip(1)
@@ -148,9 +176,7 @@ fn reachable(table: &str, port: u16, addresses: &[&str]) -> HashSet<u64> {
             let (address, raw_port) = fields.get(1)?.rsplit_once(':')?;
             let listening = fields.get(3) == Some(&LISTEN)
                 && u16::from_str_radix(raw_port, 16).ok() == Some(port)
-                && addresses
-                    .iter()
-                    .any(|reach| reach.eq_ignore_ascii_case(address));
+                && except.is_none_or(|skip| !skip.eq_ignore_ascii_case(address));
             listening
                 .then(|| fields.get(9)?.parse::<u64>().ok())
                 .flatten()

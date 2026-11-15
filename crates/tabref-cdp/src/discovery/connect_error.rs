@@ -14,6 +14,37 @@ pub(crate) fn endpoint_unreachable(port: u16, detail: &str) -> AppError {
     .with_disposition(DeliverySemantics::not_delivered())
 }
 
+/// The refusal for a port whose listening sockets changed between the owner
+/// check and the connection: whatever listens now was never checked.
+pub(crate) fn port_changed_hands(port: u16) -> AppError {
+    AppError::new(
+        ErrorCode::PermDenied,
+        format!("Port {port} changed hands between tabref's owner check and its connection"),
+    )
+    .with_suggestion("Run the command again; tabref checks the port's owner each time it connects")
+    .with_details(serde_json::json!({ "kind": "cdp_endpoint_changed", "port": port }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
+/// The refusal for an endpoint whose WebSocket address is not the checked
+/// port on 127.0.0.1: connecting there would reach whatever listens at an
+/// address the owner check never looked at.
+pub(crate) fn endpoint_mismatch(checked: u16, advertised: &str) -> AppError {
+    AppError::new(
+        ErrorCode::PermDenied,
+        format!(
+            "The DevTools endpoint for port {checked} points at {advertised}, which tabref did not check"
+        ),
+    )
+    .with_suggestion("Run 'tabref open <url> --launch' for a browser of tabref's own")
+    .with_details(serde_json::json!({
+        "kind": "cdp_endpoint_mismatch",
+        "port": checked,
+        "advertised": advertised,
+    }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
 pub(crate) fn handshake_rejected(status: u16, port: u16) -> AppError {
     AppError::new(
         ErrorCode::PermDenied,

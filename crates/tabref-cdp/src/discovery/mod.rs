@@ -4,6 +4,7 @@ pub(crate) mod connect;
 pub(crate) mod connect_error;
 pub(crate) mod endpoint_source;
 pub(crate) mod endpoint_spec;
+pub(crate) mod held_port;
 pub(crate) mod http_get;
 pub(crate) mod http_response;
 pub(crate) mod json_version;
