@@ -7,92 +7,72 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
+#[path = "common/profile_home.rs"]
+mod profile_home;
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{Duration, Instant};
 
 use common::{Run, harness_home, live, serve};
+use profile_home::{Dirs, launch_on, launched_pid, stop_browser, tabref};
 
 const PAGE: &str = "<!doctype html><title>Keep</title><h1>Keep</h1>";
 
-fn tabref(home: &Path, config: &Path, args: &[&str], in_process: bool) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_tabref"));
-    command
-        .args(args)
-        .env("TABREF_HOME", home)
-        .env("XDG_CONFIG_HOME", config)
-        .env_remove("TABREF_CDP")
-        .env_remove("TABREF_NO_DAEMON");
-    if in_process {
-        command.env("TABREF_NO_DAEMON", "1");
-    }
-    let output = command.output().unwrap();
-    Run {
-        ok: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
-}
-
-fn launched_pid(home: &Path) -> Option<u32> {
-    let text = std::fs::read_to_string(home.join("launched.json")).ok()?;
-    let record: serde_json::Value = serde_json::from_str(&text).ok()?;
-    u32::try_from(record["pid"].as_u64()?).ok()
-}
-
-/// Ends the browser `pid` the way a user closing it does (SIGTERM, so it
-/// writes its profile out), and waits until it is gone.
-fn stop_browser(pid: u32) {
-    let _ = Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .status();
-    let started = Instant::now();
-    while Path::new(&format!("/proc/{pid}")).exists() && started.elapsed() < Duration::from_secs(10)
-    {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    let _ = Command::new("kill")
-        .args(["-KILL", &format!("-{pid}")])
-        .status();
-}
-
-/// Kills every browser whose command line names `dir`, so no test leaves
-/// one running (a leaked one also keeps the build slot it inherited).
-fn kill_browsers_in(dir: &Path) {
-    let needle = dir.to_string_lossy().into_owned();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return;
+#[test]
+fn spellings_that_dodge_the_refusals_are_refused_too() {
+    let home = harness_home("profile-dodge");
+    let config = harness_home("profile-dodge-config");
+    let foreign = harness_home("profile-dodge-foreign");
+    let dirs = Dirs {
+        homes: vec![home.clone(), config.clone(), foreign.clone()],
     };
-    for entry in entries.flatten() {
-        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
-            continue;
-        };
-        let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
-        if pid != std::process::id() && String::from_utf8_lossy(&cmdline).contains(&needle) {
-            let _ = Command::new("kill")
-                .args(["-KILL", &pid.to_string()])
-                .status();
-        }
-    }
-}
+    std::fs::create_dir_all(config.join("google-chrome")).unwrap();
+    std::fs::write(foreign.join("Local State"), "{}").unwrap();
+    std::fs::set_permissions(&foreign, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let parent = home.parent().unwrap();
+    let home_name = home.file_name().unwrap();
+    let cases = [
+        config.join("chromium").join("..").join("google-chrome"),
+        parent
+            .join("missing")
+            .join("nope")
+            .join("..")
+            .join("..")
+            .join(home_name)
+            .join("p"),
+        config.join("google-chrome").join("Default"),
+        config.clone(),
+        foreign.clone(),
+    ];
+    let runs: Vec<Run> = cases
+        .iter()
+        .map(|dir| launch_on(&home, &config, dir))
+        .collect();
+    let made = (
+        config.join("chromium").exists(),
+        parent.join("missing").exists(),
+    );
+    drop(dirs);
 
-/// The test's state and profile directories, cleaned up (browsers on them
-/// killed first) however the test ends.
-struct Dirs {
-    homes: Vec<PathBuf>,
-}
-
-impl Drop for Dirs {
-    fn drop(&mut self) {
-        for home in &self.homes {
-            let config = home.with_extension("config");
-            let _ = tabref(home, &config, &["daemon", "stop"], false);
-            kill_browsers_in(home);
-            let _ = std::fs::remove_dir_all(home);
-        }
+    for (dir, run) in cases.iter().zip(&runs) {
+        assert!(!run.ok, "{} was launched on: {}", dir.display(), run.stdout);
+        assert_eq!(
+            run.json()["error"]["details"]["kind"],
+            "launch_profile_refused",
+            "{}: {}",
+            dir.display(),
+            run.stdout
+        );
     }
+    assert!(
+        runs[4].stdout.contains("not a tabref profile"),
+        "{}",
+        runs[4].stdout
+    );
+    assert_eq!(
+        made,
+        (false, false),
+        "a refused spelling created a directory"
+    );
 }
 
 #[test]

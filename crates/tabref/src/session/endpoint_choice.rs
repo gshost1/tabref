@@ -11,8 +11,10 @@ use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 
 use super::connected_browser::ConnectedBrowser;
 use super::endpoint_refusal::{named_warning, unverified_port};
-use super::launch_profile::{check_profile, requested_profile, running_on_profile, same_dir};
-use super::launch_record::{forget_launched, load_launched, save_launched};
+use super::launch_profile::{
+    normalize, prepare_profile, requested_profile, running_on_profile, same_dir,
+};
+use super::launch_record::{LAUNCH_FILE, forget_launched, parse_launched, save_launched};
 use super::session_options::SessionOptions;
 use super::user_chrome::{GONE_KIND, connect_user_chrome};
 use super::user_chrome_record::{UserChromeRecord, forget_user_chrome};
@@ -46,20 +48,26 @@ const REFUSALS: [&str; 2] = ["cdp_endpoint_changed", "cdp_endpoint_mismatch"];
 pub(crate) fn connect_browser(
     options: &SessionOptions,
     store: &RefStore,
-    user_chrome: Option<&UserChromeRecord>,
+    user_chrome: Option<(&str, &UserChromeRecord)>,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
     if let Some(spec) = &options.cdp {
         return named_browser(spec, deadline);
     }
-    if let Some(record) = user_chrome {
-        return connect_user_chrome(record, deadline).inspect_err(|error| {
-            if error.kind() == Some(GONE_KIND) {
-                let _ = forget_user_chrome(store);
-            }
-        });
+    if let Some((text, record)) = user_chrome {
+        return connect_user_chrome(record, deadline)
+            .map(|browser| ConnectedBrowser {
+                choice: Some(format!("user:{text}")),
+                ..browser
+            })
+            .inspect_err(|error| {
+                if error.kind() == Some(GONE_KIND) {
+                    let _ = forget_user_chrome(store);
+                }
+            });
     }
-    let profile = requested_profile(options);
+    let profile = requested_profile(options).map(normalize).transpose()?;
+    let profile = profile.as_deref();
     if let Some(found) = launched_browser(store, profile, deadline)? {
         return Ok(found);
     }
@@ -88,6 +96,7 @@ fn named_browser(spec: &str, deadline: Deadline) -> Result<ConnectedBrowser, App
         endpoint,
         connection,
         warning,
+        choice: None,
     })
 }
 
@@ -103,7 +112,11 @@ fn launched_browser(
     profile: Option<&Path>,
     deadline: Deadline,
 ) -> Result<Option<ConnectedBrowser>, AppError> {
-    let Some(record) = load_launched(store) else {
+    let Some(text) = store.read_state(LAUNCH_FILE) else {
+        return Ok(None);
+    };
+    let Some(record) = parse_launched(&text) else {
+        forget_launched(store);
         return Ok(None);
     };
     if profile.is_some_and(|profile| !same_dir(profile, &record.profile_dir)) {
@@ -126,6 +139,7 @@ fn launched_browser(
             endpoint,
             connection,
             warning: None,
+            choice: Some(format!("launched:{text}")),
         })),
         Err(error) if browser_is_gone(&error, process_alive(record.pid)) => {
             forget_launched(store);
@@ -192,6 +206,7 @@ fn default_port(
             endpoint,
             connection,
             warning: None,
+            choice: None,
         }),
     )
 }
@@ -229,23 +244,33 @@ fn start_browser(
     store: &RefStore,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
-    let browser = match &launch.profile_dir {
-        Some(profile) => {
-            check_profile(profile)?;
-            match running_on_profile(profile, !launch.headed) {
-                Some(running) => running,
-                None => launch_chrome(launch, deadline)?,
-            }
+    let (launch, _turn) = match &launch.profile_dir {
+        Some(dir) => {
+            let (profile, turn) = prepare_profile(dir, deadline)?;
+            let launch = LaunchOptions {
+                profile_dir: Some(profile),
+                ..launch.clone()
+            };
+            (launch, Some(turn))
         }
-        None => launch_chrome(launch, deadline)?,
+        None => (launch.clone(), None),
     };
-    save_launched(store, &browser)?;
+    let running = launch
+        .profile_dir
+        .as_deref()
+        .and_then(|profile| running_on_profile(profile, !launch.headed));
+    let browser = match running {
+        Some(running) => running,
+        None => launch_chrome(&launch, deadline)?,
+    };
     let endpoint = browser.endpoint()?;
     let connection = connect(&endpoint, deadline)?;
+    let text = save_launched(store, &browser)?;
     Ok(ConnectedBrowser {
         endpoint,
         connection,
         warning: None,
+        choice: Some(format!("launched:{text}")),
     })
 }
 

@@ -29,7 +29,6 @@ use tabref_cdp::{
 };
 use tabref_core::{AppError, Deadline, RefStore};
 
-use browser_choice::choice_key;
 use command_scope::CommandScope;
 use endpoint_choice::connect_browser;
 use session_options::SessionOptions;
@@ -68,10 +67,12 @@ impl Session {
         let scope = CommandScope::new(options, claim)?;
         let store = RefStore::open()?;
         let in_use = choice_in_use(&store, options);
-        let record = in_use.as_ref().map(|(_, record)| record);
+        let record = in_use
+            .as_ref()
+            .map(|(text, record)| (text.as_str(), record));
         let browser = connect_browser(options, &store, record, scope.deadline)?;
         let chosen = in_use.map(|(text, _)| text);
-        let choice = choice_key(&store, options);
+        let choice = browser.choice;
         let mut connection = browser.connection;
         connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
         connection.set_guard(chosen.map(|chosen| opt_in_guard(&store, chosen)));

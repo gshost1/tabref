@@ -57,26 +57,29 @@ fn the_throwaway_profile_is_private_to_the_user() {
 #[test]
 fn a_port_file_left_by_an_earlier_browser_is_not_taken_for_a_new_one() {
     let dir = std::env::temp_dir().join(format!("tabref-stale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    let nothing = super::port_file_print(&dir);
     std::fs::write(
         dir.join("DevToolsActivePort"),
         "40001\n/devtools/browser/old\n",
     )
     .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(20));
-    let launched_at = std::time::SystemTime::now();
+    let before = super::port_file_print(&dir);
 
-    let stale = super::written_since(&dir, launched_at);
+    let stale = super::changed_port_file(&dir, before.as_deref());
+    let first = super::changed_port_file(&dir, nothing.as_deref());
     std::thread::sleep(std::time::Duration::from_millis(20));
     std::fs::write(
         dir.join("DevToolsActivePort"),
         "40002\n/devtools/browser/new\n",
     )
     .unwrap();
-    let fresh = super::written_since(&dir, launched_at);
+    let fresh = super::changed_port_file(&dir, before.as_deref());
     let _ = std::fs::remove_dir_all(&dir);
 
     assert_eq!(stale, None);
+    assert_eq!(first.map(|active| active.port), Some(40001));
     assert_eq!(fresh.map(|active| active.port), Some(40002));
 }
 

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use tabref_core::{
     AppError, Deadline, DeliverySemantics, ErrorCode, create_new_private_dir, create_private_dir,
@@ -11,7 +11,9 @@ use super::chrome_binary::find_chrome;
 use super::launch_options::LaunchOptions;
 use super::launched_browser::LaunchedBrowser;
 use super::process_start::process_start;
-use crate::{ActivePort, read_active_port};
+use crate::{
+    ActivePort, ListenerVerdict, ProcessView, check_listener, is_chrome_family, read_active_port,
+};
 
 const POLL: Duration = Duration::from_millis(25);
 /// Variables that mark the launching process (a tabref daemon) and must not
@@ -39,7 +41,7 @@ pub fn launch_chrome(
         None => find_chrome()?,
     };
     let profile_dir = profile_dir(options)?;
-    let launched_at = SystemTime::now();
+    let before = port_file_print(&profile_dir);
     let mut command = Command::new(&binary);
     command
         .args(browser_args(options, &profile_dir))
@@ -59,7 +61,7 @@ pub fn launch_chrome(
         .with_details(serde_json::json!({ "kind": "chrome_spawn_failed" }))
         .with_disposition(DeliverySemantics::not_delivered())
     })?;
-    let active = wait_for_port(&mut child, (&profile_dir, launched_at), deadline)?;
+    let active = wait_for_port(&mut child, &profile_dir, before.as_deref(), deadline)?;
     let pid = child.id();
     let started = process_start(pid);
     std::thread::spawn(move || child.wait());
@@ -74,16 +76,48 @@ pub fn launch_chrome(
     })
 }
 
-/// The profile's `DevToolsActivePort`, once one written at or after `since`
-/// is there; an older one is left by an earlier browser on that profile.
-pub(crate) fn written_since(profile_dir: &Path, since: SystemTime) -> Option<ActivePort> {
-    let modified = std::fs::metadata(profile_dir.join("DevToolsActivePort"))
-        .and_then(|metadata| metadata.modified())
-        .ok()?;
-    if modified < since {
+/// What the profile's `DevToolsActivePort` is now (contents, size, time,
+/// and on Unix its inode), so a launch can tell the file its browser writes
+/// from one an earlier browser on the profile left; `None` without a file.
+pub(crate) fn port_file_print(profile_dir: &Path) -> Option<String> {
+    let path = profile_dir.join("DevToolsActivePort");
+    let metadata = std::fs::metadata(&path).ok()?;
+    let contents = std::fs::read_to_string(&path).unwrap_or_default();
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&metadata);
+    #[cfg(not(unix))]
+    let inode = 0_u64;
+    Some(format!(
+        "{inode}:{}:{:?}:{contents}",
+        metadata.len(),
+        metadata.modified().ok()
+    ))
+}
+
+/// The profile's `DevToolsActivePort`, once it differs from `before` (what
+/// it was before the launch), so a file an earlier browser left is never
+/// taken for this one's.
+pub(crate) fn changed_port_file(profile_dir: &Path, before: Option<&str>) -> Option<ActivePort> {
+    let now = port_file_print(profile_dir)?;
+    if before == Some(now.as_str()) {
         return None;
     }
     read_active_port(profile_dir).ok()
+}
+
+/// Whether the browser just started holds `port`: the child itself, or (a
+/// binary that hands off to another process) a Chrome-family process running
+/// this profile. Where the owner cannot be checked, the changed port file is
+/// taken as it is.
+fn launched_holds(port: u16, child: u32, profile_dir: &Path) -> bool {
+    let flag = format!("--user-data-dir={}", profile_dir.display());
+    let ours = |process: &ProcessView| {
+        process.pid == child || (is_chrome_family(process) && process.args().contains(&flag))
+    };
+    matches!(
+        check_listener(port, &ours),
+        ListenerVerdict::Trusted(_) | ListenerVerdict::Unknown
+    )
 }
 
 pub(crate) fn browser_args(options: &LaunchOptions, profile_dir: &Path) -> Vec<String> {
@@ -122,14 +156,18 @@ fn profile_dir(options: &LaunchOptions) -> Result<PathBuf, AppError> {
 
 fn wait_for_port(
     child: &mut Child,
-    (profile_dir, since): (&Path, SystemTime),
+    profile_dir: &Path,
+    before: Option<&str>,
     deadline: Deadline,
 ) -> Result<ActivePort, AppError> {
     loop {
-        if let Some(active) = written_since(profile_dir, since) {
-            return Ok(active);
+        let exited = child.try_wait();
+        if let (Ok(None), Some(active)) = (&exited, changed_port_file(profile_dir, before)) {
+            if launched_holds(active.port, child.id(), profile_dir) {
+                return Ok(active);
+            }
         }
-        if let Ok(Some(status)) = child.try_wait() {
+        if let Ok(Some(status)) = exited {
             return Err(AppError::new(
                 ErrorCode::ActionFailed,
                 format!("The browser exited before it opened DevTools ({status})"),
