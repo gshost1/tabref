@@ -1,21 +1,46 @@
----
-name: tabref
-description: Read and drive Chrome from the shell. Placeholder guide; the full skill is written later.
----
+# tabref: read and drive Chrome from the shell
 
-# tabref (placeholder guide)
+Chrome is already connected (TABREF_CDP). Output is plain text sized to read whole: do not pipe it through
+grep, head or sed, and do not sleep; every command waits for the page itself.
 
-tabref reads a Chrome tab into one line per element, each actionable element
-with a ref such as `@s8f3k2p9:e4`, and acts on those refs.
+Start: `tabref open <url>` loads the page and prints it.
 
-    tabref open example.com --launch   # start headless Chrome if none is reachable, load, snapshot
-    tabref snap                        # controls and headings; snap -a adds all text
-    tabref click @s8f3k2p9:e4
-    tabref fill @s8f3k2p9:e5 "ada@example.com"
-    tabref press Enter @s8f3k2p9:e5
-    tabref find "Total"                # search all text, prints the ref to act on
-    tabref read                        # page text
+## Reading
+One line per block in reading order; `#` lines are headings. Controls sit in brackets with their ref:
+`[e5 button Save]`, `[e7 Edit -> /admin/product/7/edit]` (open the address or click the ref),
+`[e9 select Size = "M" options: S | M | L]`.
+- Repeated blocks are numbered `(1/3) … (3/3)`; lists say `N items:`; tables say `table N rows: head | …`,
+  one row per line. To count, use these numbers across the whole page, not the first block you see.
+- The last line says what was cut and the exact command for it (`tabref snap --rows 21-`,
+  `tabref read --section "<heading>"`). Run it before answering about cut content.
+- `tabref read` prints the main text. `tabref find <text>` searches all text, hidden too: each match with its
+  section, its ref, and `(hidden; expand [e8 …])` when a click shows it.
+- A `dialog` line at the top is a popup: click one of its buttons first (decline cookie banners).
 
-Each snapshot gives new refs. An action that navigates prints the new page.
-`STALE_REF` means the page changed: run `tabref snap` and use the new ref.
-Add `--json` for the `{version, ok, command, data|error}` envelope.
+## Acting
+`click T`, `fill T VALUE`, `select T OPTION`, `check T`, `uncheck T`, `press KEY [T]`, `hover T`, `scroll down|T`.
+T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
+`"Edit" in "<row text>"`, `"Reply" after "<text>"` (or `before`). Several or no matches fail with candidates;
+nothing is guessed. Each action prints what changed (new address, `{3 -> 4}`, field `"67.00" -> "62.00"`,
+new controls with refs, or the next page), so do not snapshot again to check. Dates, times and numbers take
+plain values (`fill "Due date" 2027-07-31`); `select` takes a label or value.
+
+## Many steps: one call
+Use `tabref do` with a quoted heredoc, not shell loops. It stops at the first failing step and shows the page.
+
+    tabref do <<'EOF'
+    for size price in XS 47.00 L 49.00
+      open /admin/products?search=Hoodie
+      click "Edit" in "Hoodie-{size}-Red"
+      fill "Price" {price}
+      click "Save"
+      expect url ~saved=1
+    end
+    EOF
+
+Steps: any action above, `open URL`, `expect text|gone|url X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
+`tabref js "EXPR"` returns a page value as JSON (e.g. every link or row at once).
+
+## Errors (one line, code first)
+`ELEMENT_NOT_FOUND` lists the closest names; `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`;
+`STALE_REF`: use the fresh ref it gives; `TIMEOUT`; `INVALID_ARGS`. Tabs: `tabref tabs`, `tabref tab N`.
