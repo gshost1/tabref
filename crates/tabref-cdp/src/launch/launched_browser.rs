@@ -29,6 +29,7 @@ impl LaunchedBrowser {
             websocket_url: WebSocketUrl::loopback(self.port, &self.websocket_path)?,
             source: EndpointSource::Launched,
             product: None,
+            user_agent: None,
         })
     }
 }
