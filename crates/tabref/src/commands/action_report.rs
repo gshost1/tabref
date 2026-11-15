@@ -5,8 +5,8 @@ use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
 use super::page_url::short_url;
-use crate::output::outcome::Outcome;
 use super::page_view::current_page_view;
+use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
 use crate::view::node_line::{node_line, quote_text};

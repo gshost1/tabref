@@ -8,7 +8,7 @@ use tabref_page::{ElementToken, read_node_identity};
 use super::Session;
 use crate::view::node_line::node_line;
 
-const RESTART_AFTER: usize = 2_000;
+const NEXT_NUMBER: &str = "refs-next";
 const FRESH_SHOWN: usize = 3;
 
 /// A ref resolved to a live element: the ref, what its snapshot recorded,
@@ -60,16 +60,20 @@ impl Session {
     /// and accessible name must still be the recorded ones. Anything else is
     /// `STALE_REF` naming the fresh candidate, so a ref never reaches a
     /// different element. A short ref `e4` is element 4 of the current tab's
-    /// latest snapshot; numbers stay with their element across a tab's
-    /// snapshots, so a short ref the agent holds names what it named, or is
-    /// `STALE_REF` once that element is gone. The ref's tab becomes the
-    /// current tab.
+    /// latest snapshot. Numbers are handed out once per session across all
+    /// tabs and stay with their element, so a short ref the agent holds names
+    /// what it named, is `STALE_REF` once that element is gone, and is
+    /// `STALE_REF` naming the other tab when it belongs to one. A long ref's
+    /// tab becomes the current tab.
     pub(crate) fn resolve_ref(&mut self, text: &str) -> Result<RefTarget, AppError> {
         let ref_id = match short_element(text) {
             Some(element) => self.expand_short_ref(element)?,
             None => RefId::parse(text)?,
         };
         let (map, entry) = self.store().entry(&ref_id)?;
+        if entry.token.is_empty() {
+            return Err(self.in_another_tab(ref_id.element));
+        }
         let token = ElementToken::parse(&entry.token)?;
         let session = self.attach(&token.target_id)?;
         let deadline = self.deadline();
@@ -116,9 +120,7 @@ impl Session {
     }
 
     /// The refs a new snapshot of `tab_id` starts from: the tab's latest
-    /// snapshot's, so every element keeps its number and new elements get
-    /// new ones. A tab whose numbers ran past 2,000 starts again at 1 when
-    /// it shows a new document.
+    /// snapshot's, so every element keeps its number.
     pub(crate) fn continued_refs(&self, tab_id: &str, url: &str) -> RefMap {
         let mut map = self
             .store()
@@ -130,10 +132,51 @@ impl Session {
         map
     }
 
+    /// Numbers the refs of a new snapshot from the session's counter, which
+    /// only ever grows. Returns how many nodes got a ref.
+    pub(crate) fn number_refs(
+        &self,
+        tree: &mut AccessibilityNode,
+        snapshot_id: &str,
+        map: &mut RefMap,
+    ) -> Result<usize, AppError> {
+        let mut next = self
+            .store()
+            .read_state(NEXT_NUMBER)
+            .and_then(|text| text.trim().parse::<u32>().ok())
+            .unwrap_or(1);
+        let given = allocate_stable_refs(tree, snapshot_id, map, &mut next);
+        self.store().write_state(NEXT_NUMBER, &next.to_string())?;
+        Ok(given)
+    }
+
     /// Records `snapshot_id` as the tab's latest snapshot, the one short
     /// refs name.
     pub(crate) fn remember_latest(&self, tab_id: &str, snapshot_id: &str) -> Result<(), AppError> {
         self.store().write_state(&latest_name(tab_id), snapshot_id)
+    }
+
+    /// `STALE_REF` for a number this tab's snapshots never gave out, naming
+    /// the open tab whose latest snapshot holds it.
+    fn in_another_tab(&mut self, element: u32) -> AppError {
+        let tabs = self.tabs().unwrap_or_default();
+        let owner = tabs.iter().enumerate().find(|(_, tab)| {
+            self.store()
+                .read_state(&latest_name(&tab.target_id))
+                .and_then(|id| self.store().load(id.trim()).ok())
+                .and_then(|map| map.get(element).map(|entry| !entry.token.is_empty()))
+                .unwrap_or(false)
+        });
+        let message = match owner {
+            Some((index, tab)) => format!(
+                "e{element} belongs to tab [{index}] {}, not the current tab; switch with 'tabref tab {index}'",
+                quote(&tab.title)
+            ),
+            None => {
+                format!("e{element} belongs to no open tab's latest snapshot; run 'tabref snap'")
+            }
+        };
+        AppError::stale_ref_because(message).with_details(json!({ "kind": "ref_other_tab" }))
     }
 
     /// `error` with the elements of a fresh snapshot that carry the stale
@@ -190,17 +233,21 @@ fn same_identity(node: &AccessibilityNode, entry: &RefEntry, found: &mut Vec<Str
 
 /// Gives every ref-able node with an element token a ref in `map`, which
 /// holds the tab's earlier refs: a node already numbered keeps its number,
-/// and a new node gets the next one, so a number never moves to another
-/// element within a tab. Returns how many nodes got a ref.
+/// and a new node takes `next`, the session's counter, which then moves on,
+/// so a number never names two elements in one session. Numbers other tabs
+/// took are blank entries in this tab's map. Returns how many nodes got a
+/// ref.
 pub(crate) fn allocate_stable_refs(
     tree: &mut AccessibilityNode,
     snapshot_id: &str,
     map: &mut RefMap,
+    next: &mut u32,
 ) -> usize {
     let mut numbers: HashMap<String, u32> = map
         .refs
         .iter()
         .enumerate()
+        .filter(|(_, entry)| !entry.token.is_empty())
         .map(|(index, entry)| {
             (
                 entry.token.clone(),
@@ -208,10 +255,7 @@ pub(crate) fn allocate_stable_refs(
             )
         })
         .collect();
-    if map.len() > RESTART_AFTER && !shares_a_token(tree, &numbers) {
-        map.refs.clear();
-        numbers.clear();
-    }
+    *next = (*next).max(u32::try_from(map.len() + 1).unwrap_or(u32::MAX));
     let mut given = 0;
     let mut pending: Vec<&mut AccessibilityNode> = vec![tree];
     while let Some(node) = pending.pop() {
@@ -227,14 +271,22 @@ pub(crate) fn allocate_stable_refs(
                 Some(&element) => {
                     if let Some(slot) = usize::try_from(element - 1)
                         .ok()
-                        .and_then(|i| map.refs.get_mut(i))
+                        .and_then(|index| map.refs.get_mut(index))
                     {
                         *slot = entry;
                     }
                     element
                 }
                 None => {
+                    while map.len() + 1 < usize::try_from(*next).unwrap_or(usize::MAX) {
+                        map.push(RefEntry {
+                            role: String::new(),
+                            name: None,
+                            token: String::new(),
+                        });
+                    }
                     let element = map.push(entry);
+                    *next = element.saturating_add(1);
                     numbers.insert(token, element);
                     element
                 }
@@ -245,17 +297,6 @@ pub(crate) fn allocate_stable_refs(
         pending.extend(node.children.iter_mut().rev());
     }
     given
-}
-
-fn shares_a_token(node: &AccessibilityNode, numbers: &HashMap<String, u32>) -> bool {
-    node.identity
-        .retained_object
-        .as_ref()
-        .is_some_and(|token| numbers.contains_key(token))
-        || node
-            .children
-            .iter()
-            .any(|child| shares_a_token(child, numbers))
 }
 
 fn latest_name(tab_id: &str) -> String {

@@ -10,7 +10,7 @@ pub enum ScopeKind {
 }
 
 impl ScopeKind {
-    pub(crate) fn keyword(self) -> &'static str {
+    pub fn keyword(self) -> &'static str {
         match self {
             Self::Within => "in",
             Self::After => "after",

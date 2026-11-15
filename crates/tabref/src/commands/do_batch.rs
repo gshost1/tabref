@@ -6,9 +6,9 @@ use tabref_core::AppError;
 
 use super::do_expand::expand;
 use super::do_step::run_step;
+use super::page_view::current_page_view;
 use super::step_words::split_steps;
 use crate::output::outcome::Outcome;
-use super::page_view::current_page_view;
 use crate::session::Session;
 
 /// How the batch runs: each step's time limit, and whether results print

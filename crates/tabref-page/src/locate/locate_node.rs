@@ -2,7 +2,7 @@ use tabref_core::{AccessibilityNode, AppError, is_ref_able};
 
 use super::closest::closest;
 use super::indexed_node::{IndexedNode, deepest, index_tree};
-use super::locate_errors::{ambiguous, no_scope, not_found, past_last};
+use super::locate_errors::{ambiguous, no_scope, not_found, not_in_record, past_last};
 use super::locate_intent::LocateIntent;
 use super::locate_scope::{anchors, beside_anchors, near_anchors};
 use super::located::Located;
@@ -45,12 +45,18 @@ pub fn locate(
         }
         None => None,
     };
+    let mut record_miss = false;
     for tier in tiers(&nodes, (&actionable, &acting), locator, intent) {
         let tier = deepest(&nodes, &tier);
         let picked = match &scope_anchors {
             Some(found) if locator.scope_kind == ScopeKind::Within => {
-                near_anchors(&nodes, &tier, found, locator.nth)
-                    .ok_or_else(|| past_last(locator, tier.len()))?
+                match near_anchors(&nodes, &tier, found, locator.nth) {
+                    Some(picked) => picked,
+                    None => {
+                        record_miss = true;
+                        continue;
+                    }
+                }
             }
             Some(found) => {
                 let after = locator.scope_kind == ScopeKind::After;
@@ -70,6 +76,9 @@ pub fn locate(
             [only] => return located(&nodes, *only),
             many => return Err(ambiguous(locator, &labels(&nodes, many), many.len())),
         }
+    }
+    if record_miss {
+        return Err(not_in_record(locator, intent));
     }
     let reachable: Vec<usize> = (0..nodes.len())
         .filter(|&index| acts(nodes[index].node, intent, None))

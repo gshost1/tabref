@@ -55,3 +55,20 @@ pub(crate) fn past_last(locator: &Locator, count: usize) -> AppError {
     .with_details(json!({ "kind": "locate_nth_out_of_range", "count": count }))
     .with_disposition(DeliverySemantics::not_delivered())
 }
+
+/// `ELEMENT_NOT_FOUND` for an `in "<text>"` whose row or record holds no
+/// match: the text is there, the control is not, and no neighbour's stands
+/// in for it.
+pub(crate) fn not_in_record(locator: &Locator, intent: LocateIntent) -> AppError {
+    let scope = locator.scope.as_deref().unwrap_or_default();
+    AppError::new(
+        ErrorCode::ElementNotFound,
+        format!(
+            "the row or record holding {scope:?} has no {} matching {}",
+            intent.noun(),
+            locator.describe()
+        ),
+    )
+    .with_details(json!({ "kind": "locate_not_in_record" }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}

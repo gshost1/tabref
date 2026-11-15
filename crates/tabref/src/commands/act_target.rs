@@ -52,10 +52,12 @@ pub(crate) fn resolve_target(
                 Some(name) => quote_text(name),
                 None => found.role.clone(),
             };
-            if locator.scope.is_some()
-                && let Some(around) = &found.context
-            {
-                label.push_str(&format!(" in {}", quote_text(around)));
+            if let Some(scope) = &locator.scope {
+                label.push_str(&format!(
+                    " {} {}",
+                    locator.scope_kind.keyword(),
+                    quote_text(scope)
+                ));
             }
             Ok(ActTarget {
                 token: found.token,

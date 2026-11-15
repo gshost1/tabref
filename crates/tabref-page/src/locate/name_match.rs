@@ -54,13 +54,29 @@ pub(crate) fn rank(node: &AccessibilityNode, query: &str) -> Option<u8> {
     }
 }
 
-/// Whether the node's name or value contains the normalized `query`
-/// anywhere, as the text a scope names.
-pub(crate) fn shows_text(node: &AccessibilityNode, query: &str) -> bool {
+/// How well the node's name or value shows the normalized scope text
+/// `query`: 1 when it is the whole text, 2 when it holds it as whole words,
+/// 3 when it holds it inside a word.
+pub(crate) fn scope_rank(node: &AccessibilityNode, query: &str) -> Option<u8> {
+    if query.is_empty() {
+        return None;
+    }
     [node.display_name(), node.identity.value.as_deref()]
         .into_iter()
         .flatten()
-        .any(|text| normalize(text).contains(query))
+        .map(normalize)
+        .filter_map(|text| {
+            if text == query {
+                Some(1)
+            } else if contains_words(&text, query) {
+                Some(2)
+            } else if text.contains(query) {
+                Some(3)
+            } else {
+                None
+            }
+        })
+        .min()
 }
 
 fn starts_with_words(haystack: &str, query: &str) -> bool {
