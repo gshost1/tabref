@@ -10,7 +10,10 @@ const TRACKED_REQUESTS: &[&str] = &["Document", "XHR", "Fetch"];
 
 /// The page events seen since an action, folded into what is still
 /// outstanding: a main-frame navigation that has not committed or reached
-/// `DOMContentLoaded`, and document, XHR and fetch requests still in flight.
+/// `DOMContentLoaded`, and document, XHR and fetch requests the main frame
+/// sent to its own site that are still in flight. Requests to other sites
+/// (ads, analytics) and from iframes never hold the settle: they can run
+/// for seconds and say nothing about what the action changed.
 #[derive(Debug)]
 pub(crate) struct SettleTracker {
     main_frame: String,
@@ -82,9 +85,9 @@ impl SettleTracker {
                     self.navigating = false;
                 }
             }
-            "Network.requestWillBeSent" => {
+            "Network.requestWillBeSent" if main => {
                 let kind = params.get("type").and_then(Value::as_str);
-                if kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) {
+                if kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params) {
                     self.pending.insert(request_id(params));
                     self.last_activity = Some(now);
                 }
@@ -141,3 +144,37 @@ fn request_id(params: &Value) -> String {
 #[cfg(test)]
 #[path = "settle_tracker_tests.rs"]
 mod tests;
+
+fn same_site(params: &Value) -> bool {
+    let request = params
+        .get("request")
+        .and_then(|request| request.get("url"))
+        .and_then(Value::as_str);
+    let document = params.get("documentURL").and_then(Value::as_str);
+    match (request.and_then(site), document.and_then(site)) {
+        (Some(request), Some(document)) => request == document,
+        _ => true,
+    }
+}
+
+fn site(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = if host.starts_with('[') {
+        host.split_once(']').map_or(host, |(inside, _)| inside)
+    } else {
+        host.split(':').next().unwrap_or(host)
+    };
+    let labels: Vec<&str> = host.split('.').filter(|label| !label.is_empty()).collect();
+    if labels.len() <= 2
+        || labels
+            .iter()
+            .all(|label| label.chars().all(|c| c.is_ascii_digit()))
+    {
+        return Some(host.to_ascii_lowercase());
+    }
+    Some(labels[labels.len() - 2..].join(".").to_ascii_lowercase())
+}

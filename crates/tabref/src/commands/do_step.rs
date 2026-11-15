@@ -49,12 +49,12 @@ pub(crate) fn run_step(
         "fill" | "type" => {
             let (aim, value) = split_value(step)?;
             let found = target(session, aim, LocateIntent::Fill, deadline)?;
-            fill::act(session, found, value, deadline)?
+            fill::act(session, found, &value, deadline)?
         }
         "select" => {
             let (aim, value) = split_value(step)?;
             let found = target(session, aim, LocateIntent::Select, deadline)?;
-            select::act(session, found, value, deadline)?
+            select::act(session, found, &value, deadline)?
         }
         "press" => {
             let (key, aim) = args
@@ -104,10 +104,21 @@ fn target(
     resolve_target(session, &TargetSpec::from_words(words)?, intent, deadline)
 }
 
-fn split_value(step: &BatchStep) -> Result<(&[Word], &str), AppError> {
-    match step.args() {
-        [aim @ .., value] if !aim.is_empty() => Ok((aim, value.text.as_str())),
-        _ => Err(AppError::invalid_args(format!(
+/// Splits a fill or select step into its target and its value: the target
+/// is the longest run of leading words that reads as one, and every word
+/// after it is the value, so `fill "Title" 401 bad gateway` needs no quotes
+/// around the value.
+pub(crate) fn split_value(step: &BatchStep) -> Result<(&[Word], String), AppError> {
+    let args = step.args();
+    let split = (1..args.len())
+        .rev()
+        .find(|&end| TargetSpec::from_words(&args[..end]).is_ok());
+    match split {
+        Some(end) => {
+            let value: Vec<&str> = args[end..].iter().map(|word| word.text.as_str()).collect();
+            Ok((&args[..end], value.join(" ")))
+        }
+        None => Err(AppError::invalid_args(format!(
             "{} needs a target and a value, as in: {} \"Price\" 62.00",
             step.verb(),
             step.verb()
@@ -149,3 +160,7 @@ fn scroll_step(
         data: json!({ "action": "scroll", "target": found.label }),
     })
 }
+
+#[cfg(test)]
+#[path = "do_step_tests.rs"]
+mod tests;
