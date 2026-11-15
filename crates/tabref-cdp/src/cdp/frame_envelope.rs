@@ -7,4 +7,6 @@ use serde::Deserialize;
 pub(crate) struct FrameEnvelope {
     #[serde(default)]
     pub(crate) id: Option<u64>,
+    #[serde(default)]
+    pub(crate) error: Option<serde_json::Value>,
 }

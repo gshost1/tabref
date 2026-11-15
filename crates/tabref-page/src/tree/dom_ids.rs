@@ -1,34 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use serde_json::{Value, json};
-use tabref_core::{AppError, Deadline};
-
-use super::dom_display::{DISPLAY_STYLE, collect_inline};
-use super::dom_facts::DomFacts;
-use crate::{CdpConnection, PageSession};
-
-/// Reads the DOM `id` attribute of every element in the target's local
-/// frames and shadow trees, the nodes that respond to mouse clicks, and the
-/// nodes laid out inline, keyed by backend node id. One `DOMSnapshot.captureSnapshot` serves the whole
-/// target: its reply is flat arrays however deep the DOM nests, and unlike
-/// `DOM.getDocument` it does not switch on the DOM domain's mutation events.
-pub(crate) fn read_dom_facts(
-    connection: &mut CdpConnection,
-    session: &PageSession,
-    deadline: Deadline,
-) -> Result<DomFacts, AppError> {
-    let capture = connection.call(
-        "DOMSnapshot.captureSnapshot",
-        json!({ "computedStyles": [DISPLAY_STYLE] }),
-        Some(&session.session_id),
-        deadline,
-    )?;
-    Ok(DomFacts {
-        ids: collect_dom_ids(&capture),
-        clickable: collect_clickable(&capture),
-        inline: collect_inline(&capture),
-    })
-}
+use serde_json::Value;
 
 /// The backend node ids the capture's `isClickable` list names: nodes with a
 /// `click`, `mousedown` or `mouseup` listener of their own, links, and

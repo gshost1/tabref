@@ -1,0 +1,6 @@
+page "Frames" http://127.0.0.1:PORT/frames
+# Story
+The council approved the new bridge on Tuesday.
+frame: Poll: should the bridge have a cycle lane? [e173 button Yes]
+frames: 2 not shown: 1 cross-origin (ads, widgets), 1 tiny or hidden
+-- 3 lines, 134 chars, all shown

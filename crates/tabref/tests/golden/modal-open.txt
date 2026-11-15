@@ -1,0 +1,10 @@
+page "News front page" http://127.0.0.1:PORT/modal
+dialog "Privacy choices":
+  We and our partners use cookies to measure traffic and to show content that may interest you. You can accept, reject or choose which purposes to allow, and change your mind at any time from the footer of every page.
+  [e167 button Accept all] [e168 button Reject all] [e169 button Choose purposes]
+dialog "Sign in":
+  ## Sign in
+  [e170 textbox Email (type=email)] [e171 textbox Password (type=password)] [e172 button Sign in]
+# Today
+Rain is expected across the region this afternoon, clearing by the evening.
+-- 8 lines, 599 chars, all shown

@@ -1,32 +1,38 @@
-use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use serde_json::{Value, json};
-use tabref_core::{AppError, Deadline, ErrorCode};
+use tabref_core::{AppError, Deadline};
 
 use super::cdp_event::CdpEvent;
-use super::incoming::Incoming;
-use super::protocol_error::{protocol_error, target_gone};
+use super::connection_health::{ConnectionHealth, cancelled};
+use super::connection_io::session_detached;
+use super::event_buffer::EventBuffer;
+use super::reply_stash::ReplyStash;
+use super::session_ledger::SessionLedger;
+use super::waiter::Waiter;
 use crate::transport::cdp_transport::CdpTransport;
-use crate::transport::transport_error::transport_failed;
 
-const MAX_BUFFERED_EVENTS: usize = 1024;
-const MAX_DETACHED_SESSIONS: usize = 1024;
-const DETACHED: &str = "Target.detachedFromTarget";
-const DIALOG_OPENING: &str = "Page.javascriptDialogOpening";
+const POLL_LIMIT: usize = 4096;
 
-/// A CDP client over one transport. Requests carry monotonic ids; events
-/// that arrive while a reply is awaited are buffered, oldest dropped first
-/// once the buffer holds 1024. The connection remembers every flattened
-/// session the browser announced as detached: a request on one fails at once
-/// as `cdp_target_gone`, and so does a request whose session detaches while
-/// its reply is awaited, since a closing target may never answer.
+/// A CDP client over one transport. Requests carry monotonic ids and may be
+/// pipelined: [`send`](Self::send) several, then collect each reply with
+/// [`reply`](Self::reply) or whichever comes first with
+/// [`next_reply`](Self::next_reply). Events that arrive meanwhile are
+/// buffered, oldest dropped first once the buffer holds 1024. The connection
+/// remembers every flattened session the browser announced as detached: a
+/// request on one fails at once as `cdp_target_gone`, and so does a request
+/// whose session detaches while its reply is awaited, since a closing target
+/// may never answer. A repeated `Page.enable` (and the other idempotent
+/// switches the session ledger knows) is answered locally.
 pub struct CdpConnection {
-    transport: Box<dyn CdpTransport>,
-    next_id: u64,
-    events: VecDeque<CdpEvent>,
-    dropped_events: u64,
-    detached_sessions: HashSet<String>,
-    answer_dialogs: bool,
+    pub(super) transport: Box<dyn CdpTransport>,
+    pub(super) next_id: u64,
+    pub(super) events: EventBuffer,
+    pub(super) ledger: SessionLedger,
+    pub(super) replies: ReplyStash,
+    pub(super) answer_dialogs: bool,
+    pub(super) health: ConnectionHealth,
 }
 
 impl CdpConnection {
@@ -34,10 +40,11 @@ impl CdpConnection {
         Self {
             transport,
             next_id: 1,
-            events: VecDeque::new(),
-            dropped_events: 0,
-            detached_sessions: HashSet::new(),
+            events: EventBuffer::default(),
+            ledger: SessionLedger::default(),
+            replies: ReplyStash::default(),
             answer_dialogs: true,
+            health: ConnectionHealth::default(),
         }
     }
 
@@ -50,6 +57,14 @@ impl CdpConnection {
         self.answer_dialogs = answer;
     }
 
+    /// Ties the connection's waits to `cancel` (or unties them with `None`):
+    /// once it is set, every request and every wait fails at once with kind
+    /// `cancelled`, and a blocking read notices within 50 ms. The connection
+    /// stays usable for the next caller.
+    pub fn set_cancel(&mut self, cancel: Option<Arc<AtomicBool>>) {
+        self.health.cancel = cancel;
+    }
+
     /// Sends `method` and waits for its reply. A flattened target session is
     /// addressed with `session_id`. A CDP error reply becomes an adapter
     /// error carrying the CDP message in `platform_detail`.
@@ -60,40 +75,118 @@ impl CdpConnection {
         session_id: Option<&str>,
         deadline: Deadline,
     ) -> Result<Value, AppError> {
-        if session_id.is_some_and(|session| self.detached_sessions.contains(session)) {
+        let id = self.send(method, params, session_id, deadline)?;
+        self.reply(id, deadline)
+    }
+
+    /// Sends `method` without waiting and returns the id its reply will
+    /// carry. Every id sent must be collected or abandoned.
+    pub fn send(
+        &mut self,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+        deadline: Deadline,
+    ) -> Result<u64, AppError> {
+        if self.health.is_cancelled() {
+            return Err(cancelled());
+        }
+        if session_id.is_some_and(|session| self.ledger.is_detached(session)) {
             return Err(session_detached(method));
         }
         let id = self.next_id;
         self.next_id += 1;
+        let local = self.ledger.already_on(method, &params, session_id);
+        let tracked = SessionLedger::tracks(method).then(|| params.clone());
+        self.replies.wait_for(
+            id,
+            Waiter {
+                method: method.to_owned(),
+                session_id: session_id.map(str::to_owned),
+                params: tracked,
+                raw: false,
+            },
+        );
+        if local {
+            self.replies.settle(id, Ok(json!({})));
+            return Ok(id);
+        }
         let mut request = json!({ "id": id, "method": method, "params": params });
         if let Some(session_id) = session_id {
             request["sessionId"] = Value::String(session_id.to_owned());
         }
-        self.transport.send_text(&request.to_string(), deadline)?;
+        if let Err(error) = self.send_text(&request.to_string(), deadline) {
+            self.replies.abandon(id);
+            return Err(error);
+        }
+        Ok(id)
+    }
+
+    /// [`send`](Self::send) for a reply too large to parse twice, such as a
+    /// full accessibility tree: its outcome is the whole reply frame's text
+    /// as a `Value::String`, for the caller to parse into its own types. An
+    /// error reply is still an error.
+    pub fn send_raw(
+        &mut self,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+        deadline: Deadline,
+    ) -> Result<u64, AppError> {
+        let id = self.send(method, params, session_id, deadline)?;
+        self.replies.mark_raw(id);
+        Ok(id)
+    }
+
+    /// Waits for the reply to `id`. A request that misses `deadline` is
+    /// abandoned, so its late reply is skipped.
+    pub fn reply(&mut self, id: u64, deadline: Deadline) -> Result<Value, AppError> {
         loop {
-            let text = self.transport.receive_text(deadline)?;
-            match Incoming::parse(&text) {
-                Some(Incoming::Reply { id: reply_id, body }) if reply_id == id => {
-                    return reply_result(method, body);
-                }
-                Some(Incoming::UnreadableReply { id: reply_id }) if reply_id == id => {
-                    return Err(reply_unreadable(method));
-                }
-                Some(Incoming::Event(event)) => {
-                    self.answer_dialog(&event, deadline)?;
-                    self.buffer(event);
-                    if session_id.is_some_and(|session| self.detached_sessions.contains(session)) {
-                        return Err(session_detached(method));
-                    }
-                }
-                Some(
-                    Incoming::Reply { .. }
-                    | Incoming::UnreadableReply { .. }
-                    | Incoming::Unrecognized,
-                ) => {}
-                None => return Err(transport_failed(method, "unparseable DevTools frame")),
+            if let Some(outcome) = self.replies.take(id) {
+                return outcome;
+            }
+            if self.replies.waiter(id).is_none() {
+                return Err(AppError::internal(format!(
+                    "CDP request {id} is not in flight"
+                )));
+            }
+            if let Err(error) = self.read_one(deadline) {
+                self.replies.abandon(id);
+                return Err(error);
             }
         }
+    }
+
+    /// Waits for whichever of `ids` is answered first and returns its id
+    /// with its outcome. A missed deadline leaves every id in flight; the
+    /// caller abandons the ones it gives up on.
+    pub fn next_reply(
+        &mut self,
+        ids: &[u64],
+        deadline: Deadline,
+    ) -> Result<(u64, Result<Value, AppError>), AppError> {
+        loop {
+            if let Some(id) = ids.iter().copied().find(|id| self.replies.is_ready(*id)) {
+                if let Some(outcome) = self.replies.take(id) {
+                    return Ok((id, outcome));
+                }
+            }
+            if let Some(id) = ids
+                .iter()
+                .copied()
+                .find(|id| self.replies.waiter(*id).is_none())
+            {
+                return Err(AppError::internal(format!(
+                    "CDP request {id} is not in flight"
+                )));
+            }
+            self.read_one(deadline)?;
+        }
+    }
+
+    /// Stops waiting for `id`; its reply is skipped whenever it comes.
+    pub fn abandon(&mut self, id: u64) {
+        self.replies.abandon(id);
     }
 
     /// Returns the first event, buffered or newly read, that `matches`,
@@ -103,117 +196,71 @@ impl CdpConnection {
         mut matches: impl FnMut(&CdpEvent) -> bool,
         deadline: Deadline,
     ) -> Result<CdpEvent, AppError> {
-        if let Some(index) = self.events.iter().position(&mut matches) {
-            if let Some(event) = self.events.remove(index) {
-                return Ok(event);
-            }
+        if let Some(event) = self.events.take_first(&mut matches) {
+            return Ok(event);
         }
         loop {
-            let text = self.transport.receive_text(deadline)?;
-            match Incoming::parse(&text) {
-                Some(Incoming::Event(event)) => {
-                    self.answer_dialog(&event, deadline)?;
-                    if matches(&event) {
-                        return Ok(event);
-                    }
-                    self.buffer(event);
+            let text = self.receive_text(deadline)?;
+            if let Some(event) = self.route(&text, deadline)? {
+                if matches(&event) {
+                    return Ok(event);
                 }
-                Some(_) => {}
-                None => return Err(transport_failed("event", "unparseable DevTools frame")),
+                self.events.push(event);
             }
         }
+    }
+
+    /// Reads, without blocking, every frame the browser already sent, so
+    /// detaches, dialogs and late replies are accounted for before the next
+    /// command. A closed connection is an error, and [`is_closed`](Self::is_closed)
+    /// says so from then on.
+    pub fn poll_pending(&mut self, deadline: Deadline) -> Result<(), AppError> {
+        for _ in 0..POLL_LIMIT {
+            let polled = self.transport.poll_text();
+            let text = match polled {
+                Ok(Some(text)) => text,
+                Ok(None) => return Ok(()),
+                Err(error) => return Err(self.note_failure(error)),
+            };
+            if let Some(event) = self.route(&text, deadline)? {
+                self.events.push(event);
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether the transport failed or closed, after which no request can
+    /// succeed and the connection must be replaced.
+    pub fn is_closed(&self) -> bool {
+        self.health.closed
+    }
+
+    /// Whether the browser announced `session_id` as detached.
+    pub fn is_session_detached(&self, session_id: &str) -> bool {
+        self.ledger.is_detached(session_id)
     }
 
     /// Drains every buffered event.
     pub fn take_events(&mut self) -> Vec<CdpEvent> {
-        self.events.drain(..).collect()
+        self.events.take_all()
     }
 
     /// Removes and returns, in arrival order, every buffered event that
     /// `matches`, leaving the rest buffered.
-    pub fn drain_events(&mut self, mut matches: impl FnMut(&CdpEvent) -> bool) -> Vec<CdpEvent> {
-        let mut drained = Vec::new();
-        self.events.retain(|event| {
-            if matches(event) {
-                drained.push(event.clone());
-                return false;
-            }
-            true
-        });
-        drained
+    pub fn drain_events(&mut self, matches: impl FnMut(&CdpEvent) -> bool) -> Vec<CdpEvent> {
+        self.events.drain(matches)
     }
 
     /// Discards buffered events that `matches`.
-    pub fn discard_events(&mut self, mut matches: impl FnMut(&CdpEvent) -> bool) {
-        self.events.retain(|event| !matches(event));
+    pub fn discard_events(&mut self, matches: impl FnMut(&CdpEvent) -> bool) {
+        self.events.discard(matches);
     }
 
     /// How many events were discarded because the buffer was full.
     pub fn dropped_event_count(&self) -> u64 {
-        self.dropped_events
-    }
-
-    fn answer_dialog(&mut self, event: &CdpEvent, deadline: Deadline) -> Result<(), AppError> {
-        if !self.answer_dialogs || event.method != DIALOG_OPENING {
-            return Ok(());
-        }
-        let Some(session_id) = event.session_id.as_deref() else {
-            return Ok(());
-        };
-        let id = self.next_id;
-        self.next_id += 1;
-        let prompt = event
-            .params
-            .get("defaultPrompt")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let request = json!({
-            "id": id,
-            "method": "Page.handleJavaScriptDialog",
-            "params": { "accept": true, "promptText": prompt },
-            "sessionId": session_id,
-        });
-        self.transport.send_text(&request.to_string(), deadline)
-    }
-
-    fn buffer(&mut self, event: CdpEvent) {
-        if event.method == DETACHED {
-            if let Some(session) = event.params.get("sessionId").and_then(Value::as_str) {
-                if self.detached_sessions.len() >= MAX_DETACHED_SESSIONS {
-                    self.detached_sessions.clear();
-                }
-                self.detached_sessions.insert(session.to_owned());
-            }
-        }
-        if self.events.len() >= MAX_BUFFERED_EVENTS {
-            self.events.pop_front();
-            self.dropped_events += 1;
-        }
-        self.events.push_back(event);
+        self.events.dropped()
     }
 }
-
-fn session_detached(method: &str) -> AppError {
-    target_gone(method, "the browser detached the target's session")
-}
-
-fn reply_unreadable(method: &str) -> AppError {
-    AppError::new(
-        ErrorCode::ActionFailed,
-        format!("The reply to '{method}' nests too deeply to read"),
-    )
-    .with_details(json!({ "kind": "cdp_reply_unreadable", "method": method }))
-}
-
-fn reply_result(method: &str, mut body: Value) -> Result<Value, AppError> {
-    if let Some(error) = body.get("error") {
-        return Err(protocol_error(method, error));
-    }
-    Ok(body
-        .get_mut("result")
-        .map_or_else(|| json!({}), Value::take))
-}
-
 #[cfg(test)]
 #[path = "connection_tests.rs"]
 mod tests;

@@ -3,42 +3,27 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tabref_cdp::{PageSession, is_timeout};
-use tabref_core::AppError;
-use tabref_page::{PageInfo, snapshot_page_within_budget};
+use tabref_core::{AppError, Deadline, DeliverySemantics};
+use tabref_page::{wait_for_text, wait_for_url};
 
 use super::wait_condition::Condition;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::view::find_matches::find_matches;
 
-const POLL: Duration = Duration::from_millis(100);
 const QUIET: Duration = Duration::from_millis(500);
+const MATCHES_SHOWN: usize = 5;
 
-/// Waits, bounded by `--timeout`, until `condition` holds, checking as soon
-/// as it starts, so a condition that already holds returns at once.
+/// Waits, bounded by `--timeout`, until `condition` holds. A condition that
+/// already holds returns at once; otherwise the wait ends on the page event
+/// that decides it, never on a poll.
 pub(crate) fn run(session: &mut Session, condition: Condition) -> Result<Outcome, AppError> {
     let started = Instant::now();
-    let page = session.page()?;
-    let detail = match &condition {
-        Condition::Text(text) => poll(session, &condition, |session| {
-            text_matches(session, &page, text, true)
-        })?,
-        Condition::Gone(text) => poll(session, &condition, |session| {
-            text_matches(session, &page, text, false)
-        })?,
-        Condition::Url(url) => poll(session, &condition, |session| {
-            let deadline = session.deadline();
-            let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
-            Ok(info.url.contains(url.as_str()).then_some(info.url))
-        })?,
-        Condition::Idle => {
-            wait_idle(session, &page, &condition)?;
-            "network quiet".to_owned()
-        }
-    };
+    let deadline = session.deadline();
+    let detail = wait_for(session, &condition, deadline, true)?;
     let elapsed = started.elapsed().as_millis();
     let mut text = format!("ok after {elapsed} ms waiting for {}", condition.describe());
-    if !detail.is_empty() && !matches!(condition, Condition::Idle) {
+    if !detail.is_empty() {
         text.push('\n');
         text.push_str(&detail);
     }
@@ -48,48 +33,47 @@ pub(crate) fn run(session: &mut Session, condition: Condition) -> Result<Outcome
     ))
 }
 
-fn poll(
+/// Waits for `condition` within `deadline`. With `show`, appearing text is
+/// reported as the lines that hold it, with their refs.
+pub(crate) fn wait_for(
     session: &mut Session,
     condition: &Condition,
-    mut check: impl FnMut(&mut Session) -> Result<Option<String>, AppError>,
+    deadline: Deadline,
+    show: bool,
 ) -> Result<String, AppError> {
-    loop {
-        if let Some(detail) = check(session)? {
-            return Ok(detail);
+    let page = session.page()?;
+    match condition {
+        Condition::Text(text) | Condition::Gone(text) => {
+            let present = matches!(condition, Condition::Text(_));
+            if !wait_for_text(session.connection(), &page, text, present, deadline)? {
+                return Err(timed_out(condition, deadline));
+            }
+            if !present || !show {
+                return Ok(String::new());
+            }
+            let captured = session.capture()?;
+            let lines = find_matches(&captured.tree, text, None);
+            Ok(lines
+                .into_iter()
+                .take(MATCHES_SHOWN)
+                .collect::<Vec<_>>()
+                .join("\n"))
         }
-        let deadline = session.deadline();
-        if deadline.remaining() <= POLL {
-            return Err(timed_out(condition, deadline.timeout_ms()));
+        Condition::Url(part) => wait_for_url(session.connection(), &page, part, deadline)?
+            .ok_or_else(|| timed_out(condition, deadline)),
+        Condition::Idle => {
+            wait_idle(session, &page, condition, deadline)?;
+            Ok(String::new())
         }
-        std::thread::sleep(POLL);
     }
-}
-
-fn text_matches(
-    session: &mut Session,
-    page: &PageSession,
-    text: &str,
-    want_present: bool,
-) -> Result<Option<String>, AppError> {
-    let deadline = session.deadline();
-    let snapshot = snapshot_page_within_budget(session.connection(), page, deadline)?;
-    let present = !find_matches(&snapshot.tree, text, None).is_empty();
-    if present != want_present {
-        return Ok(None);
-    }
-    if !want_present {
-        return Ok(Some(String::new()));
-    }
-    let captured = session.capture()?;
-    Ok(Some(find_matches(&captured.tree, text, None).join("\n")))
 }
 
 fn wait_idle(
     session: &mut Session,
     page: &PageSession,
     condition: &Condition,
+    deadline: Deadline,
 ) -> Result<(), AppError> {
-    let deadline = session.deadline();
     let connection = session.connection();
     connection.call(
         "Network.enable",
@@ -104,12 +88,12 @@ fn wait_idle(
             return Ok(());
         }
         if deadline.is_expired() {
-            return Err(timed_out(condition, deadline.timeout_ms()));
+            return Err(timed_out(condition, deadline));
         }
         let window = if pending.is_empty() {
             QUIET.saturating_sub(quiet_since.elapsed())
         } else {
-            POLL
+            deadline.remaining()
         };
         let session_id = page.session_id.clone();
         let event = connection.wait_for_event(
@@ -144,11 +128,12 @@ fn wait_idle(
     }
 }
 
-fn timed_out(condition: &Condition, timeout_ms: u64) -> AppError {
+fn timed_out(condition: &Condition, deadline: Deadline) -> AppError {
     AppError::timeout(format!(
-        "Waited {timeout_ms} ms for {}",
+        "waited {} ms for {}",
+        deadline.elapsed().as_millis(),
         condition.describe()
     ))
     .with_details(json!({ "kind": "wait_timeout" }))
-    .with_disposition(tabref_core::DeliverySemantics::not_delivered())
+    .with_disposition(DeliverySemantics::not_delivered())
 }

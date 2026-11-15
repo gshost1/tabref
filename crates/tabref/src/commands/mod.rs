@@ -1,20 +1,32 @@
+pub(crate) mod act_target;
+pub(crate) mod acted;
 pub(crate) mod action_report;
+pub(crate) mod batch_step;
 pub(crate) mod check;
 pub(crate) mod click;
 pub(crate) mod close;
+pub(crate) mod do_batch;
+pub(crate) mod do_expand;
+pub(crate) mod do_read_steps;
+pub(crate) mod do_step;
 pub(crate) mod fill;
 pub(crate) mod find;
 pub(crate) mod hover;
 pub(crate) mod js;
 pub(crate) mod open;
+pub(crate) mod page_url;
+pub(crate) mod page_view;
 pub(crate) mod press;
 pub(crate) mod read;
 pub(crate) mod scroll;
 pub(crate) mod select;
 pub(crate) mod skill;
 pub(crate) mod snap;
+pub(crate) mod step_done;
+pub(crate) mod step_words;
 pub(crate) mod tab;
 pub(crate) mod tabs;
+pub(crate) mod target_spec;
 pub(crate) mod upload;
 pub(crate) mod wait;
 pub(crate) mod wait_condition;
@@ -27,6 +39,7 @@ use crate::cli::command::Command;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::session_options::SessionOptions;
+use crate::view::view_request::ViewRequest;
 
 /// Runs the parsed command. Every command but `skill` runs against one
 /// [`Session`], built here and nowhere else.
@@ -34,6 +47,12 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
     if let Command::Skill = cli.command {
         return Ok(skill::run());
     }
+    let mut session = Session::open(&session_options(cli))?;
+    dispatch(&mut session, &cli.command)
+}
+
+/// What the parsed command asks of its session.
+pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
     let launch = match &cli.command {
         Command::Open {
             launch: true,
@@ -46,20 +65,36 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         }),
         _ => None,
     };
-    let options = SessionOptions {
+    SessionOptions {
         cdp: cli.cdp.clone(),
         tab: cli.tab.clone(),
-        timeout_ms: cli.timeout,
+        timeout_ms: cli.timeout_ms(),
         launch,
-    };
-    let mut session = Session::open(&options)?;
-    dispatch(&mut session, &cli.command)
+        stdin: None,
+    }
 }
 
-fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
+/// Runs `command` against `session`, in-process or inside the daemon.
+pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
         Command::Open { url, .. } => open::run(session, url),
-        Command::Snap { all, root } => snap::run(session, *all, root.as_deref()),
+        Command::Snap {
+            all,
+            root,
+            rows,
+            full,
+            from,
+        } => snap::run(
+            session,
+            &ViewRequest {
+                all: *all,
+                full: *full,
+                root: root.clone(),
+                rows: rows.clone(),
+                from: *from,
+                section: None,
+            },
+        ),
         Command::Click { target } => click::run(session, target),
         Command::Fill { target, text } => fill::run(session, target, text),
         Command::Select { target, option } => select::run(session, target, option),
@@ -74,7 +109,22 @@ fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppErro
         } => scroll::run(session, direction, target.as_deref(), *px),
         Command::Upload { target, files } => upload::run(session, target, files),
         Command::Find { text, role } => find::run(session, text, role.as_deref()),
-        Command::Read { target } => read::run(session, target.as_deref()),
+        Command::Read {
+            target,
+            section,
+            rows,
+            from,
+            ..
+        } => read::run(
+            session,
+            &ViewRequest {
+                root: target.clone(),
+                rows: rows.clone(),
+                from: *from,
+                section: section.clone(),
+                ..ViewRequest::default()
+            },
+        ),
         Command::Wait {
             text,
             gone,
@@ -90,10 +140,15 @@ fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppErro
             )?,
         ),
         Command::Js { expression } => js::run(session, expression),
+        Command::Do {
+            steps,
+            step_timeout,
+        } => do_batch::run(session, steps.as_deref(), *step_timeout),
         Command::Tabs => tabs::run(session),
         Command::Tab { tab } => tab::run(session, tab),
         Command::Close { tab } => close::run(session, tab.as_deref()),
         Command::Skill => Ok(skill::run()),
+        Command::Daemon { action } => crate::daemon::control::run_in_session(session, action),
     }
 }
 

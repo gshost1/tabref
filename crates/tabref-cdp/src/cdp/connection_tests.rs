@@ -239,3 +239,145 @@ fn a_dialog_that_opens_while_a_click_waits_is_accepted_and_stays_buffered() {
     let dialogs = connection.drain_events(|event| event.method == "Page.javascriptDialogOpening");
     assert_eq!(dialogs.len(), 1);
 }
+
+#[test]
+fn pipelined_requests_are_collected_in_any_order() {
+    let transport = ScriptedTransport::new()
+        .expect("Page.getFrameTree", json!({ "frameTree": 1 }))
+        .expect("DOMSnapshot.captureSnapshot", json!({ "documents": 2 }));
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let tree = connection
+        .send("Page.getFrameTree", json!({}), Some("S"), deadline())
+        .unwrap();
+    let dom = connection
+        .send(
+            "DOMSnapshot.captureSnapshot",
+            json!({}),
+            Some("S"),
+            deadline(),
+        )
+        .unwrap();
+
+    assert_eq!(connection.reply(dom, deadline()).unwrap()["documents"], 2);
+    let (id, outcome) = connection.next_reply(&[tree], deadline()).unwrap();
+    assert_eq!(id, tree);
+    assert_eq!(outcome.unwrap()["frameTree"], 1);
+}
+
+#[test]
+fn a_repeated_enable_on_the_same_session_is_answered_without_the_browser() {
+    let transport = ScriptedTransport::new()
+        .expect("Page.enable", json!({}))
+        .expect("Page.enable", json!({}));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    for session in ["S", "S", "S", "T"] {
+        connection
+            .call("Page.enable", json!({}), Some(session), deadline())
+            .unwrap();
+    }
+
+    let sent = sent.lock().unwrap();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1]["sessionId"], "T");
+}
+
+#[test]
+fn pending_frames_are_polled_into_the_event_buffer_and_detaches_recorded() {
+    let transport = ScriptedTransport::new()
+        .push_inbound(json!({ "method": "Page.frameNavigated", "params": {}, "sessionId": "S" }))
+        .push_inbound(json!({ "method": "Target.detachedFromTarget",
+            "params": { "sessionId": "S" } }));
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    connection.poll_pending(deadline()).unwrap();
+
+    assert!(connection.is_session_detached("S"));
+    assert_eq!(connection.take_events().len(), 2);
+    assert!(!connection.is_closed());
+}
+
+#[test]
+fn a_timeout_leaves_the_connection_usable() {
+    let transport = ScriptedTransport::new().expect_silence("Page.navigate");
+    let mut connection = CdpConnection::new(transport.boxed());
+    let error = connection
+        .call("Page.navigate", json!({}), Some("S"), deadline())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Timeout);
+    assert!(!connection.is_closed());
+}
+
+#[test]
+fn a_raw_reply_is_its_whole_frame_text_small_or_large_and_errors_stay_errors() {
+    let big = "x".repeat(100 * 1024);
+    let transport = ScriptedTransport::new()
+        .expect("Accessibility.getFullAXTree", json!({ "nodes": [] }))
+        .expect("Accessibility.getFullAXTree", json!({ "nodes": [big] }))
+        .expect_error("Accessibility.getFullAXTree", -32000, "No frame");
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let mut texts = Vec::new();
+    for _ in 0..2 {
+        let id = connection
+            .send_raw(
+                "Accessibility.getFullAXTree",
+                json!({}),
+                Some("S"),
+                deadline(),
+            )
+            .unwrap();
+        texts.push(connection.reply(id, deadline()).unwrap());
+    }
+    let failed = connection
+        .send_raw(
+            "Accessibility.getFullAXTree",
+            json!({}),
+            Some("S"),
+            deadline(),
+        )
+        .unwrap();
+
+    let small: serde_json::Value = serde_json::from_str(texts[0].as_str().unwrap()).unwrap();
+    assert_eq!(small["result"], json!({ "nodes": [] }));
+    assert!(texts[1].as_str().unwrap().len() > 100 * 1024);
+    let error = connection.reply(failed, deadline()).unwrap_err();
+    assert!(is_protocol_error(&error));
+}
+
+#[test]
+fn a_cancelled_caller_stops_waiting_and_sends_nothing_more() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    let transport = ScriptedTransport::new().expect_silence("Runtime.evaluate");
+    let mut connection = CdpConnection::new(transport.boxed());
+    let cancel = Arc::new(AtomicBool::new(false));
+    connection.set_cancel(Some(Arc::clone(&cancel)));
+    let trigger = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        cancel.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+
+    let error = connection
+        .call(
+            "Runtime.evaluate",
+            json!({}),
+            Some("S"),
+            Deadline::after(5_000).unwrap(),
+        )
+        .unwrap_err();
+    trigger.join().unwrap();
+
+    assert_eq!(error.details.as_ref().unwrap()["kind"], "cancelled");
+    assert!(started.elapsed() < Duration::from_millis(1_000));
+    let again = connection
+        .call("DOM.focus", json!({}), Some("S"), deadline())
+        .unwrap_err();
+    assert_eq!(again.details.unwrap()["kind"], "cancelled");
+    assert!(!connection.is_closed());
+}

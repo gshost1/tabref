@@ -1,0 +1,16 @@
+page "Items" http://127.0.0.1:PORT/table
+# Items
+30 records found
+table 30 rows: ID | Name | Price | Action
+  1021 | Item 21 | $21.00 | [e121 Edit -> /item/1021/edit]
+  1022 | Item 22 | $22.00 | [e126 Edit -> /item/1022/edit]
+  1023 | Item 23 | $23.00 | [e131 Edit -> /item/1023/edit]
+  1024 | Item 24 | $24.00 | [e136 Edit -> /item/1024/edit]
+  1025 | Item 25 | $25.00 | [e141 Edit -> /item/1025/edit]
+  1026 | Item 26 | $26.00 | [e146 Edit -> /item/1026/edit]
+  1027 | Item 27 | $27.00 | [e151 Edit -> /item/1027/edit]
+  1028 | Item 28 | $28.00 | [e156 Edit -> /item/1028/edit]
+  1029 | Item 29 | $29.00 | [e161 Edit -> /item/1029/edit]
+  1030 | Item 30 | $30.00 | [e166 Edit -> /item/1030/edit]
+  … 20 rows before these (30 in all): tabref snap --rows 1-
+-- 14 lines, 817 chars; cut: 20 rows; more: tabref snap --rows 1- | tabref find <text>

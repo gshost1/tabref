@@ -75,17 +75,11 @@ impl CdpTransport for WebSocketTransport {
         loop {
             apply_timeouts(self.socket.get_ref(), deadline)?;
             match self.socket.read() {
-                Ok(Message::Text(text)) => return Ok(text.as_str().to_owned()),
-                Ok(Message::Binary(bytes)) => {
-                    return String::from_utf8(bytes.to_vec())
-                        .map_err(|error| transport_failed("receive", error.to_string()));
+                Ok(message) => {
+                    if let Some(text) = message_text(message, "receive") {
+                        return text;
+                    }
                 }
-                Ok(Message::Close(frame)) => {
-                    return Err(transport_closed(frame.map_or_else(String::new, |frame| {
-                        frame.reason.as_str().to_owned()
-                    })));
-                }
-                Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
                 Err(WsError::Io(error)) if is_retry(error.kind()) => {
                     if deadline.is_expired() {
                         return Err(transport_timeout("receive"));
@@ -95,6 +89,45 @@ impl CdpTransport for WebSocketTransport {
             }
         }
     }
+
+    fn poll_text(&mut self) -> Result<Option<String>, AppError> {
+        set_nonblocking(self.socket.get_ref(), true)?;
+        let polled = loop {
+            match self.socket.read() {
+                Ok(message) => {
+                    if let Some(text) = message_text(message, "poll") {
+                        break text.map(Some);
+                    }
+                }
+                Err(WsError::Io(error)) if is_retry(error.kind()) => break Ok(None),
+                Err(error) => break Err(map_ws_error("poll", error)),
+            }
+        };
+        set_nonblocking(self.socket.get_ref(), false)?;
+        polled
+    }
+}
+
+/// A data message's text, or the error a close frame means. `None` for
+/// control frames, which tungstenite answers itself.
+fn message_text(message: Message, operation: &str) -> Option<Result<String, AppError>> {
+    match message {
+        Message::Text(text) => Some(Ok(text.as_str().to_owned())),
+        Message::Binary(bytes) => Some(
+            String::from_utf8(bytes.to_vec())
+                .map_err(|error| transport_failed(operation, error.to_string())),
+        ),
+        Message::Close(frame) => Some(Err(transport_closed(
+            frame.map_or_else(String::new, |frame| frame.reason.as_str().to_owned()),
+        ))),
+        Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => None,
+    }
+}
+
+fn set_nonblocking(stream: &TcpStream, nonblocking: bool) -> Result<(), AppError> {
+    stream
+        .set_nonblocking(nonblocking)
+        .map_err(|error| transport_failed("configure", error.to_string()))
 }
 
 fn is_retry(kind: ErrorKind) -> bool {

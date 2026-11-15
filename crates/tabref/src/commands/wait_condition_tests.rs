@@ -1,4 +1,5 @@
 use tabref_core::ErrorCode;
+use tabref_page::Word;
 
 use super::Condition;
 
@@ -20,4 +21,33 @@ fn exactly_one_flag_names_the_condition() {
         let error = Condition::from_flags(text, None, url, idle).unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgs);
     }
+}
+
+#[test]
+fn a_step_names_its_condition_in_words() {
+    let words = |list: &[&str]| list.iter().map(|text| Word::bare(text)).collect::<Vec<_>>();
+    assert_eq!(
+        Condition::from_words(&words(&["url", "~saved=1"])).unwrap(),
+        Condition::Url("saved=1".into())
+    );
+    assert_eq!(
+        Condition::from_words(&words(&["url", "/saved/"])).unwrap(),
+        Condition::Url("saved".into())
+    );
+    assert_eq!(
+        Condition::from_words(&[Word::bare("text"), Word::quoted("You saved")]).unwrap(),
+        Condition::Text("You saved".into())
+    );
+    assert_eq!(
+        Condition::from_words(&[Word::quoted("Saved")]).unwrap(),
+        Condition::Text("Saved".into())
+    );
+    assert_eq!(
+        Condition::from_words(&words(&["idle"])).unwrap(),
+        Condition::Idle
+    );
+    assert_eq!(
+        Condition::from_words(&words(&["text"])).unwrap_err().code,
+        ErrorCode::InvalidArgs
+    );
 }

@@ -1,47 +1,69 @@
-use serde_json::json;
-use tabref_core::{AppError, DeliverySemantics};
-use tabref_page::{focus, press_key};
+use std::collections::HashSet;
 
-use super::action_report::finish_with_effects;
+use serde_json::json;
+use tabref_core::{AppError, Deadline};
+use tabref_page::{LocateIntent, focus, press_key};
+
+use super::act_target::{ActTarget, resolve_target};
+use super::acted::Acted;
+use super::action_report::full_report;
+use super::target_spec::TargetSpec;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 
-/// Presses `key` in the focused element, or in `target` after focusing it,
-/// then reports what the key set off, such as a submitted form.
+/// Presses `key` in the focused element, or in `target` after focusing it.
 pub(crate) fn run(
     session: &mut Session,
     key: &str,
     target: Option<&str>,
 ) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
-    let (page, label, ref_text) = match target {
-        Some(text) => {
-            let target = session.resolve_ref(text)?;
+    let target = match target {
+        Some(text) => Some(resolve_target(
+            session,
+            &TargetSpec::from_arg(text)?,
+            LocateIntent::Click,
+            deadline,
+        )?),
+        None => None,
+    };
+    let acted = act(session, key, target, deadline)?;
+    full_report(session, acted)
+}
+
+/// Presses `key` (Enter, Tab, Escape, ArrowDown, Control+a, ...) and
+/// reports what it set off, such as a submitted form.
+pub(crate) fn act(
+    session: &mut Session,
+    key: &str,
+    target: Option<ActTarget>,
+    deadline: Deadline,
+) -> Result<Acted, AppError> {
+    let (page, tab, label, known) = match target {
+        Some(target) => {
             focus(
                 session.connection(),
                 &target.session,
                 &target.token,
                 deadline,
             )?;
-            (
-                target.session.clone(),
-                format!(" in {}", target.label()),
-                Some(target.ref_id.to_string()),
-            )
+            let label = format!(" in {}", target.label);
+            (target.session, target.tab_id, label, target.known)
         }
-        None => (session.page()?, String::new(), None),
+        None => {
+            let page = session.page()?;
+            let tab = page.target_id.clone();
+            (page, tab, String::new(), HashSet::new())
+        }
     };
-    let tab = session.tab_id()?;
-    session.watch_action(&tab)?;
+    let watched = session.watch_action(&tab, deadline)?;
     press_key(session.connection(), &page, key, deadline)?;
-    let outcome = Outcome::new(
-        format!("pressed {key}{label}"),
-        json!({
-            "action": "press",
-            "key": key,
-            "ref": ref_text,
-            "disposition": DeliverySemantics::delivered_unverified(),
-        }),
-    );
-    finish_with_effects(session, outcome)
+    let effects = session.finish_action(&watched, deadline)?;
+    Ok(Acted {
+        verb: "press",
+        summary: format!("{key}{label}"),
+        data: json!({ "action": "press", "key": key, "target": label.trim_start_matches(" in ") }),
+        effects: Some(effects),
+        known,
+    })
 }

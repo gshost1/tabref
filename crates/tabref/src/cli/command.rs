@@ -14,51 +14,60 @@ pub(crate) enum Command {
         #[arg(long)]
         headed: bool,
     },
-    /// Print the page's controls and headings, one line per node, refs first
+    /// Print the page view: text in reading order, controls with refs
     Snap {
-        /// Include every node with text, not just controls and headings
+        /// Print navigation, header and footer whole, with a larger budget
         #[arg(short = 'a', long)]
         all: bool,
-        /// Print only the subtree of this ref
+        /// Print only the part of the page inside this ref
         #[arg(long, value_name = "REF")]
         root: Option<String>,
+        /// Rows of long tables and lists to print: 21-40, 21- or 5
+        #[arg(long, value_name = "FROM-TO")]
+        rows: Option<String>,
+        /// Print every line whole: no paragraph, code, dialog or option cuts
+        #[arg(long)]
+        full: bool,
+        /// Start at this line of the view (the cut markers name it)
+        #[arg(long, value_name = "LINE", default_value_t = 1)]
+        from: usize,
     },
     /// Click an element
     Click {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
     },
     /// Replace a field's text and read it back
     Fill {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
         text: String,
     },
     /// Choose an option of a <select> by its label, value or text
     Select {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
         option: String,
     },
     /// Tick a checkbox, radio button or switch
     Check {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
     },
     /// Clear a checkbox or switch
     Uncheck {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
     },
     /// Press a key (Enter, Tab, Escape, ArrowDown, Control+a, ...), in REF when given
     Press {
         key: String,
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: Option<String>,
     },
     /// Move the pointer over an element
     Hover {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
     },
     /// Scroll the page (down, up, left, right) or bring REF into view
@@ -67,7 +76,7 @@ pub(crate) enum Command {
         #[arg(default_value = "down", value_name = "DIRECTION|REF")]
         direction: String,
         /// Scroll the container that holds this ref instead of the page
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: Option<String>,
         /// Distance in CSS pixels (default: most of a screen)
         #[arg(long)]
@@ -75,7 +84,7 @@ pub(crate) enum Command {
     },
     /// Set the files of an <input type=file>
     Upload {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: String,
         #[arg(required = true)]
         files: Vec<PathBuf>,
@@ -87,10 +96,22 @@ pub(crate) enum Command {
         #[arg(long)]
         role: Option<String>,
     },
-    /// Print the page's text, or one element's
+    /// Print the main content as text, a section, or one element
     Read {
-        #[arg(value_name = "REF")]
+        #[arg(value_name = "TARGET")]
         target: Option<String>,
+        /// The main content (the default when no REF is given)
+        #[arg(long, conflicts_with_all = ["target", "section"])]
+        main: bool,
+        /// The section under the heading with this text (exact match first)
+        #[arg(long, value_name = "HEADING", conflicts_with = "target")]
+        section: Option<String>,
+        /// Rows of long tables and lists to print: 21-40, 21- or 5
+        #[arg(long, value_name = "FROM-TO")]
+        rows: Option<String>,
+        /// Start at this line of the text (the cut markers name it)
+        #[arg(long, value_name = "LINE", default_value_t = 1)]
+        from: usize,
     },
     /// Wait until a condition holds (bounded by --timeout)
     Wait {
@@ -107,6 +128,14 @@ pub(crate) enum Command {
         #[arg(long)]
         idle: bool,
     },
+    /// Run several steps in one call, one per line, from STEPS or stdin
+    Do {
+        /// The steps; read from stdin when left out or `-`
+        steps: Option<String>,
+        /// Time limit of each step, in milliseconds
+        #[arg(long, default_value_t = 10_000, value_name = "MS")]
+        step_timeout: u64,
+    },
     /// Evaluate a JavaScript expression in the page and print its value
     Js { expression: String },
     /// List the open tabs
@@ -117,6 +146,11 @@ pub(crate) enum Command {
     Close { tab: Option<String> },
     /// Print the agent guide
     Skill,
+    /// Start, inspect or stop the background daemon that keeps the browser connection
+    Daemon {
+        #[arg(value_parser = ["start", "status", "stop"])]
+        action: String,
+    },
 }
 
 impl Command {
@@ -136,11 +170,13 @@ impl Command {
             Self::Find { .. } => "find",
             Self::Read { .. } => "read",
             Self::Wait { .. } => "wait",
+            Self::Do { .. } => "do",
             Self::Js { .. } => "js",
             Self::Tabs => "tabs",
             Self::Tab { .. } => "tab",
             Self::Close { .. } => "close",
             Self::Skill => "skill",
+            Self::Daemon { .. } => "daemon",
         }
     }
 }
