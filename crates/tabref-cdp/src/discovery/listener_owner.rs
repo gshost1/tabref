@@ -8,7 +8,7 @@
 //! other process holds any of them; a socket no visible process holds belongs
 //! to another user or to root. Tables that cannot be read are `CantCheck`;
 //! other platforms are `Unknown`.
-#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

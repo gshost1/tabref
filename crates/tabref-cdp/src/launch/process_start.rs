@@ -49,6 +49,7 @@ pub fn launched_alive(record: &LaunchedBrowser) -> Option<bool> {
 
 /// The start time field of a `/proc/<pid>/stat` line, read after the
 /// command name, which may itself hold spaces and parentheses.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn linux_start_time(stat: &str) -> Option<String> {
     let after_name = &stat[stat.rfind(')')? + 1..];
     after_name.split_whitespace().nth(19).map(str::to_owned)
