@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
@@ -8,8 +9,9 @@ const WAIT_SLICE: Duration = Duration::from_millis(50);
 
 /// Which command holds each tab. The daemon runs commands concurrently, but
 /// never two on one tab: a command claims every tab it works in and waits,
-/// bounded by its deadline, while another command holds one. Claims are
-/// re-entrant for their owner and released together.
+/// bounded by its deadline and ended by its `cancel` flag, while another
+/// command holds one. Claims are re-entrant for their owner and released
+/// together.
 #[derive(Debug, Default)]
 pub(crate) struct TabLocks {
     held: Mutex<HashMap<String, u64>>,
@@ -17,7 +19,13 @@ pub(crate) struct TabLocks {
 }
 
 impl TabLocks {
-    pub(crate) fn claim(&self, tab: &str, owner: u64, deadline: Deadline) -> Result<(), AppError> {
+    pub(crate) fn claim(
+        &self,
+        tab: &str,
+        owner: u64,
+        deadline: Deadline,
+        cancel: &AtomicBool,
+    ) -> Result<(), AppError> {
         let mut held = self.held.lock().map_err(|_| poisoned())?;
         loop {
             match held.get(tab) {
@@ -26,6 +34,7 @@ impl TabLocks {
                     return Ok(());
                 }
                 Some(holder) if *holder == owner => return Ok(()),
+                Some(_) if cancel.load(Ordering::SeqCst) => return Err(cancelled(tab)),
                 Some(_) if deadline.is_expired() => return Err(busy(tab)),
                 Some(_) => {
                     let slice = deadline.remaining().min(WAIT_SLICE);
@@ -58,6 +67,15 @@ fn busy(tab: &str) -> AppError {
     )
     .with_suggestion("Wait for the other command to finish, or pass a longer --timeout")
     .with_details(serde_json::json!({ "kind": "tab_busy", "tab": tab }))
+    .with_disposition(tabref_core::DeliverySemantics::not_delivered())
+}
+
+fn cancelled(tab: &str) -> AppError {
+    AppError::new(
+        ErrorCode::ActionFailed,
+        format!("Stopped waiting for tab {tab}: the command's caller went away"),
+    )
+    .with_details(serde_json::json!({ "kind": "cancelled", "tab": tab }))
     .with_disposition(tabref_core::DeliverySemantics::not_delivered())
 }
 

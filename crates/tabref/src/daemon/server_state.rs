@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::json;
@@ -41,15 +41,19 @@ impl ServerState {
     /// A session ready for the next command: a kept one whose connection
     /// still answers, or a new connection. A kept session whose browser went
     /// away is dropped here, so the command reconnects instead of failing.
-    pub(crate) fn checkout(&self, options: &SessionOptions) -> Result<Session, AppError> {
+    pub(crate) fn checkout(
+        &self,
+        options: &SessionOptions,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<Session, AppError> {
         let owner = self.next_owner.fetch_add(1, Ordering::SeqCst);
         while let Some(mut session) = self.take_idle() {
-            let claim = TabClaim::new(Arc::clone(&self.locks), owner);
+            let claim = TabClaim::new(Arc::clone(&self.locks), owner, Arc::clone(cancel));
             if session.begin(options, Some(claim)).is_ok() {
                 return Ok(session);
             }
         }
-        let claim = TabClaim::new(Arc::clone(&self.locks), owner);
+        let claim = TabClaim::new(Arc::clone(&self.locks), owner, Arc::clone(cancel));
         Session::open_claimed(options, Some(claim))
     }
 

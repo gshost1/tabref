@@ -1,6 +1,7 @@
 pub(crate) mod action_effects;
 pub(crate) mod action_watch;
 pub(crate) mod captured_snapshot;
+pub(crate) mod command_input;
 pub(crate) mod command_scope;
 pub(crate) mod endpoint_choice;
 pub(crate) mod kept_session;
@@ -55,7 +56,8 @@ impl Session {
     ) -> Result<Self, AppError> {
         let scope = CommandScope::new(options, claim)?;
         let store = RefStore::open()?;
-        let (endpoint, connection) = connect_browser(options, &store, scope.deadline)?;
+        let (endpoint, mut connection) = connect_browser(options, &store, scope.deadline)?;
+        connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
         Ok(Self {
             connection,
             endpoint,

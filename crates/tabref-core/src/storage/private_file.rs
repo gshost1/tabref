@@ -9,7 +9,10 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// and a rename, so a reader never sees half a file. Missing parent
 /// directories are created private to the user (0700 on Unix), the file is
 /// written private (0600), and the temporary file is created new, so a file
-/// or link planted at its name is never written through.
+/// or link planted at its name is never written through. The file is not
+/// synced to disk: everything kept this way (ref maps, the current tab, the
+/// launch record) is a cache that a crash may lose without harm, and a sync
+/// cost 10 to 20 ms per snapshot on a real disk.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     create_private_dir(parent)?;
@@ -26,7 +29,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     options.write(true).create_new(true);
     private_file_mode(&mut options);
     let mut file = options.open(&temp)?;
-    if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+    if let Err(error) = file.write_all(bytes) {
         let _ = std::fs::remove_file(&temp);
         return Err(error);
     }

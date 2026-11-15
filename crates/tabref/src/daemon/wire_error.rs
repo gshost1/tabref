@@ -41,11 +41,29 @@ impl From<&AppError> for WireError {
     }
 }
 
+/// Names every code, so a code added to `ErrorCode` fails to compile here
+/// until it is listed in `CODES` too (the test checks the two agree).
+fn listed(code: ErrorCode) -> bool {
+    match code {
+        ErrorCode::PermDenied
+        | ErrorCode::ElementNotFound
+        | ErrorCode::ActionFailed
+        | ErrorCode::ActionNotSupported
+        | ErrorCode::StaleRef
+        | ErrorCode::AmbiguousTarget
+        | ErrorCode::WindowNotFound
+        | ErrorCode::Timeout
+        | ErrorCode::InvalidArgs
+        | ErrorCode::SnapshotNotFound
+        | ErrorCode::Internal => CODES.contains(&code),
+    }
+}
+
 impl From<WireError> for AppError {
     fn from(wire: WireError) -> Self {
         let code = CODES
             .into_iter()
-            .find(|code| code.as_str() == wire.code)
+            .find(|code| listed(*code) && code.as_str() == wire.code)
             .unwrap_or(ErrorCode::Internal);
         Self {
             code,

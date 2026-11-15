@@ -13,6 +13,8 @@ use super::NO_DAEMON_ENV;
 use super::build_id::build_id;
 use super::daemon_address::DaemonAddress;
 use super::private_dir::{check_private, check_socket};
+use super::request_paths::{resolved_paths, runs_in_process};
+use super::request_stdin::request_stdin;
 use super::spawn::spawn_daemon;
 use super::wire_io::{MAX_REPLY, read_line, write_line};
 use super::wire_reply::WireReply;
@@ -41,14 +43,23 @@ pub(crate) fn run_through_daemon(cli: &Cli) -> Option<Result<Outcome, AppError>>
         .skip(1)
         .map(|arg| arg.into_string().ok())
         .collect::<Option<Vec<String>>>()?;
+    if runs_in_process(&cli.command) {
+        return None;
+    }
     let cwd = std::env::current_dir().ok()?.to_str()?.to_owned();
     let address = DaemonAddress::for_endpoint(cli.cdp.as_deref()).ok()?;
+    let stdin = match request_stdin(&cli.command) {
+        Ok(stdin) => stdin,
+        Err(error) => return Some(Err(error)),
+    };
     let request = WireRequest {
         op: "run".to_owned(),
         build: build_id(),
         argv,
         cwd,
         cdp: cli.cdp.clone(),
+        paths: resolved_paths(&cli.command),
+        stdin,
     };
     let wait = Duration::from_millis(cli.timeout).saturating_add(REPLY_SLACK);
     for _ in 0..3 {

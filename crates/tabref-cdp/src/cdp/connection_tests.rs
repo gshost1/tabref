@@ -346,3 +346,38 @@ fn a_raw_reply_is_its_whole_frame_text_small_or_large_and_errors_stay_errors() {
     let error = connection.reply(failed, deadline()).unwrap_err();
     assert!(is_protocol_error(&error));
 }
+
+#[test]
+fn a_cancelled_caller_stops_waiting_and_sends_nothing_more() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    let transport = ScriptedTransport::new().expect_silence("Runtime.evaluate");
+    let mut connection = CdpConnection::new(transport.boxed());
+    let cancel = Arc::new(AtomicBool::new(false));
+    connection.set_cancel(Some(Arc::clone(&cancel)));
+    let trigger = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        cancel.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+
+    let error = connection
+        .call(
+            "Runtime.evaluate",
+            json!({}),
+            Some("S"),
+            Deadline::after(5_000).unwrap(),
+        )
+        .unwrap_err();
+    trigger.join().unwrap();
+
+    assert_eq!(error.details.as_ref().unwrap()["kind"], "cancelled");
+    assert!(started.elapsed() < Duration::from_millis(1_000));
+    let again = connection
+        .call("DOM.focus", json!({}), Some("S"), deadline())
+        .unwrap_err();
+    assert_eq!(again.details.unwrap()["kind"], "cancelled");
+    assert!(!connection.is_closed());
+}

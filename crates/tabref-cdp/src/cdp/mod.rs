@@ -1,5 +1,7 @@
 pub(crate) mod cdp_event;
 pub(crate) mod connection;
+pub(crate) mod connection_health;
+pub(crate) mod connection_io;
 pub(crate) mod event_buffer;
 pub(crate) mod frame_envelope;
 pub(crate) mod incoming;

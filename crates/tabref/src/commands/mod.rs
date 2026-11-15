@@ -57,6 +57,7 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
         tab: cli.tab.clone(),
         timeout_ms: cli.timeout,
         launch,
+        stdin: None,
     }
 }
 

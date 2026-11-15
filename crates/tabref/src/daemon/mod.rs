@@ -8,6 +8,7 @@ pub(crate) mod build_id;
 pub(crate) mod control;
 pub(crate) mod daemon_address;
 pub(crate) mod request_paths;
+pub(crate) mod request_stdin;
 pub(crate) mod tab_locks;
 pub(crate) mod wire_error;
 pub(crate) mod wire_reply;
@@ -24,9 +25,13 @@ pub(crate) mod run_request;
 #[cfg(unix)]
 pub(crate) mod server;
 #[cfg(unix)]
+pub(crate) mod server_connection;
+#[cfg(unix)]
 pub(crate) mod server_state;
 #[cfg(unix)]
 pub(crate) mod spawn;
+#[cfg(unix)]
+pub(crate) mod stale_sweep;
 #[cfg(unix)]
 pub(crate) mod wire_io;
 

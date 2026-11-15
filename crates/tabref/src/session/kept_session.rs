@@ -22,6 +22,8 @@ impl Session {
         claim: Option<TabClaim>,
     ) -> Result<(), AppError> {
         self.scope = CommandScope::new(options, claim)?;
+        let cancel = self.scope.claim.as_ref().map(TabClaim::cancel_flag);
+        self.connection.set_cancel(cancel);
         self.connection.poll_pending(self.scope.deadline)?;
         self.connection.take_events();
         let connection = &self.connection;
@@ -33,6 +35,7 @@ impl Session {
     /// Ends the daemon command: its tab claims are released.
     pub(crate) fn end(&mut self) {
         self.scope.claim = None;
+        self.connection.set_cancel(None);
     }
 
     /// Whether the connection failed, so no later command can use it.
