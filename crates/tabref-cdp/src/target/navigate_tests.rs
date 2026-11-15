@@ -1,7 +1,9 @@
 use serde_json::json;
 use tabref_core::{Deadline, ErrorCode};
 
-use super::{navigate, navigate_by, wait_for_load};
+use std::time::Duration;
+
+use super::{load_bound, navigate, navigate_by, wait_for_load};
 use crate::ScriptedTransport;
 use crate::{CdpConnection, PageSession};
 
@@ -169,9 +171,30 @@ fn a_navigation_the_browser_never_starts_is_a_pending_navigation() {
     .unwrap_err();
 
     assert_eq!(error.code, ErrorCode::Timeout);
+    assert!(
+        error.message.contains("did not respond"),
+        "{}",
+        error.message
+    );
+    assert!(!error.suggestion.clone().unwrap().contains("repeat"));
     let details = error.details.unwrap();
     assert_eq!(details["kind"], "cdp_navigation_pending");
-    assert_eq!(details["retryable"], true);
+    assert!(details.get("retryable").is_none());
+}
+
+#[test]
+fn a_commit_just_before_the_load_bound_still_gets_half_a_second_to_load() {
+    let commit = Deadline::after(5_000).unwrap();
+
+    let nearly_spent = load_bound(commit, Deadline::after(50).unwrap());
+    let roomy = load_bound(commit, Deadline::after(3_000).unwrap());
+    let tight = load_bound(Deadline::after(200).unwrap(), Deadline::after(50).unwrap());
+
+    assert!(nearly_spent.remaining() > Duration::from_millis(450));
+    assert!(nearly_spent.remaining() <= Duration::from_millis(500));
+    assert!(roomy.remaining() > Duration::from_millis(2_900));
+    assert!(tight.remaining() <= Duration::from_millis(200));
+    assert!(tight.remaining() > Duration::from_millis(100));
 }
 
 #[test]

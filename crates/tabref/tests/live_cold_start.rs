@@ -111,4 +111,5 @@ fn a_navigation_the_browser_never_starts_says_so() {
         error["details"]["kind"], "cdp_navigation_pending",
         "{error}"
     );
+    assert_eq!(error["details"]["retryable"], true, "{error}");
 }

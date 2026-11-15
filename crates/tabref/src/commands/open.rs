@@ -43,6 +43,9 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
     ) {
         Ok(()) => false,
         Err(error) if error.kind() == Some("cdp_load_timeout") => true,
+        Err(error) if error.kind() == Some("cdp_navigation_pending") => {
+            return Err(open_again(error));
+        }
         Err(error) => return Err(error),
     };
     let captured = session.capture()?;
@@ -58,6 +61,24 @@ pub(crate) fn run(session: &mut Session, url: &str) -> Result<Outcome, AppError>
         serde_json::json!(!unfinished),
     );
     Ok(report)
+}
+
+/// A navigation the browser did not start in time, for `open` alone:
+/// opening the same address again only asks for it again, so it may be
+/// repeated. Other callers keep the neutral error, as repeating them could
+/// repeat the actions before the navigation.
+fn open_again(error: AppError) -> AppError {
+    let mut details = error
+        .details
+        .clone()
+        .unwrap_or_else(|| serde_json::json!({}));
+    details["retryable"] = serde_json::json!(true);
+    error
+        .with_suggestion(
+            "A slow server, or a browser that has just started and is still loading its \
+             profile, holds the page back; run the same open again, or pass a longer --timeout",
+        )
+        .with_details(details)
 }
 
 /// `example.com` becomes `https://example.com`, a loopback host such as

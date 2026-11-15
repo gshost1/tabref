@@ -155,7 +155,7 @@ impl Session {
             .map_err(|error| {
                 if is_protocol_error(&error) {
                     let detail = error.platform_detail.clone().unwrap_or_default();
-                    target_gone("Target.attachToTarget", detail)
+                    target_gone(failed_method(&error), detail)
                 } else {
                     error
                 }
@@ -169,6 +169,21 @@ impl Session {
     }
 }
 
+/// The method a protocol error names: attaching sends several, and the
+/// error should say which one the browser refused.
+fn failed_method(error: &AppError) -> &str {
+    error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("method"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Target.attachToTarget")
+}
+
 fn remembered_is(store: &RefStore, name: &str, target_id: &str) -> bool {
     store.read_state(name).as_deref() == Some(target_id)
 }
+
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;
