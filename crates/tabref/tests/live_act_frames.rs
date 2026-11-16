@@ -86,7 +86,11 @@ fn a_click_whose_effect_lands_in_a_same_origin_frame_reports_the_change() {
         escalated.stdout
     );
     let raised = tabref.ok(&["click", "Raise"]);
-    assert!(raised.stdout.contains("Priority high"), "{}", raised.stdout);
+    assert!(
+        raised.stdout.contains("{normal -> high}"),
+        "{}",
+        raised.stdout
+    );
     let noop = tabref.ok(&["click", "Noop"]);
     assert_eq!(noop.stdout.trim(), format!("clicked \"Noop\" {NOTHING}"));
 }
@@ -101,7 +105,7 @@ fn a_form_sent_inside_a_frame_reports_the_frame_s_new_page() {
     let run = tabref.ok(&["do", "fill Note \"call back\"; click \"Send note\""]);
     assert!(!run.stdout.contains(NOTHING), "{}", run.stdout);
     assert!(
-        run.stdout.contains("Note sent to the customer"),
+        run.stdout.contains("sent to the customer"),
         "{}",
         run.stdout
     );

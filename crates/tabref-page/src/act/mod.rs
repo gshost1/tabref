@@ -41,3 +41,4 @@ pub(crate) mod upload;
 pub(crate) mod upload_outcome;
 pub(crate) mod value_target;
 pub(crate) mod viewport_metrics;
+pub(crate) mod watch_scripts;

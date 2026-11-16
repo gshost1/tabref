@@ -15,6 +15,7 @@ use crate::view::ref_style::RefStyle;
 
 const CHANGE_BUDGET: usize = 600;
 const NOTHING_SEEN: &str = " (no visible change)";
+const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
 const NEW_SHOWN: usize = 8;
 const NEW_LINE_CHARS: usize = 80;
 
@@ -24,8 +25,8 @@ const NEW_LINE_CHARS: usize = 80;
 /// led to another page, a snapshot of that page.
 pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome, AppError> {
     let mut first = format!("{} {}", past(acted.verb), acted.summary);
-    if nothing_seen(&acted) {
-        first.push_str(NOTHING_SEEN);
+    if let Some(note) = nothing_seen(&acted) {
+        first.push_str(note);
     }
     let mut outcome = Outcome::new(first, acted.data);
     if let Some(effects) = &acted.effects {
@@ -47,8 +48,8 @@ pub(crate) fn step_report(
     last: bool,
 ) -> Result<(String, Value), AppError> {
     let mut line = format!("ok {} {}", acted.verb, acted.summary);
-    if nothing_seen(&acted) {
-        line.push_str(NOTHING_SEEN);
+    if let Some(note) = nothing_seen(&acted) {
+        line.push_str(note);
     }
     let mut data = acted.data;
     let Some(effects) = &acted.effects else {
@@ -150,23 +151,29 @@ fn effect_block(
     Ok((lines, data))
 }
 
-/// Whether a click, key press or hover showed no effect at all: no
-/// navigation, tab, dialog, DOM mutation or text change. Changes inside a
-/// closed shadow root or drawn on a canvas look like this too.
-fn nothing_seen(acted: &Acted) -> bool {
-    let Some(effects) = &acted.effects else {
-        return false;
-    };
-    matches!(acted.verb, "click" | "double-click" | "press" | "hover")
+/// What a click, key press or hover that showed no effect at all says: no
+/// navigation, tab, dialog, DOM mutation or text change in the document,
+/// its open shadow roots or its same-origin frames. A shown frame from
+/// another site may hold the change, so that is said; a change inside a
+/// closed shadow root or drawn on a canvas looks like nothing. `None` when
+/// the action showed an effect.
+fn nothing_seen(acted: &Acted) -> Option<&'static str> {
+    let effects = acted.effects.as_ref()?;
+    let quiet = matches!(acted.verb, "click" | "double-click" | "press" | "hover")
         && !effects.settled.navigated
         && !effects.settled.same_document
         && effects.new_tab.is_none()
         && effects.dialogs().is_empty()
-        && effects.downloads.is_empty()
-        && effects
-            .page
-            .as_ref()
-            .is_some_and(|page| page.mutations == Some(0) && page.changes.is_empty())
+        && effects.downloads.is_empty();
+    let page = effects.page.as_ref()?;
+    if !quiet || page.mutations != Some(0) || !page.changes.is_empty() {
+        return None;
+    }
+    Some(if page.unread_frames > 0 {
+        NOTHING_READ
+    } else {
+        NOTHING_SEEN
+    })
 }
 
 fn within_budget(changes: &[String]) -> Vec<String> {
