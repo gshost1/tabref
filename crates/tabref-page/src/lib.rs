@@ -25,6 +25,7 @@ pub use act::change_watch::{mark_page, page_changes};
 pub use act::checked::set_checked;
 pub use act::click::{click, click_times};
 pub use act::element_reading::ElementReading;
+pub use act::file_input_choice::FileInputVia;
 pub use act::fill::fill;
 pub use act::fill_outcome::FillOutcome;
 pub use act::focus::{focus, focus_target, page_focused};
