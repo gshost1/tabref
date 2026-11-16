@@ -1,10 +1,12 @@
-//! Live runs of `focus T` in a browser tabref launched, whose tabs are
-//! told at attach that they hold the window focus and are never told
-//! otherwise: the page's own focus handlers run, as a command and as a `do`
+//! Live runs of `focus T` in a browser tabref launched, whose current tab
+//! is told at attach that it holds the window focus, and told otherwise
+//! when tabref leaves it: the page's own focus handlers run, as a command and as a `do`
 //! step, in a background tab too, which reads as visible and focused to
 //! every command alike; what a focus showed stays shown for the
 //! next command; a label focuses its control; and a page that moves the
-//! focus away within about 300 ms is reported. Opt-in:
+//! focus away within about 300 ms is reported. Without the daemon each
+//! command's connection closes, and the page may see a blur between two
+//! commands, never within one. Opt-in:
 //! `TABREF_LIVE=1 cargo test -p tabref --test live_focus -- --test-threads=1`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -279,4 +281,91 @@ fn with_no_tab_remembered_the_showing_tab_wins_over_one_tabref_told_it_has_the_f
         }
     }
     assert_eq!(read(&tabref, "location.pathname"), "/quiet");
+}
+
+fn forget_current_tab(tabref: &common::Harness) {
+    for entry in std::fs::read_dir(&tabref.home).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("tab-") && !name.starts_with("tab-order-") {
+            std::fs::remove_file(entry.path()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn choosing_the_showing_tab_does_not_blur_the_tab_tabref_works_in() {
+    if !live() {
+        return;
+    }
+    let tabref = own_browser("focus-no-blur");
+    let port = open_page(&tabref);
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/quiet")]);
+    tabref.ok(&[
+        "open",
+        "--new-tab",
+        &format!("http://127.0.0.1:{port}/focus"),
+    ]);
+    forget_current_tab(&tabref);
+    std::thread::sleep(Duration::from_millis(500));
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let seen = read(&tabref, "location.pathname + ' ' + window.lastBlur");
+    let (path, last_blur) = seen.split_once(' ').unwrap();
+    assert_eq!(path, "/focus", "{seen}");
+    assert!(
+        last_blur.parse::<u128>().unwrap() < started,
+        "the tab tabref works in was blurred during the command: {seen}, started at {started}"
+    );
+}
+
+#[test]
+fn a_dialog_while_leaving_a_tab_does_not_use_up_the_commands_dialog_answer() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-leave-dialog");
+    let port = read(&tabref, "location.port");
+    tabref.ok(&[
+        "open",
+        "--new-tab",
+        &format!("http://127.0.0.1:{port}/delete"),
+    ]);
+    tabref.ok(&["--tab", "0", "js", "window.confirmOnBlur = true; 1"]);
+    tabref.ok(&["--dialog", "dismiss", "--tab", "1", "click", "Delete"]);
+    assert_eq!(read(&tabref, "document.title"), "kept");
+}
+
+#[test]
+fn a_tab_whose_switch_off_timed_out_is_told_again_when_it_is_current() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-unknown");
+    tabref.ok(&["focus", "Name"]);
+    tabref.ok(&["js", "window.stall = 1500; 1"]);
+    tabref.ok(&["open", "--new-tab", "about:blank"]);
+    std::thread::sleep(Duration::from_millis(2_500));
+    assert_eq!(
+        in_back(&tabref, "window.stall = false; document.hasFocus()"),
+        "true"
+    );
+}
+
+#[test]
+fn a_background_tab_of_a_browser_tabref_launched_is_captured() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-shot");
+    let work = common::scratch("focus-shot-work");
+    tabref.ok(&["open", "--new-tab", "about:blank"]);
+    let out = work.0.join("back.png");
+    let started = Instant::now();
+    let shot = tabref.run(&["--tab", "0", "screenshot", "--out", out.to_str().unwrap()]);
+    let took = started.elapsed();
+    assert!(shot.ok, "{}{}", shot.stdout, shot.stderr);
+    assert!(std::fs::metadata(&out).map(|meta| meta.len()).unwrap_or(0) > 0);
+    assert!(took < Duration::from_millis(5_000), "{took:?}");
 }

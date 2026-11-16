@@ -17,12 +17,12 @@ fn the_focused_tab_comes_first_then_the_first_visible_one() {
         state("B", true, true),
         state("C", false, false),
     ];
-    assert_eq!(pick_visible(&focused).as_deref(), Some("B"));
+    assert_eq!(pick_visible(&focused, &[]).as_deref(), Some("B"));
     let visible = [state("A", false, false), state("B", true, false)];
-    assert_eq!(pick_visible(&visible).as_deref(), Some("B"));
+    assert_eq!(pick_visible(&visible, &[]).as_deref(), Some("B"));
     let hidden = [state("A", false, false), state("B", false, false)];
-    assert_eq!(pick_visible(&hidden), None);
-    assert_eq!(pick_visible(&[]), None);
+    assert_eq!(pick_visible(&hidden, &[]), None);
+    assert_eq!(pick_visible(&[], &[]), None);
 }
 
 #[test]
@@ -53,4 +53,13 @@ fn the_wait_ends_on_a_focused_answer_on_all_answers_or_shortly_after_a_visible_o
     assert!(settled(&[state("A", true, false)], 1, 3, Some(long)));
     assert!(!settled(&[state("A", false, false)], 1, 3, None));
     assert!(!settled(&[], 0, 3, None));
+}
+
+#[test]
+fn a_tab_tabref_emulates_counts_only_when_no_other_tab_is_showing() {
+    let emulated = ["A".to_owned()];
+    let both = [state("A", true, true), state("B", true, false)];
+    assert_eq!(pick_visible(&both, &emulated).as_deref(), Some("B"));
+    let alone = [state("A", true, true), state("B", false, false)];
+    assert_eq!(pick_visible(&alone, &emulated).as_deref(), Some("A"));
 }

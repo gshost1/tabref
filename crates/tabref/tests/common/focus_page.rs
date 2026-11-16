@@ -55,8 +55,16 @@ customElements.define('x-closed', class extends HTMLElement {
 });
 window.ticks = { hidden: 0, wentHidden: false };
 window.stall = false;
-const stall = () => { if (!window.stall) return; const until = Date.now() + 8000; while (Date.now() < until) {} };
+const stall = () => {
+  if (!window.stall) return;
+  const until = Date.now() + (typeof window.stall === 'number' ? window.stall : 8000);
+  while (Date.now() < until) {}
+};
 window.addEventListener('blur', stall);
+window.blurs = 0;
+window.confirmOnBlur = false;
+window.lastBlur = 0;
+window.addEventListener('blur', () => { window.blurs += 1; window.lastBlur = Date.now(); if (window.confirmOnBlur) confirm('Leave this tab?'); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stall(); });
 setInterval(() => { if (document.visibilityState === 'hidden') window.ticks.hidden += 1; }, 10);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') window.ticks.wentHidden = true; });
@@ -71,6 +79,11 @@ pub const QUIET: &str = r#"<!doctype html><title>Quiet</title>
 <label>Other <input id=other></label>
 <div onfocusin="if (event.target.id === 'deep') setTimeout(() => document.getElementById('other').focus(), 220)">
 <label>Deep jump <input id=deep></label></div>"#;
+
+/// A page whose button asks before it deletes, and says in its title what
+/// the answer was.
+pub const DELETE: &str = r#"<!doctype html><title>Delete</title>
+<button onclick="document.title = confirm('Delete it?') ? 'deleted' : 'kept'">Delete</button>"#;
 
 /// The focus page in a browser tabref did not launch (`--cdp`).
 pub fn foreign_site(name: &str) -> Harness {
@@ -96,9 +109,9 @@ pub fn own_browser(name: &str) -> Harness {
     tabref
 }
 
-/// Opens the focus page (`/focus`, with `/quiet` beside it).
+/// Opens the focus page (`/focus`, with `/quiet` and `/delete` beside it).
 pub fn open_page(tabref: &Harness) -> u16 {
-    let port = serve(&[("/focus", PAGE), ("/quiet", QUIET)]);
+    let port = serve(&[("/focus", PAGE), ("/quiet", QUIET), ("/delete", DELETE)]);
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/focus")]);
     port
 }

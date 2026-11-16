@@ -34,15 +34,18 @@ pub(crate) struct TabState {
 }
 
 /// The visible tab among `tabs`, or `None` when none says it is visible or
-/// focused (or the tabs could not be asked in time).
+/// focused (or the tabs could not be asked in time). `emulated` are the
+/// tabs this connection told they hold the window focus (see
+/// [`pick_visible`]); nothing in any tab is changed to ask.
 pub(crate) fn visible_tab(
     connection: &mut CdpConnection,
     tabs: &[PageTarget],
+    emulated: &[String],
     deadline: Deadline,
 ) -> Option<String> {
     let budget = deadline.capped(probe_budget(deadline.remaining()));
     let sessions = attach(connection, tabs, budget);
-    let states = ask(connection, &sessions, budget);
+    let states = ask(connection, &sessions, emulated, budget);
     for (_, session) in &sessions {
         if let Ok(id) = connection.send(
             "Target.detachFromTarget",
@@ -53,14 +56,22 @@ pub(crate) fn visible_tab(
             connection.abandon(id);
         }
     }
-    pick_visible(&states)
+    pick_visible(&states, emulated)
 }
 
-/// The focused tab, else the first visible one.
-pub(crate) fn pick_visible(states: &[TabState]) -> Option<String> {
-    states
+/// The focused tab, else the first visible one. A tab in `emulated` (one
+/// tabref told it holds the window focus) says so whatever Chrome shows,
+/// so its answer counts only when no other tab is focused or visible.
+pub(crate) fn pick_visible(states: &[TabState], emulated: &[String]) -> Option<String> {
+    let real: Vec<&TabState> = states
         .iter()
+        .filter(|state| !emulated.contains(&state.target_id))
+        .collect();
+    real.iter()
         .find(|state| state.focused)
+        .or_else(|| real.iter().find(|state| state.visible))
+        .copied()
+        .or_else(|| states.iter().find(|state| state.focused))
         .or_else(|| states.iter().find(|state| state.visible))
         .map(|state| state.target_id.clone())
 }
@@ -124,10 +135,12 @@ fn attach(
 }
 
 /// Each tab's answer, as they come, until [`settled`] or `budget` ends;
-/// the tabs still silent then are given up. In the listing's order.
+/// the tabs still silent then are given up. In the listing's order. The
+/// answers of `emulated` tabs are kept but never end the wait.
 fn ask(
     connection: &mut CdpConnection,
     sessions: &[(String, String)],
+    emulated: &[String],
     budget: Deadline,
 ) -> Vec<TabState> {
     let params = json!({ "expression": ASK, "returnByValue": true });
@@ -145,7 +158,12 @@ fn ask(
     let mut pending: Vec<u64> = sent.iter().map(|(_, id)| *id).collect();
     let mut first_visible: Option<Instant> = None;
     loop {
-        let heard: Vec<TabState> = states.iter().flatten().cloned().collect();
+        let heard: Vec<TabState> = states
+            .iter()
+            .flatten()
+            .filter(|state| !emulated.contains(&state.target_id))
+            .cloned()
+            .collect();
         let answered = sent.len() - pending.len();
         let since = first_visible.map(|at| at.elapsed());
         if pending.is_empty() || settled(&heard, answered, sent.len(), since) {
@@ -171,7 +189,8 @@ fn ask(
             Some((answer.first()?.as_bool()?, answer.get(1)?.as_bool()?))
         });
         if let Some((visible, focused)) = answer {
-            if visible && first_visible.is_none() {
+            let real = !emulated.contains(&sessions[index].0);
+            if visible && real && first_visible.is_none() {
                 first_visible = Some(Instant::now());
             }
             states[index] = Some(TabState {

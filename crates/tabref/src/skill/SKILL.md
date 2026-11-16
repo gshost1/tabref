@@ -15,7 +15,7 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
 - The last line says what was cut and the exact command for it (`tabref snap --rows 21-`,
   `tabref read --section "<heading>"`). Run it before answering about cut content.
 - `tabref read` prints the main text. `tabref find <text>` searches all text, hidden too
-  (a hidden match names the ref to click that shows it).
+  (a hidden match names the ref that shows it).
 - A `dialog` line at the top is a popup: click one of its buttons first (decline cookie banners).
 
 ## Acting
@@ -39,9 +39,9 @@ Use `tabref do` with a quoted heredoc, not shell loops. It stops at the first fa
     end
     EOF
 
-Steps: any action, `open URL`, `expect text|gone|url X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
+Steps: any action but `upload`, `open URL`, `expect text|gone|url X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
 `expect T is enabled|visible|hidden|gone|value=X` waits for an element's state.
-`tabref js "EXPR"` returns a page value as JSON (e.g. every link or row at once).
+`tabref js "EXPR"` returns a page value as JSON (every link or row at once).
 
 ## Errors (one line, code first)
 `ELEMENT_NOT_FOUND` lists close names; `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`; `STALE_REF`: use

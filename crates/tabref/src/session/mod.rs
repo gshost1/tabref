@@ -9,6 +9,7 @@ pub(crate) mod connected_browser;
 pub(crate) mod connection_warning;
 pub(crate) mod endpoint_choice;
 pub(crate) mod endpoint_refusal;
+pub(crate) mod focus_state;
 pub(crate) mod kept_session;
 pub(crate) mod launch_profile;
 pub(crate) mod launch_record;
@@ -37,6 +38,7 @@ use crate::commands::app_guard::{app_has_no_page, app_runtime};
 use attached_tab::AttachedTab;
 use command_scope::CommandScope;
 use endpoint_choice::connect_browser;
+use focus_state::FocusState;
 use reached_browser::ReachedBrowser;
 use session_options::SessionOptions;
 use tab_claim::TabClaim;
@@ -180,16 +182,18 @@ impl Session {
         let deadline = self.scope.deadline;
         let focus = self.browser.launched && self.scope.tab.as_deref() == Some(target_id);
         if let Some(tab) = self.attached.get_mut(target_id) {
-            if focus && !tab.focused {
-                self.connection
-                    .call(
-                        OWN_TAB_FOCUS,
-                        json!({ "enabled": true }),
-                        Some(&tab.session.session_id),
-                        deadline,
-                    )
-                    .map_err(attach_error)?;
-                tab.focused = true;
+            if focus && tab.focus != FocusState::On {
+                let told = self.connection.call(
+                    OWN_TAB_FOCUS,
+                    json!({ "enabled": true }),
+                    Some(&tab.session.session_id),
+                    deadline,
+                );
+                if let Err(error) = told {
+                    tab.focus = FocusState::Unknown;
+                    return Err(attach_error(error));
+                }
+                tab.focus = FocusState::On;
             }
             return Ok(tab.session.clone());
         }
@@ -204,7 +208,11 @@ impl Session {
             .map_err(attach_error)?;
         let tab = AttachedTab {
             session: session.clone(),
-            focused: focus,
+            focus: if focus {
+                FocusState::On
+            } else {
+                FocusState::Off
+            },
         };
         self.attached.insert(target_id.to_owned(), tab);
         Ok(session)
@@ -221,13 +229,17 @@ impl Session {
     /// so a tab tabref no longer works in goes back to the background:
     /// hidden, with throttled timers. Only a tab no other daemon command
     /// holds is told, held for that one call and released at once; a tab
-    /// another command works in now keeps its state, and its flag. A tab is marked as told no more only when the
-    /// browser took it or the tab is gone; a call that failed otherwise (a
-    /// cancel, the deadline) leaves the mark, so a later command tries
-    /// again.
+    /// another command works in now keeps its state, and its flag. A
+    /// dialog the tab opens while it is left (a blur handler's `confirm`)
+    /// is accepted, and the command's own `--dialog` answer is kept for the
+    /// command's own dialog. A tab is `Off` once the browser took the call
+    /// or the tab is gone; a call that failed otherwise (a cancel, the
+    /// deadline) leaves it `Unknown`, so the next switch-off tries again and
+    /// the next attach while it is current tells it again.
     fn leave_other_tabs(&mut self, keep: Option<&str>, deadline: Deadline) {
+        let choice = self.connection.take_dialog_choice();
         for (id, tab) in &mut self.attached {
-            if !tab.focused || keep == Some(id.as_str()) {
+            if tab.focus == FocusState::Off || keep == Some(id.as_str()) {
                 continue;
             }
             let Some(taken) = self.scope.try_hold(id) else {
@@ -242,10 +254,23 @@ impl Session {
             if taken {
                 self.scope.release_tab(id);
             }
-            if left.as_ref().map_or_else(is_target_gone, |_| true) {
-                tab.focused = false;
-            }
+            tab.focus = if left.as_ref().map_or_else(is_target_gone, |_| true) {
+                FocusState::Off
+            } else {
+                FocusState::Unknown
+            };
         }
+        self.connection.answer_next_dialog(choice);
+    }
+
+    /// The tabs this connection told they hold the window focus, or may
+    /// have.
+    pub(crate) fn emulated_tabs(&self) -> Vec<String> {
+        self.attached
+            .iter()
+            .filter(|(_, tab)| tab.focus != FocusState::Off)
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     /// For a daemon command that ends, while it still holds its claim:
@@ -254,7 +279,12 @@ impl Session {
     /// connection that waits in the pool leaves no background tab visible.
     #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn leave_background_tabs(&mut self) {
-        if !self.browser.launched || !self.attached.values().any(|tab| tab.focused) {
+        if !self.browser.launched
+            || self
+                .attached
+                .values()
+                .all(|tab| tab.focus == FocusState::Off)
+        {
             return;
         }
         let current = self.store.read_state(&self.tab_state_name());
