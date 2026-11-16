@@ -2,6 +2,7 @@ use std::fmt;
 
 const CONTEXT_CHARS: usize = 40;
 const LINE_CHARS: usize = 100;
+const ADDED_CHARS: usize = 400;
 const MIDDLE_CHARS: usize = 60;
 
 /// One line of a page's rendered text that an action changed: rewritten in
@@ -15,12 +16,13 @@ pub enum TextChange {
 
 impl fmt::Display for TextChange {
     /// `▲ {3 -> 4} ▼ Books set in winter` for a rewritten line, keeping the
-    /// words around the change; `+ line` and `- line` otherwise, cut to 100
-    /// characters.
+    /// words around the change; `+ line` otherwise, whole up to 400
+    /// characters so a validation message keeps its list, and `- line` cut
+    /// to 100. A cut ends after a whole word.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Changed { before, after } => formatter.write_str(&inline_change(before, after)),
-            Self::Added(line) => write!(formatter, "+ {}", cut(line, LINE_CHARS)),
+            Self::Added(line) => write!(formatter, "+ {}", cut(line, ADDED_CHARS)),
             Self::Removed(line) => write!(formatter, "- {}", cut(line, LINE_CHARS)),
         }
     }
@@ -119,14 +121,24 @@ fn splits_number(chars: &[char], at: usize) -> bool {
     at > 0 && chars.get(at).is_some_and(char::is_ascii_digit) && chars[at - 1].is_ascii_digit()
 }
 
-/// `text` cut to `limit` characters, ending in `…` when cut.
+/// `text` cut to about `limit` characters, ending in `…` when cut: after
+/// the last whole word that fits, or mid-word when the first half of the
+/// room holds no space.
 pub(crate) fn cut(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit {
         return text.to_owned();
     }
-    let mut kept: String = text.chars().take(limit).collect();
-    kept.push('…');
-    kept
+    let kept: String = text.chars().take(limit).collect();
+    let next_is_space = text.chars().nth(limit).is_some_and(char::is_whitespace);
+    if next_is_space {
+        return format!("{} …", kept.trim_end());
+    }
+    match kept.rfind(' ') {
+        Some(space) if kept[..space].chars().count() >= limit / 2 => {
+            format!("{} …", kept[..space].trim_end())
+        }
+        _ => format!("{kept}…"),
+    }
 }
 
 fn tail(text: &str, limit: usize) -> String {
