@@ -16,7 +16,8 @@ Styles follow public benchmark lists (WebArena, WebVoyager, Mind2Web): one goal 
   dw5 help desk: paginated ticket search, then an internal note and a status change in a same-origin iframe
   dw6 staff directory: infinite-scroll list, a duplicate name, then a busy profile page for a two-hop lookup
   dw7 CMS: multi-field edit (ARIA combobox, datetime-local, tag chips) beside near-duplicate posts
-  dp1 pypi.org: a release date from a long release history
+  dp1 pypi.org: a release date from a long release history (starts on the project page: pypi.org's search shows
+      a client challenge to a HeadlessChrome user agent that never clears, the project page does not)
   dp2 docs.python.org: when a parameter was added, beside the function's own version note
   dp3 rfc-editor.org: a section number deep in a very long document
 """
@@ -529,8 +530,9 @@ def web_prompt(tid):
                 "\"{exp[dw7_title]}\": change its category to {exp[dw7_category]}, schedule it to publish on "
                 "{exp[dw7_day_long]} at {exp[dw7_time]} (status Scheduled), and remove its \"{exp[dw7_drop]}\" tag "
                 "while keeping its other tags. Save it, and do not change any other post."),
-        "dp1": ("In Google Chrome, open https://pypi.org/ , find the Python package \"requests\" and tell me on which "
-                f"date its version {PYPI_VERSION} was released." + PUBLIC_RULES),
+        "dp1": ("In Google Chrome, open the PyPI page of the Python package \"requests\" at "
+                "https://pypi.org/project/requests/ and tell me on which date its version "
+                f"{PYPI_VERSION} was released." + PUBLIC_RULES),
         "dp2": ("In Google Chrome, open https://docs.python.org/3/ , find the documentation of itertools.batched() "
                 "and tell me in which Python version its strict parameter was added. Reply with the version."
                 + PUBLIC_RULES),
