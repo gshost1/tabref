@@ -52,7 +52,7 @@ pub(crate) fn reading_view(
     let deadline = session.deadline();
     let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
     let kept = session.reusable_capture();
-    let input = match outline_input(session, kept.as_ref()) {
+    let input = match outline_input(session, kept.as_deref()) {
         Ok(mut input) => {
             input.refs.clear();
             input
