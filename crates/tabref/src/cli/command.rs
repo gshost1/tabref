@@ -117,7 +117,9 @@ pub(crate) enum Command {
     },
     /// Search the whole page, text included, for TEXT
     Find {
-        text: String,
+        /// The text; several words are searched as one text
+        #[arg(required = true, num_args = 1..)]
+        text: Vec<String>,
         /// Only nodes of this role
         #[arg(long)]
         role: Option<String>,
@@ -166,6 +168,10 @@ pub(crate) enum Command {
         step_timeout: u64,
     },
     /// Evaluate a JavaScript expression in the page and print its value
+    ///
+    /// To load more of a page, use `tabref scroll` (many in one `tabref do`):
+    /// it waits for what each scroll loads, where a script that scrolls and
+    /// sleeps can only guess.
     Js { expression: String },
     /// List the open tabs
     Tabs,
