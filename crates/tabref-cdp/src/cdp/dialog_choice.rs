@@ -45,3 +45,7 @@ impl DialogChoice {
 #[cfg(test)]
 #[path = "dialog_choice_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "dialog_tab_tests.rs"]
+mod tab_tests;

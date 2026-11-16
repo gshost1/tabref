@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tabref_core::AppError;
 use tabref_page::{PageInfo, drain_dialogs};
 
-use super::action_report::dialog_line;
+use super::action_report::dialog_lines;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 
@@ -27,7 +27,7 @@ pub(crate) fn kept_page(dialogs: &[Value], url: &str, info: &PageInfo) -> Option
     if !dismissed {
         return None;
     }
-    let mut lines: Vec<String> = dialogs.iter().map(dialog_line).collect();
+    let mut lines: Vec<String> = dialog_lines(dialogs);
     lines.push(format!(
         "stayed on the page: its beforeunload dialog was dismissed, so {url} was not opened"
     ));
@@ -49,15 +49,15 @@ pub(crate) fn with_dialogs(report: &mut Outcome, dialogs: &[Value]) {
     if dialogs.is_empty() {
         return;
     }
-    let lines: Vec<String> = dialogs.iter().map(dialog_line).collect();
+    let lines = dialog_lines(dialogs);
     report.text = format!("{}\n{}", lines.join("\n"), report.text);
     add_data(report, dialogs);
 }
 
 /// Puts the dialogs after a report.
 pub(crate) fn after_report(report: &mut Outcome, dialogs: &[Value]) {
-    for dialog in dialogs {
-        report.push_line(&dialog_line(dialog));
+    for line in dialog_lines(dialogs) {
+        report.push_line(&line);
     }
     add_data(report, dialogs);
 }
@@ -67,7 +67,7 @@ pub(crate) fn error_with_dialogs(mut error: AppError, dialogs: &[Value]) -> AppE
     if dialogs.is_empty() {
         return error;
     }
-    let lines: Vec<String> = dialogs.iter().map(dialog_line).collect();
+    let lines = dialog_lines(dialogs);
     error.message = format!("{} ({})", error.message, lines.join("; "));
     let mut details = error.details.take().unwrap_or_else(|| json!({}));
     if let Some(object) = details.as_object_mut() {
@@ -75,6 +75,28 @@ pub(crate) fn error_with_dialogs(mut error: AppError, dialogs: &[Value]) -> AppE
     }
     error.details = Some(details);
     error
+}
+
+/// Marks the dialogs that opened in another tab than the one this command
+/// works in (`other_tab`), when the connection knew their tab.
+pub(crate) fn mark_other_tabs(session: &mut Session, mut dialogs: Vec<Value>) -> Vec<Value> {
+    if !dialogs.iter().any(|dialog| dialog["tab"].is_string()) {
+        return dialogs;
+    }
+    let current = session
+        .current_tab_unclaimed()
+        .ok()
+        .flatten()
+        .map(|tab| tab.target_id);
+    for dialog in &mut dialogs {
+        let elsewhere = dialog["tab"]
+            .as_str()
+            .is_some_and(|tab| Some(tab) != current.as_deref());
+        if elsewhere {
+            dialog["other_tab"] = json!(true);
+        }
+    }
+    dialogs
 }
 
 fn add_data(report: &mut Outcome, dialogs: &[Value]) {

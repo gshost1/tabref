@@ -159,7 +159,7 @@ fn dialog_answers_are_chosen_for_the_next_dialog_and_reported() {
         later.stdout
     );
     assert_eq!(
-        after_later, "ly\ndialog confirm \"Later?\" accepted",
+        after_later, "ly\ndialog confirm \"Later?\" accepted (opened after the last command)",
         "the next command without --dialog accepts the late dialog and reports it"
     );
     assert!(batch.ok, "{}{}", batch.stdout, batch.stderr);
@@ -189,52 +189,72 @@ fn dialog_answers_are_chosen_for_the_next_dialog_and_reported() {
 
 const LATER: &str = "<!doctype html><title>Later</title>\
     <button onclick=\"setTimeout(() => { document.title = String(confirm('Later?')); }, 300)\">\
-    Later</button>";
+    Later</button>\
+    <button onclick=\"document.title = confirm('Delete all?') ? 'deleted' : 'kept'\">Delete</button>";
 
-/// A dialog that opens after its command ended (here from a timer) is
-/// answered when the next command starts, under that command's `--dialog`,
-/// and reported by it; a next command without `--dialog` accepts it and
-/// reports that.
+/// The first command of a fresh daemon gets its `--dialog`; a dialog that
+/// opens after its command ended (here from a timer) is accepted, never
+/// with the next command's `--dialog`, and the next command reports it as
+/// opened after the last command, its own `--dialog` still going to its
+/// own first dialog.
 #[test]
-fn a_dialog_that_opens_after_a_command_is_answered_and_reported_by_the_next() {
+fn a_dialog_that_opens_after_a_command_is_accepted_and_reported_by_the_next() {
     if !live() {
         return;
     }
     let tabref = harness("dialogs-later");
     let port = serve(&[("/", LATER)]);
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+    let title = || {
+        let out = tabref.ok(&["js", "document.title"]).stdout;
+        out.lines().next().unwrap_or_default().to_owned()
+    };
+
+    let _ = tabref.run(&["daemon", "stop"]);
+    let fresh = tabref.ok(&["--dialog", "dismiss", "click", "Delete"]);
+    let fresh_title = title();
 
     let first = tabref.ok(&["--dialog", "dismiss", "click", "Later"]);
     std::thread::sleep(std::time::Duration::from_millis(800));
     let next = tabref.ok(&["--dialog", "dismiss", "js", "1"]);
-    let dismissed_title = tabref
-        .ok(&["js", "document.title"])
-        .stdout
-        .trim()
-        .to_owned();
+    let late_title = title();
 
     tabref.ok(&["click", "Later"]);
     std::thread::sleep(std::time::Duration::from_millis(800));
-    let plain = tabref.ok(&["js", "1"]);
-    let accepted_title = tabref
-        .ok(&["js", "document.title"])
-        .stdout
-        .trim()
-        .to_owned();
+    let delete = tabref.ok(&["--dialog", "dismiss", "click", "Delete"]);
+    let delete_title = title();
     let _ = tabref.run(&["daemon", "stop"]);
 
+    assert!(
+        fresh
+            .stdout
+            .contains("dialog confirm \"Delete all?\" dismissed"),
+        "the first command of a fresh daemon did not get --dialog: {}",
+        fresh.stdout
+    );
+    assert_eq!(fresh_title, "kept");
     assert!(first.stdout.contains("was not used"), "{}", first.stdout);
     assert!(
-        next.stdout.contains("dialog confirm \"Later?\" dismissed"),
-        "the next command did not answer and report the late dialog: {}",
+        next.stdout
+            .contains("dialog confirm \"Later?\" accepted (opened after the last command)"),
+        "the next command did not report the late dialog: {}",
         next.stdout
     );
-    assert!(!next.stdout.contains("was not used"), "{}", next.stdout);
-    assert_eq!(dismissed_title, "false");
+    assert!(next.stdout.contains("was not used"), "{}", next.stdout);
+    assert_eq!(late_title, "true");
     assert!(
-        plain.stdout.contains("dialog confirm \"Later?\" accepted"),
+        delete
+            .stdout
+            .contains("dialog confirm \"Later?\" accepted (opened after the last command)"),
         "{}",
-        plain.stdout
+        delete.stdout
     );
-    assert_eq!(accepted_title, "true");
+    assert!(
+        delete
+            .stdout
+            .contains("dialog confirm \"Delete all?\" dismissed"),
+        "the late dialog used up the next command's --dialog: {}",
+        delete.stdout
+    );
+    assert_eq!(delete_title, "kept");
 }

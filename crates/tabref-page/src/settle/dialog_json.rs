@@ -6,8 +6,10 @@ use crate::{CdpConnection, CdpEvent};
 pub const DIALOG_OPENING: &str = "Page.javascriptDialogOpening";
 
 /// A dialog as reports show it: its `type`, `message`, the `url` of the
-/// frame that opened it, and the `answer` the connection gave it
-/// (`{accept, text}`; null when the connection did not answer it).
+/// frame that opened it, the `tab` (target id) it opened in when the
+/// connection knows it, the `answer` the connection gave it (`{accept,
+/// text}`; null when the connection did not answer it), and whether it
+/// opened while no command was running (`late`).
 pub fn dialog_json(event: &CdpEvent) -> Value {
     let field = |name: &str| event.params.get(name).cloned().unwrap_or(Value::Null);
     json!({
@@ -15,6 +17,8 @@ pub fn dialog_json(event: &CdpEvent) -> Value {
         "message": field("message"),
         "url": field("url"),
         "answer": field("answer"),
+        "tab": field("tab"),
+        "late": event.params.get("late").and_then(Value::as_bool).unwrap_or(false),
     })
 }
 

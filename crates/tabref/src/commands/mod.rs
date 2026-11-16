@@ -64,23 +64,23 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         return Ok(skill::run());
     }
     let mut session = Session::open(&session_options(cli))?;
-    session.connection().answer_next_dialog(cli.dialog.clone());
     let outcome = dispatch_cli(&mut session, cli);
     session.with_warning(outcome)
 }
 
 /// Runs the parsed command line against `session`, whose connection holds
 /// the command's `--dialog` answer for the first dialog it applies to that
-/// the whole command meets (`do` included; set when the session opened, or
-/// when the daemon began the command, so a dialog left from the last
-/// command gets it too). The answer is cleared after the command, so a kept
-/// connection never carries it into the next one. The dialogs no part of
-/// the report took are added to it (or to its error), and a result says
-/// when no dialog used the answer.
+/// the whole command meets (`do` included). It is set when the session
+/// opens, or when the daemon begins the command after accepting any dialog
+/// left open since the last one. The answer is cleared after the command,
+/// so a kept connection never carries it into the next one. The dialogs no
+/// part of the report took are added to it (or to its error), those from
+/// another tab marked so, and a result says when no dialog used the answer.
 pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, AppError> {
     let outcome = dispatch(session, &cli.command);
     let unused = session.connection().take_dialog_choice();
     let left = dialog_report::navigation_dialogs(session);
+    let left = dialog_report::mark_other_tabs(session, left);
     let mut outcome = match outcome {
         Ok(outcome) => outcome,
         Err(error) => return Err(dialog_report::error_with_dialogs(error, &left)),
@@ -110,7 +110,7 @@ fn unused_note(choice: &tabref_cdp::DialogChoice) -> String {
     };
     format!(
         "note: --dialog {given} was not used: no {wanted} opened during this command; one that \
-         opens after it is accepted"
+         opens after it is accepted, and the next command reports it"
     )
 }
 

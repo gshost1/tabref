@@ -9,7 +9,7 @@ use tabref_core::{AppError, Deadline};
 use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
 
 use super::act_target::resolve_target;
-use super::action_report::dialog_line;
+use super::action_report::dialog_lines;
 use super::app_guard::refuse_in_app;
 use super::batch_step::BatchStep;
 use super::dialog_report::{error_with_dialogs, kept_page, navigation_dialogs};
@@ -100,51 +100,56 @@ fn opened_line(
     downloads::enable_for_action(session, deadline)?;
     let navigated = navigate(session.connection(), page, url, navigation);
     let dialogs = navigation_dialogs(session);
-    let said: String = dialogs
+    let said: String = dialog_lines(&dialogs)
         .iter()
-        .map(|dialog| format!("; {}", dialog_line(dialog)))
+        .map(|line| format!("; {line}"))
         .collect();
-    if dialogs
-        .iter()
-        .any(|dialog| dialog["type"] == "beforeunload")
-    {
-        let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
-        if let Some(kept) = kept_page(&dialogs, url, &info) {
-            let mut data = kept.data;
-            data["action"] = json!("open");
-            return Ok((
-                format!("ok open {url}: {}", kept.text.replace('\n', "; ")),
-                data,
-            ));
+    let mut after = || -> Result<(String, Value), AppError> {
+        if dialogs
+            .iter()
+            .any(|dialog| dialog["type"] == "beforeunload")
+        {
+            let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
+            if let Some(kept) = kept_page(&dialogs, url, &info) {
+                let mut data = kept.data;
+                data["action"] = json!("open");
+                return Ok((
+                    format!("ok open {url}: {}", kept.text.replace('\n', "; ")),
+                    data,
+                ));
+            }
         }
-    }
-    let grace = downloads::grace_after(&navigated);
-    let started = downloads::after_action(session, page, None, deadline, grace);
-    if !started.is_empty() {
-        let lines: Vec<String> = started.iter().map(download_line).collect();
-        let data: Vec<Value> = started.iter().map(download_json).collect();
-        let text = format!("ok open {url}: {}{said}", lines.join("; "));
-        return Ok((
-            text,
-            json!({ "action": "open", "opened": "download", "downloads": data, "dialogs": dialogs }),
-        ));
-    }
-    match navigated {
-        Ok(()) => {}
-        Err(error) if error.kind() == Some("cdp_load_timeout") => {}
-        Err(error) => return Err(error_with_dialogs(error, &dialogs)),
-    }
-    let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
-    let text = format!(
-        "ok open {} {}{said}",
-        short_url(from, &info.url),
-        quote_text(&info.title)
-    );
-    let mut data = json!({ "action": "open", "url": info.url, "title": info.title });
-    if !dialogs.is_empty() {
-        data["dialogs"] = json!(dialogs);
-    }
-    Ok((text, data))
+        let grace = downloads::grace_after(&navigated);
+        let started = downloads::after_action(session, page, None, deadline, grace);
+        if !started.is_empty() {
+            let lines: Vec<String> = started.iter().map(download_line).collect();
+            let downloads: Vec<Value> = started.iter().map(download_json).collect();
+            let text = format!("ok open {url}: {}{said}", lines.join("; "));
+            let mut data =
+                json!({ "action": "open", "opened": "download", "downloads": downloads });
+            if !dialogs.is_empty() {
+                data["dialogs"] = json!(dialogs);
+            }
+            return Ok((text, data));
+        }
+        match &navigated {
+            Ok(()) => {}
+            Err(error) if error.kind() == Some("cdp_load_timeout") => {}
+            Err(error) => return Err(error.clone()),
+        }
+        let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
+        let text = format!(
+            "ok open {} {}{said}",
+            short_url(from, &info.url),
+            quote_text(&info.title)
+        );
+        let mut data = json!({ "action": "open", "url": info.url, "title": info.title });
+        if !dialogs.is_empty() {
+            data["dialogs"] = json!(dialogs);
+        }
+        Ok((text, data))
+    };
+    after().map_err(|error| error_with_dialogs(error, &dialogs))
 }
 
 /// `expect text "Saved"`, `expect gone "Loading"`, `expect url ~saved=1`,

@@ -16,6 +16,7 @@ use super::protocol_error::{protocol_error, target_gone};
 use crate::transport::transport_error::{is_timeout, transport_failed};
 
 const DETACHED: &str = "Target.detachedFromTarget";
+const ATTACHED: &str = "Target.attachedToTarget";
 const DIALOG_OPENING: &str = "Page.javascriptDialogOpening";
 const RAW_SCAN_MIN: usize = 64 * 1024;
 const CANCEL_SLICE: Duration = Duration::from_millis(50);
@@ -62,6 +63,7 @@ impl CdpConnection {
                 Ok(None)
             }
             Some(Incoming::Event(mut event)) => {
+                self.note_child_tab(&event);
                 self.answer_dialog(&mut event, deadline)?;
                 if event.method == DETACHED {
                     if let Some(session) = event.params.get("sessionId").and_then(Value::as_str) {
@@ -146,7 +148,27 @@ impl CdpConnection {
             answer["text"] = Value::String(text);
         }
         event.params["answer"] = answer;
+        if let Some(tab) = self.ledger.tab_of(&session_id) {
+            event.params["tab"] = Value::String(tab.to_owned());
+        }
         self.send_text(&request.to_string(), deadline)
+    }
+
+    /// An iframe session auto-attached under a session belongs to that
+    /// session's tab.
+    fn note_child_tab(&mut self, event: &CdpEvent) {
+        if event.method != ATTACHED {
+            return;
+        }
+        let (Some(parent), Some(child)) = (
+            event.session_id.as_deref(),
+            event.params.get("sessionId").and_then(Value::as_str),
+        ) else {
+            return;
+        };
+        if let Some(tab) = self.ledger.tab_of(parent).map(str::to_owned) {
+            self.ledger.note_tab(child, &tab);
+        }
     }
 
     pub(super) fn send_text(&mut self, text: &str, deadline: Deadline) -> Result<(), AppError> {

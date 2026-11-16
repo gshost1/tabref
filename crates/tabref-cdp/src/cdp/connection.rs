@@ -73,6 +73,25 @@ impl CdpConnection {
         self.dialogs.next.take()
     }
 
+    /// Records that `session_id` is the page session of the tab `target_id`,
+    /// so a dialog it (or an iframe session under it) opens names that tab
+    /// in `params.tab`.
+    pub fn note_session_tab(&mut self, session_id: &str, target_id: &str) {
+        self.ledger.note_tab(session_id, target_id);
+    }
+
+    /// Marks every dialog event buffered so far with `params.late`: they
+    /// opened while no command was running.
+    pub fn mark_buffered_dialogs_late(&mut self) {
+        let dialogs = self
+            .events
+            .drain(|event| event.method == "Page.javascriptDialogOpening");
+        for mut event in dialogs {
+            event.params["late"] = serde_json::Value::Bool(true);
+            self.events.push(event);
+        }
+    }
+
     /// Ties the connection's waits to `cancel` (or unties them with `None`):
     /// once it is set, every request and every wait fails at once with kind
     /// `cancelled`, and a blocking read notices within 50 ms. The connection

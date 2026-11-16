@@ -29,7 +29,8 @@ pub(crate) struct Cli {
     /// How to answer the first confirm, prompt or leave-page dialog of the
     /// whole command, a `do` batch included: accept, dismiss, or
     /// accept=TEXT (for the first prompt). Alerts, and every other dialog,
-    /// are accepted, as without it
+    /// are accepted, as without it; so is a dialog that opens after a
+    /// command ends, which the next command reports
     #[arg(long, global = true, value_name = "ANSWER", value_parser = dialog_choice)]
     pub(crate) dialog: Option<DialogChoice>,
     #[command(subcommand)]

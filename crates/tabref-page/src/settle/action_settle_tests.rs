@@ -67,7 +67,10 @@ fn a_dialog_the_action_opened_is_reported() {
     )]);
     assert_eq!(
         outcome.dialogs,
-        vec![json!({ "type": "alert", "message": "Saved", "url": null, "answer": null })]
+        vec![
+            json!({ "type": "alert", "message": "Saved", "url": null, "answer": null,
+            "tab": null, "late": false })
+        ]
     );
 }
 

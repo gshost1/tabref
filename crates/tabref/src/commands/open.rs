@@ -93,41 +93,45 @@ fn load(
         deadline.capped(Duration::from_millis(load)),
     );
     let dialogs = navigation_dialogs(session);
-    if dialogs
-        .iter()
-        .any(|dialog| dialog["type"] == "beforeunload")
-    {
-        let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
-        if let Some(kept) = kept_page(&dialogs, url, &info) {
-            return Ok(kept);
+    let after = || -> Result<Outcome, AppError> {
+        if dialogs
+            .iter()
+            .any(|dialog| dialog["type"] == "beforeunload")
+        {
+            let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
+            if let Some(kept) = kept_page(&dialogs, url, &info) {
+                return Ok(kept);
+            }
         }
-    }
-    let grace = downloads::grace_after(&navigated);
-    let started = downloads::after_action(session, page, None, deadline, grace);
-    if !started.is_empty() {
-        let mut report = downloaded(&started);
+        let grace = downloads::grace_after(&navigated);
+        let started = downloads::after_action(session, page, None, deadline, grace);
+        if !started.is_empty() {
+            let mut report = downloaded(&started);
+            with_dialogs(&mut report, &dialogs);
+            return Ok(report);
+        }
+        let unfinished = match navigated {
+            Ok(()) => false,
+            Err(error) if error.kind() == Some("cdp_load_timeout") => true,
+            Err(error) => return Err(error),
+        };
+        let captured = session.capture()?;
+        let options = ViewRequest::default().snap_options(&captured.info.url)?;
+        let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
+        if unfinished {
+            report.push_line(
+                "note: the page had not finished loading; snap again if parts are missing",
+            );
+        }
+        set(
+            &mut report.data,
+            "load_finished",
+            serde_json::json!(!unfinished),
+        );
         with_dialogs(&mut report, &dialogs);
-        return Ok(report);
-    }
-    let unfinished = match navigated {
-        Ok(()) => false,
-        Err(error) if error.kind() == Some("cdp_load_timeout") => true,
-        Err(error) => return Err(error_with_dialogs(error, &dialogs)),
+        Ok(report)
     };
-    let captured = session.capture()?;
-    let options = ViewRequest::default().snap_options(&captured.info.url)?;
-    let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
-    if unfinished {
-        report
-            .push_line("note: the page had not finished loading; snap again if parts are missing");
-    }
-    set(
-        &mut report.data,
-        "load_finished",
-        serde_json::json!(!unfinished),
-    );
-    with_dialogs(&mut report, &dialogs);
-    Ok(report)
+    after().map_err(|error| error_with_dialogs(error, &dialogs))
 }
 
 /// An `open` whose address downloaded: one line per download, the page

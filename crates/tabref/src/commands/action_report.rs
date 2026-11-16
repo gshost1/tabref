@@ -63,8 +63,8 @@ pub(crate) fn step_report(
         merge(&mut data, more);
         return Ok((line, data));
     }
-    for dialog in effects.dialogs() {
-        line.push_str(&format!("; {}", dialog_line(dialog)));
+    for dialog in dialog_lines(effects.dialogs()) {
+        line.push_str(&format!("; {dialog}"));
     }
     for download in &effects.downloads {
         line.push_str(&format!("; {}", download_line(download)));
@@ -96,7 +96,7 @@ fn effect_block(
     effects: &ActionEffects,
     known: &HashSet<String>,
 ) -> Result<(Vec<String>, Value), AppError> {
-    let mut lines: Vec<String> = effects.dialogs().iter().map(dialog_line).collect();
+    let mut lines: Vec<String> = dialog_lines(effects.dialogs());
     lines.extend(effects.downloads.iter().map(download_line));
     let mut data = json!({
         "dialogs": effects.dialogs(),
@@ -203,6 +203,8 @@ fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut V
     }
 }
 
+const MAX_DIALOG_LINES: usize = 10;
+
 /// One dialog as a line: its type, its message when it has one, and how
 /// it was answered.
 pub(crate) fn dialog_line(dialog: &Value) -> String {
@@ -214,10 +216,47 @@ pub(crate) fn dialog_line(dialog: &Value) -> String {
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if message.is_empty() {
-        return format!("dialog {kind} {}", answered(dialog));
+    let mut line = if message.is_empty() {
+        format!("dialog {kind} {}", answered(dialog))
+    } else {
+        format!("dialog {kind} {} {}", quote_text(message), answered(dialog))
+    };
+    if dialog["late"] == Value::Bool(true) {
+        line.push_str(" (opened after the last command)");
     }
-    format!("dialog {kind} {} {}", quote_text(message), answered(dialog))
+    if dialog["other_tab"] == Value::Bool(true) {
+        line.push_str(" (in another tab)");
+    }
+    line
+}
+
+/// The dialogs as lines: the same line repeated is one line with `×N`, and
+/// past `MAX_DIALOG_LINES` the rest is counted.
+pub(crate) fn dialog_lines(dialogs: &[Value]) -> Vec<String> {
+    let mut counted: Vec<(String, usize)> = Vec::new();
+    for dialog in dialogs {
+        let line = dialog_line(dialog);
+        match counted.iter_mut().find(|(seen, _)| *seen == line) {
+            Some((_, count)) => *count += 1,
+            None => counted.push((line, 1)),
+        }
+    }
+    let more = counted.len().saturating_sub(MAX_DIALOG_LINES);
+    let mut lines: Vec<String> = counted
+        .into_iter()
+        .take(MAX_DIALOG_LINES)
+        .map(|(line, count)| {
+            if count > 1 {
+                format!("{line} \u{d7}{count}")
+            } else {
+                line
+            }
+        })
+        .collect();
+    if more > 0 {
+        lines.push(format!("{more} more dialogs"));
+    }
+    lines
 }
 
 /// How the connection answered a dialog, from its `answer`: "dismissed",
