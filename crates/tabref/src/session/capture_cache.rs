@@ -87,6 +87,11 @@ impl Session {
         self.captures = Some(cache);
     }
 
+    /// Whether this command keeps its captures for the next one to reuse.
+    pub(crate) fn keeps_captures(&self) -> bool {
+        self.captures.is_some()
+    }
+
     /// A capture of the current tab: the kept one when the page provably
     /// has not changed since it was taken, else a new one.
     pub(crate) fn current_capture(

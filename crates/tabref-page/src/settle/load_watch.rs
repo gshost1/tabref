@@ -11,11 +11,13 @@ use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
 use crate::{CdpConnection, PageSession};
+use tabref_cdp::is_timeout;
 
 const WATCH_KEY: &str = "tabref.load-watch";
 const NEAR_EMPTY_ELEMENTS: usize = 300;
 const NEAR_EMPTY_CHARS: usize = 200;
 const CLEANUP_WAIT: Duration = Duration::from_millis(20);
+const START_WAIT: Duration = Duration::from_millis(200);
 
 const LOAD_OBSERVER: &str = r"(() => {
   if (window !== window.top) return;
@@ -43,9 +45,16 @@ const LOAD_STATUS: &str = r"(() => {
   }
   const body = document.body;
   let empty = !body;
-  if (body && body.getElementsByTagName('*').length < ELEMENTS) {
+  if (body && body.getElementsByTagName('*').length < ELEMENTS * 4) {
+    const frame = 'header, nav, footer, [role=banner], [role=navigation], [role=contentinfo]';
     const controls = 'input:not([type=hidden]), select, textarea, button, [contenteditable], [role=button], [role=textbox]';
-    empty = body.innerText.trim().length < CHARS && !body.querySelector(controls);
+    const outer = [...body.querySelectorAll(frame)].filter(el => !el.parentElement.closest(frame));
+    const inside = outer.reduce((sum, el) => sum + el.getElementsByTagName('*').length + 1, 0);
+    if (body.getElementsByTagName('*').length - inside < ELEMENTS) {
+      const chars = outer.reduce((left, el) => left - el.innerText.trim().length, body.innerText.trim().length);
+      const control = [...body.querySelectorAll(controls)].some(el => !el.closest(frame));
+      empty = chars < CHARS && !control;
+    }
   }
   return { wall: performance.timeOrigin + now, since, empty, watched: !!state };
 })()";
@@ -69,8 +78,11 @@ pub struct LoadWatch {
 /// The page as one quick read saw it: the page's clock in milliseconds
 /// since the epoch, how long ago the DOM last changed (`None` when it has
 /// not changed since `DOMContentLoaded`, or was not watched), and whether
-/// the page is near-empty: fewer than 200 characters of rendered text and
-/// no field or button, read only on a page of under 300 elements.
+/// the page is near-empty: outside its header, navigation and footer
+/// (`header`, `nav`, `footer` and their ARIA roles), fewer than 300
+/// elements, fewer than 200 characters of rendered text and no field or
+/// button. An app shell whose only search box sits in its header is
+/// near-empty until its content renders.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LoadStatus {
     pub(crate) wall_ms: f64,
@@ -80,36 +92,43 @@ pub(crate) struct LoadStatus {
 
 impl LoadWatch {
     /// Starts watching `session` before a navigation. A browser that
-    /// refuses the script still gets a watch, of the network alone.
+    /// refuses the script still gets a watch, of the network alone. Each
+    /// call waits at most 200 ms, as the page being left may be too busy
+    /// to answer; a call that times out gives the watch up, so the
+    /// navigation keeps its time.
     pub fn start(
         connection: &mut CdpConnection,
         session: &PageSession,
         deadline: Deadline,
     ) -> Result<Self, AppError> {
         let id = Some(session.session_id.as_str());
-        connection.call("Page.enable", json!({}), id, deadline)?;
+        let quick = || deadline.capped(START_WAIT);
+        connection.call("Page.enable", json!({}), id, quick())?;
         let source = LOAD_OBSERVER.replace("KEY", WATCH_KEY);
-        let script = connection
-            .call(
-                "Page.addScriptToEvaluateOnNewDocument",
-                json!({ "source": source }),
-                id,
-                deadline,
-            )
-            .ok()
-            .and_then(|reply| {
-                reply
-                    .get("identifier")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            });
-        connection.call("Network.enable", json!({}), id, deadline)?;
-        let session_id = session.session_id.clone();
-        connection.discard_events(|event| is_network_event(event, &session_id));
-        Ok(Self {
+        let script = match connection.call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": source }),
+            id,
+            quick(),
+        ) {
+            Ok(reply) => reply
+                .get("identifier")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            Err(error) if is_timeout(&error) => return Err(error),
+            Err(_) => None,
+        };
+        let mut watch = Self {
             session: session.clone(),
             script,
-        })
+        };
+        if let Err(error) = connection.call("Network.enable", json!({}), id, quick()) {
+            watch.forget_script(connection, deadline);
+            return Err(error);
+        }
+        let session_id = session.session_id.clone();
+        connection.discard_events(|event| is_network_event(event, &session_id));
+        Ok(watch)
     }
 
     /// Takes the script off new documents, so later navigations of the
