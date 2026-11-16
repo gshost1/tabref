@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
+use super::change_lines::{distinct_changes, step_change};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
@@ -135,19 +136,31 @@ fn effect_block(
         let captured = session.capture()?;
         let mut appeared = Vec::new();
         new_controls(&captured.tree, known, &mut appeared);
-        let shown = appeared.len().min(NEW_SHOWN);
+        let shown = if reordered(&page.changes) {
+            0
+        } else {
+            appeared.len().min(NEW_SHOWN)
+        };
         lines.extend(
             appeared
                 .iter()
                 .take(shown)
                 .map(|line| format!("new {line}")),
         );
-        if appeared.len() > shown {
+        if appeared.len() > shown && shown > 0 {
             lines.push(format!("+{} more new: tabref snap", appeared.len() - shown));
         }
         merge(&mut data, json!({ "new": appeared }));
     }
     Ok((lines, data))
+}
+
+/// Whether the page drew a list again in a new order: its cells and links
+/// are new elements then, and listing them would only repeat the rows.
+fn reordered(changes: &[tabref_page::TextChange]) -> bool {
+    changes
+        .iter()
+        .any(|change| matches!(change, tabref_page::TextChange::Reordered { .. }))
 }
 
 /// What a click, double-click, key press, hover or focus that showed no
@@ -344,48 +357,6 @@ pub(crate) fn styled(line: &str) -> String {
         }
         _ => line.to_owned(),
     }
-}
-
-/// The changed lines as printed, each once with how many times it showed
-/// (`+ Required ×2`): a page often shows the same message twice (a summary
-/// list and inline under the field). Lines are compared whole, before any
-/// cut.
-pub(crate) fn distinct_changes(changes: &[tabref_page::TextChange]) -> Vec<String> {
-    counted(changes)
-        .into_iter()
-        .map(|(change, count)| with_count(change.to_string(), count))
-        .collect()
-}
-
-fn counted(changes: &[tabref_page::TextChange]) -> Vec<(&tabref_page::TextChange, usize)> {
-    let mut counts: Vec<(&tabref_page::TextChange, usize)> = Vec::new();
-    for change in changes {
-        match counts.iter_mut().find(|(seen, _)| *seen == change) {
-            Some((_, count)) => *count += 1,
-            None => counts.push((change, 1)),
-        }
-    }
-    counts
-}
-
-fn with_count(line: String, count: usize) -> String {
-    if count > 1 {
-        format!("{line} ×{count}")
-    } else {
-        line
-    }
-}
-
-/// The first change as a `do` step's line carries it, cut to 100
-/// characters, with how many more there were: `+ Saved (+2 more)`.
-fn step_change(changes: &[tabref_page::TextChange]) -> Option<String> {
-    let counts = counted(changes);
-    let (first, count) = counts.first()?;
-    let line = with_count(first.brief(), *count);
-    if counts.len() > 1 {
-        return Some(format!("{line} (+{} more)", counts.len() - 1));
-    }
-    Some(line)
 }
 
 #[cfg(test)]
