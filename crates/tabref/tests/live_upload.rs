@@ -8,7 +8,7 @@ mod common;
 
 use common::{harness, live, scratch, serve};
 
-const DROPZONE: &str = r#"<!doctype html><title>Report</title>
+const DROPZONE: &str = r##"<!doctype html><title>Report</title>
 <form id="report"><label>Description <textarea name="body"></textarea></label>
 <div class="dropzone">Drop files here or <a href="#" id="pick">select more files…</a></div>
 <button>Submit report</button></form>
@@ -20,7 +20,7 @@ input.multiple = true;
 input.className = 'dz-hidden-input';
 input.style.cssText = 'visibility:hidden;position:absolute;top:0;left:0;height:0;width:0';
 document.getElementById('report').appendChild(input);
-</script>"#;
+</script>"##;
 
 #[test]
 fn a_drop_zone_link_uploads_to_its_hidden_input_and_css_is_explained() {
