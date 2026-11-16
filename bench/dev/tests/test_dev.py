@@ -177,6 +177,13 @@ class Shipments(Base):
         self.assertFalse(self.verdict(", ".join([city_other_status["tracking"]] + d["expected"][:2])))
         self.assertFalse(self.verdict(", ".join(d["expected"][:2])))
 
+    def test_bare_codes_and_a_space_for_the_dash_pass(self):
+        d = self.w["dw2"]
+        codes = [t.split("-")[1] for t in d["expected"]]
+        self.assertTrue(self.verdict(", ".join(codes)))
+        self.assertTrue(self.verdict(", ".join("TRK " + c for c in codes)))
+        self.assertFalse(self.verdict(", ".join(reversed(codes))))
+
 
 class Tokens(Base):
     tid = "dw3"
@@ -320,12 +327,18 @@ class Public(unittest.TestCase):
         dates = td.parse_pypi_release_dates((FIX / "pypi_requests_subset.json").read_text(), td.PYPI_VERSION)
         self.assertEqual(dates, ["2017-01-24"])
         self.check("dp1", {"dp1_dates": dates}, "Version 2.13.0 was released on Jan 24, 2017.",
-                   ["January 23, 2017", "2016-12-20", "It was released in 2017", ""])
+                   ["January 23, 2017", "2016-12-20", "It was released in 2017", "01/23/2017", ""])
+        for good in ("January 24th, 2017", "24th January 2017", "01/24/2017", "2017/01/24", "1/24/2017"):
+            self.assertTrue(td.verify_web(TASK["dp1"], {"exp": {"dp1_dates": dates}}, good, {})[0], good)
 
     def test_batched_strict_version(self):
         v = td.parse_batched_strict((FIX / "itertools_batched_snippet.html").read_text())
         self.assertEqual(v, "3.13")
-        self.check("dp2", {"dp2_version": v}, "Python 3.13", ["Python 3.12", "batched came in 3.12, strict in 3.13", ""])
+        self.check("dp2", {"dp2_version": v}, "Python 3.13",
+                   ["Python 3.12", "It was added in Python 3.12.", "strict came in 3.12, not 3.13", "3.14", "3.1", ""])
+        for good in ("It was added in Python 3.13.", "Python 3.13.0", "batched was added in 3.12 and strict in 3.13",
+                     "batched came in 3.12, strict in 3.13"):
+            self.assertTrue(td.verify_web(TASK["dp2"], {"exp": {"dp2_version": v}}, good, {})[0], good)
 
     def test_rfc_section(self):
         s = td.parse_rfc_section((FIX / "rfc9110_418_snippet.html").read_text())
@@ -342,6 +355,24 @@ class Public(unittest.TestCase):
 
 
 class Wiring(unittest.TestCase):
+    def test_a_dev_run_that_reads_behind_the_bench_is_caught(self):
+        run_web = load("run_web_dev_peek", BENCH / "harness" / "run_web.py")
+        for cmd in ("cat ~/tabref/bench/dev/tasks_dev.py", "grep -r expected bench/dev", "tail runs/results-web.jsonl",
+                    "curl -s http://127.0.0.1:8794/__state", "curl http://127.0.0.1:8794/__reset?seed=1",
+                    "ls ../", "python3 -c 'import tasks_dev'"):
+            self.assertTrue(run_web.reads_dev([cmd]), cmd)
+        for cmd in ("tabref open http://127.0.0.1:8794/clinic/", "tabref snapshot", "tabref click e12"):
+            self.assertIsNone(run_web.reads_dev([cmd]), cmd)
+
+    def test_dev_tasks_flag_names_only_dev_tasks(self):
+        run_web = load("run_web_dev_tasks", BENCH / "harness" / "run_web.py")
+        saved = sys.argv
+        self.addCleanup(setattr, sys, "argv", saved)
+        sys.argv = ["run_web.py", "--smoke", "--taskset", "dev", "--tasks", "dw1,hw1", "--out", tempfile.mkdtemp()]
+        with self.assertRaises(SystemExit) as cm:
+            run_web.main()
+        self.assertIn("outside the dev set: hw1", str(cm.exception))
+
     def test_run_web_loads_dev_unsealed_on_its_own_port(self):
         run_web = load("run_web_dev", BENCH / "harness" / "run_web.py")
         ts = run_web.load_taskset("dev")

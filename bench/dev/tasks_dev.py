@@ -342,8 +342,13 @@ def verify_dw1(w, answer, state):
 
 
 def tracking_mentions(answer, known):
-    pos = {t: answer.upper().find(t) for t in known}
-    return sorted((p, t) for t, p in pos.items() if p >= 0)
+    """Known tracking numbers in the order the answer names them: TRK-123456, TRK 123456 or the bare 123456."""
+    found = []
+    for t in known:
+        m = re.search(rf"(?<!\d){re.escape(t.split('-', 1)[1])}(?!\d)", answer)
+        if m:
+            found.append((m.start(), t))
+    return sorted(found)
 
 
 def verify_dw2(w, answer, state):
@@ -461,9 +466,10 @@ def web_expectations(task_id):
 
 def date_mentions(answer):
     out = set()
-    text = re.sub(r"\s+", " ", answer.replace(",", " "))
+    text = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", re.sub(r"\s+", " ", answer.replace(",", " ")))
     for fmt, rx in (("%d %b %Y", r"\b\d{1,2} [A-Z][a-z]{2,8}\.? \d{4}\b"), ("%b %d %Y", r"\b[A-Z][a-z]{2,8}\.? \d{1,2} \d{4}\b"),
-                    ("%Y-%m-%d", r"\b\d{4}-\d{2}-\d{2}\b")):
+                    ("%Y-%m-%d", r"\b\d{4}-\d{2}-\d{2}\b"), ("%m/%d/%Y", r"\b\d{1,2}/\d{1,2}/\d{4}\b"),
+                    ("%Y/%m/%d", r"\b\d{4}/\d{1,2}/\d{1,2}\b")):
         for m in re.findall(rx, text):
             m = re.sub(r"\s+", " ", m.replace(".", ""))
             for f in (fmt, fmt.replace("%b", "%B")):
@@ -474,14 +480,29 @@ def date_mentions(answer):
     return out
 
 
+VERSION_RX = r"(?<![\d.])3\.(\d{1,2})(?:\.\d+)?(?!\d)"
+
+
+def strict_version_given(said, want, answer):
+    """dp2 passes when the right minor version is the answer: the only version named, or, when another one (the
+    batched-itself decoy) is named too, the only one in the clauses that mention "strict"."""
+    if want not in said:
+        return False
+    if set(said) == {want}:
+        return True
+    clauses = re.split(r"[,;()]|\.(?!\d)|\b(?:and|but|while|whereas)\b", answer)
+    near = {int(m) for c in clauses if re.search(r"strict", c, re.I) for m in re.findall(VERSION_RX, c)}
+    return near == {want}
+
+
 def verify_public(task_id, exp, answer):
     if task_id == "dp1":
         said = date_mentions(answer)
         return bool(said) and said <= set(exp["dp1_dates"]), f"want {exp['dp1_dates'][0]}; answer dates {sorted(said)}"
     if task_id == "dp2":
-        said = re.findall(r"(?<![\d.])3\.\d{1,2}(?![\d.])", answer)
         want = exp["dp2_version"]
-        return bool(said) and (said[0] == want or set(said) == {want}), f"want {want}; answer versions {said}"
+        said = [int(m) for m in re.findall(VERSION_RX, answer)]
+        return strict_version_given(said, int(want.split(".")[1]), answer), f"want {want}; answer minors {said}"
     if task_id == "dp3":
         said = re.findall(r"(?<![\d.])\d+(?:\.\d+)+", answer)
         want = exp["dp3_section"]

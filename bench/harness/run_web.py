@@ -37,7 +37,8 @@ server on 8793). Both use the same arms, tool paragraphs, caps, Chrome setup, lo
 - the console shows no verifier text and errors show only their exception type.
   laptop: <key on stdin> | BENCH_FRESH_DIR=<sealed dir> bench/tools/tabbench.sh run --taskset fresh --rounds 0-4
 Dev (--taskset dev): the unsealed tuning set in bench/dev/ (tasks_dev.py, site dev/web/server.py on 8794), run and
-reported like heldout (per-task tables and verifier text allowed); its work folders go under web-dev/.
+reported like heldout (per-task tables and verifier text allowed); its work folders go under web-dev/. A dev run fails
+(read_sealed true) when a tool call names the dev task files, the results file, /__state, /__reset or ../ (reads_dev).
   laptop: <key on stdin> | bench/tools/tabbench.sh run --taskset dev --rounds 0-4
 --smoke: no model, no key, no Chrome: start the set's site, reset every task for run 0, fetch the local pages the
 prompts name, and count verifiers that reject an empty answer with an empty and with an untouched state
@@ -253,6 +254,20 @@ def reads_sealed(commands, results, sealed_dir, allowed=()):
     return f"a tool result shows {hit!r}" if hit else None
 
 
+DEV_MARKS = ("tasks_dev", "bench/dev", "results-web.jsonl", "/__state", "/__reset", "../")
+
+
+def reads_dev(commands):
+    """Why a dev run counts as having looked behind the bench, or None: a tool call names the dev task module or
+    folder, the results file, the site's state or reset endpoint, or a parent folder. The dev set is not sealed,
+    so this is a light check on the commands only (fresh's reads_sealed also checks results and outside paths)."""
+    for cmd in commands:
+        hit = next((m for m in DEV_MARKS if m in cmd), None)
+        if hit:
+            return f"a tool call names {hit!r}"
+    return None
+
+
 def summarize_stream(lines):
     """browser bench run.py summarize_stream, unchanged."""
     turns, tool_calls, tool_chars, snap_chars, snap_calls = 0, 0, 0, 0, 0
@@ -437,6 +452,8 @@ class Runner:
         if ts.sealed:
             commands, results = tool_traffic((stdout or "").splitlines())
             peeked = reads_sealed(commands, results, ts.sealed_dir, allowed=(work, core.tools_dir()))
+        elif ts.name == "dev":
+            peeked = reads_dev(tool_traffic((stdout or "").splitlines())[0])
         if peeked:
             ok, why = False, f"{peeked}; {why}"
         chrome_alive = bool(core.profile_processes(profile))
@@ -511,6 +528,10 @@ def main():
             raise SystemExit(f"the fresh site runs on {fresh.BASE} only")
         if a.tasks and not set(a.tasks.split(",")) <= set(ts.order):
             raise SystemExit("--tasks names tasks outside the fresh set")
+    if ts.name == "dev" and a.tasks:
+        bad = [t for t in a.tasks.split(",") if t not in ts.order]
+        if bad:
+            raise SystemExit(f"--tasks names tasks outside the dev set: {', '.join(bad)} (dev tasks: {', '.join(ts.order)})")
     a.base = a.base or (fresh.BASE if ts.sealed else DEV_BASE if ts.name == "dev" else HELDOUT_BASE)
     if a.smoke:
         return smoke(a, ts, vault)
