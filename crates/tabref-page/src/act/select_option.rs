@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
+use super::aria_select::select_listed;
 use super::element_call::ElementCall;
 use super::option_match::{OptionEntry, OptionPick, listing, pick_option, printed, shown};
 use super::remote_element::call_on_element;
@@ -35,7 +36,9 @@ const CHOOSE_OPTION: &str = r"function(index, value) {
 /// page input, so the value is set directly. A choice that names several
 /// options, a disabled one or none fails with the options as the view
 /// prints them: thirty at most, in the message and in the details, which
-/// count them all in `options_total`. All are read for the match.
+/// count them all in `options_total`. All are read for the match. Any
+/// other element goes to the ARIA path ([`select_listed`]): a combobox, a
+/// button that opens a listbox, or a listbox; the rest are refused.
 pub fn select_option(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -54,11 +57,7 @@ pub fn select_option(
         deadline,
     )?;
     if read.get("error").is_some() {
-        return Err(AppError::new(
-            ErrorCode::ActionNotSupported,
-            format!("DOM node {} is not a <select>", token.backend_node_id),
-        )
-        .with_disposition(DeliverySemantics::not_delivered()));
+        return select_listed(connection, session, token, choice, deadline);
     }
     let options = entries(read.get("options"));
     let index = match pick_option(&options, choice) {
@@ -88,6 +87,7 @@ pub fn select_option(
         value: text("value").unwrap_or_default(),
         label: text("label").unwrap_or_default(),
         previous: text("previous"),
+        read_back: false,
     })
 }
 
@@ -118,7 +118,7 @@ fn entries(options: Option<&Value>) -> Vec<OptionEntry> {
         .unwrap_or_default()
 }
 
-fn refused(options: &[OptionEntry], choice: &str, pick: &OptionPick) -> AppError {
+pub(crate) fn refused(options: &[OptionEntry], choice: &str, pick: &OptionPick) -> AppError {
     let all: Vec<usize> = (0..options.len()).collect();
     let named = |indices: &[usize]| -> Vec<String> {
         indices

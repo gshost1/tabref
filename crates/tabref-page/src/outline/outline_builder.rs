@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use super::block::Block;
 use super::block_kind::BlockKind;
 use super::container::is_container;
+use super::control::Control;
 use super::control_build::control_of;
 use super::dom_tree::DomTree;
 use super::element_kind::{is_block_display, is_sectioning, is_skipped, semantic_kind};
@@ -151,7 +152,7 @@ impl<'a> OutlineBuilder<'a> {
             .is_some_and(|_| is_container(tree, index, &self.input.refs));
         if let Some(found) = control.take() {
             if !container {
-                into.items.push(Item::Control(found));
+                push_control(into, found, semantic_kind(node, context.in_section));
                 return;
             }
             control = Some(found);
@@ -204,6 +205,19 @@ impl<'a> OutlineBuilder<'a> {
         }
         push_block(into, block);
     }
+}
+
+/// Appends a control. One that is itself a list item, as an
+/// `<li role=option>` or `<li role=menuitem>` is, goes in a list item of its
+/// own, since a list prints only its items.
+fn push_control(into: &mut Block, control: Control, kind: Option<BlockKind>) {
+    if kind == Some(BlockKind::ListItem) {
+        let mut item = Block::new(BlockKind::ListItem);
+        item.items.push(Item::Control(control));
+        into.items.push(Item::Block(item));
+        return;
+    }
+    into.items.push(Item::Control(control));
 }
 
 /// Appends a text run, joined to the run before it when there is one.

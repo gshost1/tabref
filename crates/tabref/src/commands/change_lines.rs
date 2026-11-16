@@ -1,5 +1,6 @@
 //! How an action report prints changed lines: each line once, with how
-//! many times the page showed it.
+//! many times the page showed it, and not again as an added line when a
+//! new control printed with its ref says the same text.
 
 /// The changed lines as printed, each once with how many times it showed
 /// (`+ Required ×2`): a page often shows the same message twice (a summary
@@ -41,4 +42,36 @@ pub(crate) fn step_change(changes: &[tabref_page::TextChange]) -> Option<String>
         return Some(format!("{line} (+{} more)", counts.len() - 1));
     }
     Some(line)
+}
+
+/// The names of the new controls whose lines are in `shown`, spaces
+/// collapsed.
+pub(crate) fn printed_names(found: &[(String, Option<String>)], shown: &[String]) -> Vec<String> {
+    found
+        .iter()
+        .filter(|(line, _)| shown.contains(line))
+        .filter_map(|(_, name)| name.as_deref().map(collapsed))
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// The changes without each added line that is exactly the name of a new
+/// control already printed, as an opened listbox adds its options both as
+/// text and as controls.
+pub(crate) fn without_added(
+    changes: &[tabref_page::TextChange],
+    named: &[String],
+) -> Vec<tabref_page::TextChange> {
+    changes
+        .iter()
+        .filter(|change| match change {
+            tabref_page::TextChange::Added(line) => !named.contains(&collapsed(line)),
+            _ => true,
+        })
+        .cloned()
+        .collect()
+}
+
+fn collapsed(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }

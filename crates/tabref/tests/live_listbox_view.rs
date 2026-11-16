@@ -57,7 +57,7 @@ fn a_click_that_opens_a_listbox_names_each_option_once() {
         assert_eq!(mentions, 1, "{name}:\n{}", clicked.stdout);
     }
     assert!(
-        clicked.stdout.contains("option Green"),
+        clicked.stdout.contains(r#"option "Green""#),
         "{}",
         clicked.stdout
     );
