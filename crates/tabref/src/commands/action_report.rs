@@ -16,6 +16,7 @@ use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
 
 const CHANGE_BUDGET: usize = 600;
+const RELOAD_BUDGET: usize = 200;
 const NOTHING_SEEN: &str = " (no visible change)";
 const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
 const NEW_SHOWN: usize = 8;
@@ -131,7 +132,11 @@ fn effect_block(
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
     let changes = distinct_changes(&page.changes);
-    lines.extend(within_budget(&changes));
+    if effects.settled.navigated {
+        lines.extend(reload_head(&page.changes));
+    } else {
+        lines.extend(within_budget(&changes));
+    }
     merge(&mut data, json!({ "changes": changes }));
     if effects.settled.navigated {
         let report = current_page_view(session)?;
@@ -185,14 +190,37 @@ fn nothing_seen(acted: &Acted) -> Option<&'static str> {
     })
 }
 
-/// The changed lines that fit 600 bytes, in order: one that does not fit
-/// whole is cut to the room left when that is 60 bytes or more, the first
-/// line too, and the rest are counted.
+/// The added lines a same-address reload prints before the view, about
+/// 200 bytes of them: they say what the reload brought (an error, a flash
+/// message), while the view holds them all again and the removed lines are
+/// only the old page.
+fn reload_head(changes: &[tabref_page::TextChange]) -> Vec<String> {
+    let added: Vec<tabref_page::TextChange> = changes
+        .iter()
+        .filter(|change| matches!(change, tabref_page::TextChange::Added(_)))
+        .cloned()
+        .collect();
+    fit_lines(
+        &distinct_changes(&added),
+        RELOAD_BUDGET,
+        "+{} more added lines, in the view below",
+    )
+}
+
+/// The changed lines that fit 600 bytes, the rest counted with a pointer
+/// to `snap`.
 fn within_budget(changes: &[String]) -> Vec<String> {
+    fit_lines(changes, CHANGE_BUDGET, "+{} more: tabref snap")
+}
+
+/// The lines that fit `budget` bytes, in order: one that does not fit
+/// whole is cut to the room left when that is 60 bytes or more, the first
+/// line too, and the rest are counted with `more` (`{}` is the count).
+fn fit_lines(changes: &[String], budget: usize, more: &str) -> Vec<String> {
     let mut used = 0;
     let mut shown = Vec::new();
     for change in changes {
-        let room = CHANGE_BUDGET - used;
+        let room = budget - used;
         if change.len() <= room {
             used += change.len();
             shown.push(change.clone());
@@ -204,10 +232,7 @@ fn within_budget(changes: &[String]) -> Vec<String> {
         break;
     }
     if shown.len() < changes.len() {
-        shown.push(format!(
-            "+{} more: tabref snap",
-            changes.len() - shown.len()
-        ));
+        shown.push(more.replace("{}", &(changes.len() - shown.len()).to_string()));
     }
     shown
 }
