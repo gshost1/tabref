@@ -82,21 +82,14 @@ pub(crate) fn act(
     })
 }
 
-/// The refusal of an element that is no select of any kind, naming it as
-/// the command names it.
+/// The refusal of an element that is no select of any kind, or a
+/// multi-select listbox, naming it as the command names it.
 fn named(mut error: AppError, subject: &str) -> AppError {
-    if error.kind() != Some("select_unsupported") {
+    if !matches!(error.kind(), Some("select_unsupported" | "select_multi")) {
         return error;
     }
-    let element = error
-        .details
-        .as_ref()
-        .and_then(|details| details.get("element"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("element")
-        .to_owned();
-    error.message = format!(
-        "{subject} is a {element}, not a <select> or an ARIA combobox or listbox; click it, then click the option"
-    );
+    if let Some((_, rest)) = error.message.split_once(" is a ") {
+        error.message = format!("{subject} is a {rest}");
+    }
     error
 }

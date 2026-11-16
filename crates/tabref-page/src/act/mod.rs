@@ -6,6 +6,7 @@ pub(crate) mod append_outcome;
 pub(crate) mod append_text;
 pub(crate) mod aria_select;
 pub(crate) mod aria_select_errors;
+pub(crate) mod aria_select_read;
 pub(crate) mod aria_select_scripts;
 pub(crate) mod assigned_input;
 pub(crate) mod blocker;

@@ -1,50 +1,38 @@
 //! `select` on the ARIA patterns a page builds instead of a `<select>`: a
 //! combobox (select-only or editable), a button with `aria-haspopup=listbox`,
-//! or a listbox. It does what a user does: opens the popup when it is closed
-//! (a click, then Down Arrow), waits for its options, types the wanted text
-//! into an editable combobox when no shown option matches, matches the
-//! option as a native select's is matched, clicks it, and reads the control
-//! back. Only shown options are matched: one a filter hid cannot be clicked.
+//! or a single-select listbox. It does what a user does: opens the popup when
+//! it is closed (a click, then Down Arrow when the control has the focus),
+//! waits for its options, types the wanted text into an editable combobox
+//! when no shown option matches, matches the option as a native select's is
+//! matched, clicks it, and reads the control back. Only shown options are
+//! matched: one a filter hid cannot be clicked.
+//!
+//! A pick counts only on a sign the click itself gave: the control's value
+//! became the label, or, when it already read so (the typed text), the
+//! option became selected or the popup closed while the control kept the
+//! focus. Any failure after the popup opened closes it, and text typed for
+//! the search is replaced by the old text again.
 
-use std::time::{Duration, Instant};
-
-use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline, DeliverySemantics};
 
-use super::action_need::ActionNeed;
-use super::actionable::wait_actionable;
-use super::aria_select_errors::{no_options, not_taken, unpicked, unsupported};
-use super::aria_select_scripts::{FIELD, OPTION_AT, READ};
+use super::aria_select_errors::{
+    multi_select, no_options, not_taken, option_gone, put_back, quoted, unpicked, unsupported,
+};
+use super::aria_select_read::{Control, Listed};
 use super::click::click_times;
-use super::element_call::ElementCall;
-use super::element_errors::script_failed;
 use super::fill::fill;
 use super::key_press::press_key;
 use super::option_match::{OptionEntry, OptionPick, pick_option};
-use super::remote_element::{call_on_element, with_element};
 use super::select_outcome::SelectOutcome;
-use crate::{CdpConnection, ElementToken, PageSession};
+use crate::{CdpConnection, ElementToken, PageSession, cut_chars};
 
-const POLL: Duration = Duration::from_millis(50);
-const LONGEST_WAIT: Duration = Duration::from_millis(1_500);
+const VALUE_CHARS: usize = 80;
 
-/// The control as one read saw it.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Listed {
-    pub kind: String,
-    pub editable: bool,
-    pub open: bool,
-    pub options: Vec<Shown>,
-    pub value: String,
-    pub describe: String,
-}
-
-/// One option of the popup and whether it shows now.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Shown {
-    pub entry: OptionEntry,
-    pub shown: bool,
-    pub selected: bool,
+/// What the select changed on the page so far, for the clean-up.
+#[derive(Default)]
+struct Touched {
+    opened: bool,
+    typed: bool,
 }
 
 /// Picks the option `choice` names in the ARIA control `token` names.
@@ -61,83 +49,179 @@ pub(crate) fn select_listed(
         token,
         deadline,
     };
-    let mut state = page.read(true)?;
-    if state.kind == "none" {
-        return Err(unsupported(token, &state.describe));
+    let first = page.read(true)?;
+    if first.kind == "none" {
+        return Err(unsupported(token, &first.describe));
     }
+    if first.multi {
+        return Err(multi_select(token));
+    }
+    let previous = first.value.clone();
+    let mut touched = Touched::default();
+    match pick(&mut page, first, choice, &mut touched) {
+        Ok((outcome, close)) => {
+            if close && touched.opened {
+                let _ = press_key(page.connection, page.session, "Escape", page.deadline);
+            }
+            Ok(outcome)
+        }
+        Err(error) => Err(clean_up(&mut page, error, &touched, &previous)),
+    }
+}
+
+/// The pick, and whether the popup tabref opened is still to be closed.
+fn pick(
+    page: &mut Control<'_>,
+    mut state: Listed,
+    choice: &str,
+    touched: &mut Touched,
+) -> Result<(SelectOutcome, bool), AppError> {
     let previous = state.value.clone();
-    let mut opened = false;
     if !state.open {
-        page.ready(token, &format!("{} {}", state.kind, state.describe))?;
-        click_times(page.connection, session, token, 1, deadline)?;
-        opened = true;
+        let token = page.token.clone();
+        page.ready(&token, &format!("{} {}", state.kind, state.describe))?;
+        click_times(page.connection, page.session, &token, 1, page.deadline)?;
+        touched.opened = true;
         state = page.wait_for(|now| now.open)?;
-        if !state.open && !state.editable && state.kind != "listbox" {
-            press_key(page.connection, session, "ArrowDown", deadline)?;
+        if !state.open && !state.editable && state.kind != "listbox" && state.focused {
+            press_key(page.connection, page.session, "ArrowDown", page.deadline)?;
             state = page.wait_for(|now| now.open)?;
         }
     }
-    let mut pick = pick_shown(&state, choice).0;
-    let mut typed = false;
-    if state.editable && pick == OptionPick::Missing {
+    if state.multi {
+        return Err(multi_select(page.token));
+    }
+    if state.editable && pick_shown(&state, choice).0 == OptionPick::Missing {
         let field = page.field()?;
-        fill(page.connection, session, &field, choice, deadline)?;
-        typed = true;
-        opened = true;
+        touched.typed = true;
+        touched.opened = true;
+        fill(page.connection, page.session, &field, choice, page.deadline)?;
         state =
             page.wait_for(|now| now.open && pick_shown(now, choice).0 != OptionPick::Missing)?;
-        pick = pick_shown(&state, choice).0;
     }
-    let OptionPick::Chosen(at) = pick else {
-        if opened {
-            let _ = press_key(page.connection, session, "Escape", deadline);
-        }
-        let error = if state.open || state.options.iter().any(|option| option.shown) {
-            let (entries, _) = shown_entries(&state);
-            unpicked(&entries, choice, &pick, typed)
-        } else {
-            no_options(&state.describe, choice, typed)
-        };
-        return Err(if opened {
-            error.with_disposition(DeliverySemantics::delivered_unverified())
-        } else {
-            error
-        });
+    let (mut index, label) = chosen(&state, choice, touched.typed)?;
+    let already = if state.kind == "listbox" {
+        state.options[index].selected
+    } else {
+        !touched.typed && previous.to_lowercase() == label.to_lowercase()
     };
-    let index = shown_entries(&state).1[at];
-    let label = state.options[index].entry.label.clone();
-    let option = page.option(index)?;
-    page.ready(&option, &format!("option \"{label}\""))?;
-    click_times(page.connection, session, &option, 1, deadline)?;
-    let after = page.wait_for(|now| took(now, index, &label, &previous))?;
-    if !took(&after, index, &label, &previous) {
+    if already {
+        return Ok((outcome(&previous, &previous, &label), true));
+    }
+    let option = match page.option(index, &label)? {
+        Some(option) => option,
+        None => {
+            state = page.read(false)?;
+            let (again, label_again) = chosen(&state, choice, touched.typed)?;
+            if label_again != label {
+                return Err(option_gone(&label));
+            }
+            index = again;
+            page.option(index, &label)?
+                .ok_or_else(|| option_gone(&label))?
+        }
+    };
+    page.ready(&option, &format!("option {}", quoted(&label)))?;
+    click_times(page.connection, page.session, &option, 1, page.deadline)?;
+    let before = state;
+    let after = page.wait_for(|now| took(now, &before, index, &label))?;
+    if !took(&after, &before, index, &label) {
         return Err(not_taken(&label, &after.value));
     }
-    Ok(SelectOutcome {
-        value: after.value,
-        label,
-        previous: (!previous.is_empty()).then_some(previous),
-        read_back: true,
-    })
+    Ok((outcome(&after.value, &previous, &label), after.open))
 }
 
-/// Whether the control now shows `label`: its displayed value is the
-/// label, or holds it and changed, or, for a listbox, the option is
-/// selected.
-fn took(state: &Listed, index: usize, label: &str, previous: &str) -> bool {
-    let value = state.value.to_lowercase();
-    let wanted = label.to_lowercase();
-    if state.kind == "listbox" {
-        return state
+fn outcome(value: &str, previous: &str, label: &str) -> SelectOutcome {
+    SelectOutcome {
+        value: cut_chars(value, VALUE_CHARS),
+        label: label.to_owned(),
+        previous: (!previous.is_empty()).then(|| cut_chars(previous, VALUE_CHARS)),
+        read_back: true,
+    }
+}
+
+/// The index and label of the one shown option `choice` names, or the
+/// refusal that lists the shown options.
+fn chosen(state: &Listed, choice: &str, typed: bool) -> Result<(usize, String), AppError> {
+    let (pick, indices) = pick_shown(state, choice);
+    match pick {
+        OptionPick::Chosen(at) => {
+            let index = indices[at];
+            Ok((index, state.options[index].entry.label.clone()))
+        }
+        other if state.open || state.options.iter().any(|option| option.shown) => {
+            let (entries, _) = shown_entries(state);
+            Err(unpicked(&entries, choice, &other))
+        }
+        _ => Err(no_options(&state.describe, choice, typed)),
+    }
+}
+
+/// Puts back the text tabref typed and closes the popup it opened, and
+/// says so in `error`.
+fn clean_up(
+    page: &mut Control<'_>,
+    error: AppError,
+    touched: &Touched,
+    previous: &str,
+) -> AppError {
+    let mut error = error;
+    if touched.typed {
+        let restored = page
+            .field()
+            .and_then(|field| {
+                fill(
+                    page.connection,
+                    page.session,
+                    &field,
+                    previous,
+                    page.deadline,
+                )
+            })
+            .is_ok_and(|filled| filled.verified);
+        error.message.push_str(&put_back(previous, restored));
+    }
+    if touched.opened {
+        let _ = press_key(page.connection, page.session, "Escape", page.deadline);
+        error = error.with_disposition(DeliverySemantics::delivered_unverified());
+    }
+    error
+}
+
+/// Whether the option click took. The value must read as the label: the
+/// same, or holding it when no other option's label holds it too; a listbox
+/// must have the option selected. And the click must have left a sign the
+/// state before it could not give: the value changed, or the option became
+/// selected, or the popup closed while the control kept the focus.
+pub(crate) fn took(now: &Listed, before: &Listed, index: usize, label: &str) -> bool {
+    let selected = |state: &Listed| {
+        state
             .options
             .get(index)
-            .is_some_and(|option| option.selected);
+            .is_some_and(|option| option.selected)
+    };
+    if now.kind == "listbox" {
+        return selected(now)
+            && now
+                .options
+                .get(index)
+                .is_some_and(|option| option.entry.label == label);
     }
-    value == wanted || (value.contains(&wanted) && state.value != previous)
+    let value = now.value.to_lowercase();
+    let wanted = label.to_lowercase();
+    let shared = before.options.iter().chain(&now.options).any(|option| {
+        let other = option.entry.label.to_lowercase();
+        other != wanted && other.contains(&wanted)
+    });
+    let shows = value == wanted || (!shared && value.contains(&wanted));
+    let changed = now.value != before.value;
+    let committed =
+        (selected(now) && !selected(before)) || (before.open && !now.open && now.focused);
+    shows && (changed || committed)
 }
 
 /// The shown options as entries, and the index of each in all options.
-fn shown_entries(state: &Listed) -> (Vec<OptionEntry>, Vec<usize>) {
+pub(crate) fn shown_entries(state: &Listed) -> (Vec<OptionEntry>, Vec<usize>) {
     state
         .options
         .iter()
@@ -147,178 +231,9 @@ fn shown_entries(state: &Listed) -> (Vec<OptionEntry>, Vec<usize>) {
         .unzip()
 }
 
-fn pick_shown(state: &Listed, choice: &str) -> (OptionPick, Vec<usize>) {
+pub(crate) fn pick_shown(state: &Listed, choice: &str) -> (OptionPick, Vec<usize>) {
     let (entries, indices) = shown_entries(state);
     (pick_option(&entries, choice), indices)
-}
-
-struct Control<'a> {
-    connection: &'a mut CdpConnection,
-    session: &'a PageSession,
-    token: &'a ElementToken,
-    deadline: Deadline,
-}
-
-impl Control<'_> {
-    fn read(&mut self, record: bool) -> Result<Listed, AppError> {
-        let read = call_on_element(
-            self.connection,
-            self.session,
-            self.token,
-            ElementCall {
-                function: READ,
-                arguments: vec![json!(record)],
-            },
-            self.deadline,
-        )?;
-        Ok(listed(&read))
-    }
-
-    fn wait_for(&mut self, done: impl Fn(&Listed) -> bool) -> Result<Listed, AppError> {
-        let started = Instant::now();
-        let budget = LONGEST_WAIT.min(self.deadline.remaining() / 2);
-        loop {
-            let state = self.read(false)?;
-            if done(&state) || started.elapsed() + POLL >= budget {
-                return Ok(state);
-            }
-            std::thread::sleep(POLL);
-        }
-    }
-
-    fn ready(&mut self, token: &ElementToken, subject: &str) -> Result<(), AppError> {
-        match wait_actionable(
-            self.connection,
-            self.session,
-            token,
-            ActionNeed::Click,
-            self.deadline,
-        )? {
-            None => Ok(()),
-            Some(blocked) => Err(blocked.error(subject)),
-        }
-    }
-
-    fn option(&mut self, index: usize) -> Result<ElementToken, AppError> {
-        let found = self.element(OPTION_AT, vec![json!(index)])?;
-        found.ok_or_else(|| super::aria_select_errors::option_gone(index))
-    }
-
-    fn field(&mut self) -> Result<ElementToken, AppError> {
-        let found = self.element(FIELD, Vec::new())?;
-        Ok(found.unwrap_or_else(|| self.token.clone()))
-    }
-
-    fn element(
-        &mut self,
-        function: &str,
-        arguments: Vec<Value>,
-    ) -> Result<Option<ElementToken>, AppError> {
-        let (session, token, deadline) = (self.session, self.token, self.deadline);
-        with_element(
-            self.connection,
-            session,
-            token,
-            deadline,
-            |connection, object| {
-                element_of(
-                    connection,
-                    session,
-                    (object, function, arguments),
-                    token,
-                    deadline,
-                )
-            },
-        )
-    }
-}
-
-fn element_of(
-    connection: &mut CdpConnection,
-    session: &PageSession,
-    (object_id, function, arguments): (&str, &str, Vec<Value>),
-    token: &ElementToken,
-    deadline: Deadline,
-) -> Result<Option<ElementToken>, AppError> {
-    let arguments: Vec<Value> = arguments
-        .into_iter()
-        .map(|value| json!({ "value": value }))
-        .collect();
-    let reply = connection.call(
-        "Runtime.callFunctionOn",
-        json!({
-            "objectId": object_id,
-            "functionDeclaration": function,
-            "arguments": arguments,
-            "returnByValue": false,
-            "awaitPromise": false,
-        }),
-        Some(&session.session_id),
-        deadline,
-    )?;
-    if let Some(exception) = reply.get("exceptionDetails") {
-        return Err(script_failed(exception));
-    }
-    let Some(found) = reply.pointer("/result/objectId").and_then(Value::as_str) else {
-        return Ok(None);
-    };
-    let described = connection.call(
-        "DOM.describeNode",
-        json!({ "objectId": found }),
-        Some(&session.session_id),
-        deadline,
-    );
-    let _ = connection.call(
-        "Runtime.releaseObject",
-        json!({ "objectId": found }),
-        Some(&session.session_id),
-        deadline,
-    );
-    Ok(described?
-        .pointer("/node/backendNodeId")
-        .and_then(Value::as_i64)
-        .map(|backend_node_id| ElementToken {
-            backend_node_id,
-            ..token.clone()
-        }))
-}
-
-fn listed(read: &Value) -> Listed {
-    let text = |value: &Value, key: &str| {
-        value
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
-    };
-    let flag = |value: &Value, key: &str| value.get(key).and_then(Value::as_bool).unwrap_or(false);
-    let options = read
-        .get("options")
-        .and_then(Value::as_array)
-        .map(|options| {
-            options
-                .iter()
-                .map(|option| Shown {
-                    entry: OptionEntry {
-                        label: text(option, "label"),
-                        text: text(option, "text"),
-                        value: text(option, "value"),
-                        disabled: flag(option, "disabled"),
-                    },
-                    shown: flag(option, "shown"),
-                    selected: flag(option, "selected"),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Listed {
-        kind: text(read, "kind"),
-        editable: flag(read, "editable"),
-        open: flag(read, "open"),
-        options,
-        value: text(read, "value"),
-        describe: text(read, "describe"),
-    }
 }
 
 #[cfg(test)]
