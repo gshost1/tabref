@@ -29,7 +29,7 @@ use crate::session::Session;
 use crate::view::node_line::quote_text;
 
 const READ_LIMIT: usize = 4_000;
-const FOUND_SHOWN: usize = 10;
+const FOUND_SHOWN: usize = 5;
 
 /// `open URL`: a path, `?query` or `./relative` address resolves against
 /// the current page. Waits for the page's load; a page still loading after
@@ -231,14 +231,15 @@ pub(crate) fn read_step(
     })
 }
 
-/// `find TEXT`: the lines `tabref find` prints for it, with the ref to
-/// act on, and the note on scrolling for more when nothing matched.
+/// `find TEXT`: the first lines `tabref find` prints for it, with the ref
+/// to act on, the command that prints the rest, and the note on loading
+/// more when nothing matched.
 pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone, AppError> {
     let needle = joined(args);
     if needle.is_empty() {
         return Err(AppError::invalid_args("find needs the text to look for"));
     }
-    let found = find::search(session, &needle, None, FOUND_SHOWN)?;
+    let found = find::search(session, &needle, None, FOUND_SHOWN, true)?;
     let note = found
         .note
         .as_ref()
@@ -251,6 +252,13 @@ pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone
     for line in &found.lines {
         text.push_str("\n  ");
         text.push_str(line);
+    }
+    if found.count > found.lines.len() {
+        text.push_str(&format!(
+            "\n  +{} more: tabref find {}",
+            found.count - found.lines.len(),
+            quote_text(&needle)
+        ));
     }
     let mut data = found.data;
     data["action"] = json!("find");
