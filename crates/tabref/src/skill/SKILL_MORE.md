@@ -14,6 +14,10 @@ logged-in Chrome and its sessions); `tabref connect --off` stops.
 Apps built on Chrome (Electron, reached with `--cdp PORT`): `open`, `open --new-tab` and `close` are refused,
 as the windows are the app; read and act with snap, click and fill (js to read).
 
+JavaScript dialogs are accepted and reported; `--dialog dismiss` (or `accept=TEXT` for a prompt) answers the
+first confirm, prompt or leave-page dialog of the whole command, `do` included; not reliable while another
+tabref command runs at the same time.
+
 Screenshots: `tabref screenshot [T] [--out FILE]` saves a PNG of the page, or of element T, and prints
 its path.
 

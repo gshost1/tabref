@@ -4,6 +4,7 @@
 
 use tabref_cdp::BrowserEndpoint;
 use tabref_core::AppError;
+use tabref_page::DIALOG_OPENING;
 
 use super::Session;
 use super::browser_choice::choice_key;
@@ -15,8 +16,11 @@ impl Session {
     /// Starts the next command on a kept session: a fresh deadline and tab
     /// choice, every frame the browser sent meanwhile accounted for, and the
     /// sessions of closed tabs forgotten. Events from before the command are
-    /// dropped, as a new connection would never have seen them. An error
-    /// means the connection is gone, or it is not to the browser this
+    /// dropped, as a new connection would never have seen them, except a
+    /// dialog that opened since the last command: it is accepted (never with
+    /// this command's `--dialog`, which is set only after it) and kept, so
+    /// this command reports it as opened after the last command.
+    /// An error means the connection is gone, or it is not to the browser this
     /// command wants (the user turned `connect --user-chrome` on or off, or
     /// one command asks for `--launch` and the next does not), and the
     /// session must be replaced.
@@ -34,8 +38,12 @@ impl Session {
         self.scope = CommandScope::new(options, claim)?;
         let cancel = self.scope.claim.as_ref().map(TabClaim::cancel_flag);
         self.connection.set_cancel(cancel);
+        self.connection.answer_next_dialog(None);
         self.connection.poll_pending(self.scope.deadline)?;
-        self.connection.take_events();
+        self.connection
+            .discard_events(|event| event.method != DIALOG_OPENING);
+        self.connection.mark_buffered_dialogs_late();
+        self.connection.answer_next_dialog(options.dialog.clone());
         let connection = &self.connection;
         self.attached
             .retain(|_, tab| !connection.is_session_detached(&tab.session.session_id));

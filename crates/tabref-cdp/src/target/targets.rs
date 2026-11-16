@@ -49,6 +49,7 @@ pub fn attach_to_target_with(
         deadline,
     )?;
     let session_id = string_field(&result, "sessionId", "Target.attachToTarget")?;
+    connection.note_session_tab(&session_id, target_id);
     let mut calls = vec![("Runtime.runIfWaitingForDebugger", json!({}))];
     calls.extend(follow_ups.iter().cloned());
     connection.call_all(&calls, Some(&session_id), deadline)?;

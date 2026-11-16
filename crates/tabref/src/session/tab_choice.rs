@@ -13,6 +13,12 @@ impl Session {
         Ok(self.current_tab_unclaimed()?.map(|tab| tab.url))
     }
 
+    /// The tab this command already works in, when it chose one; no
+    /// request is made.
+    pub(crate) fn known_tab(&self) -> Option<&str> {
+        self.scope.tab.as_deref()
+    }
+
     /// The tab this command would work in, read from the tab listing
     /// without claiming it. `None` when the browser has no tab.
     pub(crate) fn current_tab_unclaimed(&mut self) -> Result<Option<PageTarget>, AppError> {

@@ -81,6 +81,7 @@ impl Session {
         let mut connection = browser.connection;
         connection.set_cancel(scope.claim.as_ref().map(TabClaim::cancel_flag));
         connection.set_guard(chosen.map(|chosen| opt_in_guard(&store, chosen)));
+        connection.answer_next_dialog(options.dialog.clone());
         Ok(Self {
             connection,
             browser: ReachedBrowser::new(browser.endpoint, &store),

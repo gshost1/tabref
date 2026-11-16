@@ -21,6 +21,7 @@ const TOGGLES: &[(&str, &str)] = &[
 pub(crate) struct SessionLedger {
     detached: HashSet<String>,
     switched_on: HashMap<String, Vec<String>>,
+    tabs: HashMap<String, String>,
 }
 
 impl SessionLedger {
@@ -34,6 +35,18 @@ impl SessionLedger {
         }
         self.detached.insert(session_id.to_owned());
         self.switched_on.remove(session_id);
+        self.tabs.remove(session_id);
+    }
+
+    /// Records that `session_id` belongs to the tab `tab` (a page session,
+    /// or an iframe session under it).
+    pub(crate) fn note_tab(&mut self, session_id: &str, tab: &str) {
+        self.tabs.insert(session_id.to_owned(), tab.to_owned());
+    }
+
+    /// The tab `session_id` belongs to, when the connection saw it attach.
+    pub(crate) fn tab_of(&self, session_id: &str) -> Option<&str> {
+        self.tabs.get(session_id).map(String::as_str)
     }
 
     /// Whether a reply to `method` can change what the ledger records.

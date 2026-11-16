@@ -8,6 +8,7 @@ pub(crate) mod click;
 pub(crate) mod close;
 pub(crate) mod close_browser;
 pub(crate) mod connect;
+pub(crate) mod dialog_report;
 pub(crate) mod do_batch;
 pub(crate) mod do_expand;
 pub(crate) mod do_read_steps;
@@ -27,6 +28,7 @@ pub(crate) mod js;
 pub(crate) mod kept_download;
 pub(crate) mod new_tab;
 pub(crate) mod open;
+
 pub(crate) mod open_request;
 pub(crate) mod page_url;
 pub(crate) mod page_view;
@@ -66,8 +68,54 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         return Ok(skill::run(topic.as_deref()));
     }
     let mut session = Session::open(&session_options(cli))?;
-    let outcome = dispatch(&mut session, &cli.command);
+    let outcome = dispatch_cli(&mut session, cli);
     session.with_warning(outcome)
+}
+
+/// Runs the parsed command line against `session`, whose connection holds
+/// the command's `--dialog` answer for the first dialog it applies to that
+/// the whole command meets (`do` included). It is set when the session
+/// opens, or when the daemon begins the command after accepting any dialog
+/// left open since the last one. The answer is cleared after the command,
+/// so a kept connection never carries it into the next one. The dialogs no
+/// part of the report took are added to it (or to its error), those from
+/// another tab marked so, and a result says when no dialog used the answer.
+pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, AppError> {
+    let outcome = dispatch(session, &cli.command);
+    let unused = session.connection().take_dialog_choice();
+    let left = dialog_report::navigation_dialogs(session, None);
+    let left = dialog_report::mark_other_tabs(session, left);
+    let mut outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error) => return Err(dialog_report::error_with_dialogs(error, &left)),
+    };
+    dialog_report::after_report(&mut outcome, &left);
+    if let Some(unused) = unused {
+        outcome.push_line(&unused_note(&unused));
+        action_report::set(&mut outcome.data, "dialog_unused", serde_json::json!(true));
+    }
+    Ok(outcome)
+}
+
+/// Says that `--dialog` found nothing to answer, and that a dialog opening
+/// after the command is accepted as usual.
+fn unused_note(choice: &tabref_cdp::DialogChoice) -> String {
+    let (given, wanted) = match choice {
+        tabref_cdp::DialogChoice::Dismiss => {
+            ("dismiss".to_owned(), "confirm, prompt or leave-page dialog")
+        }
+        tabref_cdp::DialogChoice::Accept { text: Some(text) } => (
+            format!("accept={}", crate::view::node_line::quote_text(text)),
+            "prompt",
+        ),
+        tabref_cdp::DialogChoice::Accept { text: None } => {
+            ("accept".to_owned(), "confirm, prompt or leave-page dialog")
+        }
+    };
+    format!(
+        "note: --dialog {given} was not used: no {wanted} opened during this command; one that \
+         opens after it is accepted, and the next command reports it"
+    )
 }
 
 /// What the parsed command asks of its session.
@@ -94,6 +142,7 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
         timeout_ms: cli.timeout_ms(),
         launch,
         stdin: None,
+        dialog: cli.dialog.clone(),
     }
 }
 

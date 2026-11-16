@@ -1,4 +1,5 @@
 pub(crate) mod action_settle;
+pub(crate) mod dialog_json;
 pub(crate) mod download_events;
 pub(crate) mod download_origin;
 pub(crate) mod download_record;
