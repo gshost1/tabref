@@ -34,7 +34,7 @@ fn printed_cost(kept: &[ViewLine]) -> usize {
 #[test]
 fn past_the_budget_a_marker_names_the_line_to_go_on_from_and_plain_headings_follow() {
     let mut lines = vec![line(1, "# Title", Some(1), None)];
-    lines.extend((2..=21).map(|n| paragraph(n, 49)));
+    lines.extend((2..=21).map(|n| paragraph(n, 54)));
     lines.push(line(22, "## [e4 Early life -> #early]", Some(2), None));
     lines[21].plain = Some("Early life".to_owned());
     lines.push(paragraph(23, 10));
@@ -42,12 +42,12 @@ fn past_the_budget_a_marker_names_the_line_to_go_on_from_and_plain_headings_foll
     lines.push(paragraph(25, 1));
     let (kept, report) = fit(lines, &options(1_000, true), false);
     let shown = texts(&kept);
-    assert_eq!(shown.len(), 18, "{shown:#?}");
+    assert_eq!(shown.len(), 17, "{shown:#?}");
     assert_eq!(shown[0], "# Title");
     assert_eq!(
-        &shown[15..],
+        &shown[14..],
         &[
-            "… lines 16-25 cut here to fit: tabref snap --from 16",
+            "… lines 15-25 cut here to fit: tabref snap --from 15",
             "## Early life (1 lines, --from 22)",
             "## Death (1 lines, --from 24)",
         ]
@@ -59,10 +59,10 @@ fn past_the_budget_a_marker_names_the_line_to_go_on_from_and_plain_headings_foll
             report.lines_shown,
             report.lines_total
         ),
-        (2, 2, 15, 25)
+        (2, 2, 14, 25)
     );
     assert_eq!(report.sections.first_heading.as_deref(), Some("Early life"));
-    assert_eq!(report.budget_from, Some(16));
+    assert_eq!(report.budget_from, Some(15));
     assert!(printed_cost(&kept) <= 900);
     assert!(!report.is_complete());
 }
@@ -166,4 +166,82 @@ fn chrome_keeps_its_first_lines_when_the_page_has_main_content() {
     assert_eq!(report.chrome_cut, 3);
     let (whole, report) = fit(lines, &options(10_000, true), true);
     assert_eq!((whole.len(), report.is_complete()), (10, true));
+}
+
+#[test]
+fn when_the_top_level_does_not_all_fit_the_more_line_points_at_the_next_top_level_heading() {
+    let mut lines: Vec<ViewLine> = (1..=20).map(|n| paragraph(n, 99)).collect();
+    for release in 0..300 {
+        let number = lines.len() + 1;
+        lines.push(line(number, &format!("## 2.{release}.0"), Some(2), None));
+        lines.push(line(number + 1, "### Fixes", Some(3), None));
+        lines.push(paragraph(number + 2, 30));
+    }
+    let (kept, report) = fit(lines, &options(2_000, true), false);
+    let listed = report.sections.listed;
+    assert!(listed > 0 && listed < 300, "{listed}");
+    let shown = texts(&kept);
+    assert!(shown.iter().filter(|text| text.starts_with("## ")).count() == listed);
+    let next_release = 21 + 3 * listed;
+    assert_eq!(
+        *shown.last().unwrap(),
+        format!(
+            "… {} more headings; tabref find <text> or tabref snap --from {next_release}",
+            600 - listed
+        )
+    );
+}
+
+#[test]
+fn a_view_just_over_the_budget_prints_whole_rather_than_hide_a_small_tail() {
+    let mut lines: Vec<ViewLine> = (1..=99).map(|n| paragraph(n, 99)).collect();
+    lines.push(paragraph(100, 99 + 300));
+    let total = printed_cost(&lines);
+    assert!(total > 10_000 && total <= 10_400, "{total}");
+    let (kept, report) = fit(lines, &options(10_000, true), false);
+    assert_eq!(kept.len(), 100);
+    assert!(report.is_complete());
+    assert_eq!(report.chars_shown, total);
+}
+
+#[test]
+fn a_view_well_over_the_budget_still_cuts() {
+    let lines: Vec<ViewLine> = (1..=112).map(|n| paragraph(n, 99)).collect();
+    let (kept, report) = fit(lines, &options(10_000, true), false);
+    assert!(!report.is_complete());
+    assert!(printed_cost(&kept) <= 10_000 - 400);
+}
+
+#[test]
+fn a_cut_that_hides_form_controls_says_so_and_where_they_start() {
+    let mut lines: Vec<ViewLine> = (1..=110).map(|n| paragraph(n, 99)).collect();
+    lines.push(line(111, "[e40 textbox Card number]", None, None));
+    lines.push(line(
+        112,
+        "Terms \\[see below\\] [e41 link Terms -> /terms]",
+        None,
+        None,
+    ));
+    lines.push(line(
+        113,
+        "[e42 checkbox Agree] [e43 button Pay now]",
+        None,
+        None,
+    ));
+    let total = printed_cost(&lines);
+    assert!(total > 10_000 + 1_000, "{total}");
+    let (kept, report) = fit(lines, &options(10_000, true), false);
+    let from = report.budget_from.unwrap();
+    let marker = texts(&kept)
+        .into_iter()
+        .find(|text| text.starts_with("… lines"))
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        marker,
+        format!(
+            "… lines {from}-113 cut here to fit: tabref snap --from {from}; \
+             3 form controls follow, from line 111: tabref snap --from 111"
+        )
+    );
 }

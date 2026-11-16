@@ -50,10 +50,18 @@ pub(crate) fn cut_outline(
             .find(|line| line.heading.is_some())
             .map(ViewLine::heading_text),
     };
-    let chosen = choose(&entries, room);
+    let (chosen, listing) = choose(&entries, room);
     sections.listed = chosen.len();
     let mut printed: Vec<ViewLine> = chosen.iter().map(|&at| entries[at].line.clone()).collect();
-    let first_left = (0..entries.len()).find(|at| !chosen.contains(at));
+    let mut listed = vec![false; entries.len()];
+    for &at in &chosen {
+        listed[at] = true;
+    }
+    let left_out = |at: &usize| !listed[*at];
+    let first_left = (0..entries.len())
+        .filter(left_out)
+        .find(|&at| listing.is_none_or(|level| entries[at].level <= level))
+        .or_else(|| (0..entries.len()).find(left_out));
     if let Some(left) = first_left {
         printed.push(ViewLine::new(
             0,
@@ -103,8 +111,10 @@ fn entries(lines: &[ViewLine], from: usize) -> Vec<Entry> {
 
 /// The indexes of the entries to list, in page order: those of every level
 /// up to the deepest one whose headings all fit, then as many of the next
-/// level's as the room still holds, in order.
-fn choose(entries: &[Entry], room: usize) -> Vec<usize> {
+/// level's as the room still holds, in order. Also that next level, so the
+/// last line can point at its first heading left out rather than at a
+/// deeper one.
+fn choose(entries: &[Entry], room: usize) -> (Vec<usize>, Option<u8>) {
     let levels: BTreeSet<u8> = entries.iter().map(|entry| entry.level).collect();
     let cost_upto = |deepest: u8| -> usize {
         entries
@@ -150,5 +160,5 @@ fn choose(entries: &[Entry], room: usize) -> Vec<usize> {
         }
         chosen.sort_unstable();
     }
-    chosen
+    (chosen, next)
 }
