@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use super::response_bytes::{ReplyBody, ResponseBytes};
 use super::settle_wait::SettleWait;
 use crate::CdpEvent;
 
@@ -16,7 +17,8 @@ const TRACKED_REQUESTS: &[&str] = &["Document", "XHR", "Fetch"];
 /// analytics), and those from documents with no site of their own such as
 /// `about:blank` ad slots, never hold the settle: they can run for seconds
 /// and say nothing about what the action changed. A navigation's document
-/// request always counts.
+/// request always counts. A request whose reply has a known length counts
+/// as finished once that many bytes arrived, even before Chrome reports it.
 #[derive(Debug)]
 pub(crate) struct SettleTracker {
     main_frame: String,
@@ -25,6 +27,7 @@ pub(crate) struct SettleTracker {
     content_loaded: bool,
     same_document: bool,
     pending: HashSet<String>,
+    bodies: HashMap<String, ResponseBytes>,
     last_activity: Option<Instant>,
 }
 
@@ -37,6 +40,7 @@ impl SettleTracker {
             content_loaded: false,
             same_document: false,
             pending: HashSet::new(),
+            bodies: HashMap::new(),
             last_activity: None,
         }
     }
@@ -103,12 +107,39 @@ impl SettleTracker {
                     self.navigating = false;
                 }
             }
-            "Network.loadingFinished" | "Network.loadingFailed" => {
-                if self.pending.remove(&request_id(params)) {
-                    self.last_activity = Some(now);
+            "Network.responseReceived" => {
+                let id = request_id(params);
+                if self.pending.contains(&id) {
+                    match ReplyBody::of(params) {
+                        ReplyBody::Empty => self.finish(&id, now),
+                        ReplyBody::Counted(bytes) => {
+                            self.bodies.insert(id, bytes);
+                        }
+                        ReplyBody::Unknown => {}
+                    }
                 }
             }
+            "Network.dataReceived" => {
+                let id = request_id(params);
+                if self
+                    .bodies
+                    .get_mut(&id)
+                    .is_some_and(|bytes| bytes.add(params))
+                {
+                    self.finish(&id, now);
+                }
+            }
+            "Network.loadingFinished" | "Network.loadingFailed" => {
+                self.finish(&request_id(params), now);
+            }
             _ => {}
+        }
+    }
+
+    fn finish(&mut self, id: &str, now: Instant) {
+        self.bodies.remove(id);
+        if self.pending.remove(id) {
+            self.last_activity = Some(now);
         }
     }
 
