@@ -2,10 +2,12 @@ use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::element_call::ElementCall;
-use super::option_match::{OptionEntry, OptionPick, listing, pick_option, printed};
+use super::option_match::{OptionEntry, OptionPick, listing, pick_option, printed, shown};
 use super::remote_element::call_on_element;
 use super::select_outcome::SelectOutcome;
 use crate::{CdpConnection, ElementToken, PageSession};
+
+const DETAILED: usize = 30;
 
 const READ_OPTIONS: &str = r"function() {
   if (this.localName !== 'select') return { error: 'not_select' };
@@ -32,7 +34,8 @@ const CHOOSE_OPTION: &str = r"function(index, value) {
 /// as a user's pick would; a native select's popup cannot be driven with
 /// page input, so the value is set directly. A choice that names several
 /// options, a disabled one or none fails with the options as the view
-/// prints them.
+/// prints them: thirty at most, in the message and in the details, which
+/// count them all in `options_total`. All are read for the match.
 pub fn select_option(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -120,6 +123,7 @@ fn refused(options: &[OptionEntry], choice: &str, pick: &OptionPick) -> AppError
     let named = |indices: &[usize]| -> Vec<String> {
         indices
             .iter()
+            .take(DETAILED)
             .map(|index| printed(&options[*index]))
             .collect()
     };
@@ -141,7 +145,7 @@ fn refused(options: &[OptionEntry], choice: &str, pick: &OptionPick) -> AppError
             "disabled_option",
             format!(
                 "option '{}' is disabled; options: {}",
-                printed(&options[*index]),
+                shown(&options[*index]),
                 listing(options, &all)
             ),
             named(&[*index]),
@@ -163,6 +167,7 @@ fn refused(options: &[OptionEntry], choice: &str, pick: &OptionPick) -> AppError
             "reason": reason,
             "matches": matches,
             "options": named(&all),
+            "options_total": options.len(),
         }))
         .with_disposition(DeliverySemantics::not_delivered())
 }

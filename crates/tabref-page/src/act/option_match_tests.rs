@@ -155,13 +155,19 @@ fn a_choice_that_names_nothing_is_missing() {
 #[test]
 fn a_label_and_another_option_s_value_alike_are_ambiguous() {
     let options = vec![option("2", "1"), option("3", "2")];
-    assert_eq!(pick_option(&options, "2"), OptionPick::Ambiguous(vec![0, 1]));
+    assert_eq!(
+        pick_option(&options, "2"),
+        OptionPick::Ambiguous(vec![0, 1])
+    );
     let printed_alike = vec![option("2", "x"), option("Two", "2")];
     assert_eq!(
         pick_option(&printed_alike, "2"),
         OptionPick::Ambiguous(vec![0, 1])
     );
-    assert_eq!(pick_option(&printed_alike, "Two (2)"), OptionPick::Chosen(1));
+    assert_eq!(
+        pick_option(&printed_alike, "Two (2)"),
+        OptionPick::Chosen(1)
+    );
 }
 
 #[test]
@@ -225,5 +231,5 @@ fn a_label_that_ends_in_disabled_is_its_own_label() {
 #[test]
 fn the_listing_escapes_bars_and_control_characters() {
     let options = vec![option("A | B\u{1b}[1m", "ab")];
-    assert_eq!(listing(&options, &[0]), "A \\| B\\u001b[1m (ab)");
+    assert_eq!(listing(&options, &[0]), "A \\| B\\u001b\\[1m (ab)");
 }
