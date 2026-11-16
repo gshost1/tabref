@@ -32,7 +32,14 @@ pub(crate) fn footer_line(
         more.push(route.starting_at(from, full));
     }
     if report.sections.count > 0 {
-        cut.push(format!("{} sections as headings", report.sections.count));
+        if report.sections.listed < report.sections.count {
+            cut.push(format!(
+                "{} sections after it, {} listed",
+                report.sections.count, report.sections.listed
+            ));
+        } else {
+            cut.push(format!("{} sections as headings", report.sections.count));
+        }
         if let Some(heading) = &report.sections.first_heading {
             more.push(format!(
                 "tabref read --section {}",
