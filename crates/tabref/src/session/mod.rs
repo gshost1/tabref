@@ -21,6 +21,7 @@ pub(crate) mod tab_claim;
 pub(crate) mod tab_order;
 pub(crate) mod user_chrome;
 pub(crate) mod user_chrome_record;
+pub(crate) mod visible_tab;
 
 use std::collections::HashMap;
 
@@ -37,7 +38,6 @@ use command_scope::CommandScope;
 use endpoint_choice::connect_browser;
 use reached_browser::ReachedBrowser;
 use session_options::SessionOptions;
-use tab_choice::choose_tab;
 use tab_claim::TabClaim;
 use tab_order::{order_text, stable_order};
 use user_chrome_record::{choice_in_use, opt_in_guard};
@@ -125,9 +125,7 @@ impl Session {
             return Ok(tab.clone());
         }
         let tabs = self.tabs()?;
-        let remembered = self.store.read_state(&self.tab_state_name());
-        let chosen = choose_tab(&tabs, self.scope.tab_hint.as_deref(), remembered.as_deref())?;
-        let tab = match chosen {
+        let tab = match self.chosen_tab(&tabs)? {
             Some(tab) => tab,
             None => {
                 let deadline = self.scope.deadline;
