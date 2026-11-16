@@ -28,7 +28,10 @@ fn doctors() -> Vec<OptionEntry> {
 
 #[test]
 fn the_printed_form_adds_the_value_only_when_the_label_lacks_it() {
-    assert_eq!(printed(&option("Dr. Ada Lind", "d01")), "Dr. Ada Lind (d01)");
+    assert_eq!(
+        printed(&option("Dr. Ada Lind", "d01")),
+        "Dr. Ada Lind (d01)"
+    );
     assert_eq!(printed(&option("Small (S)", "s")), "Small (S)");
     assert_eq!(printed(&option("Choose", "")), "Choose");
     assert_eq!(printed(&option("Red", "red")), "Red");
@@ -38,7 +41,11 @@ fn the_printed_form_adds_the_value_only_when_the_label_lacks_it() {
 fn the_label_the_printed_form_and_the_value_all_pick_the_option() {
     let options = doctors();
     for choice in ["Dr. Bo Quist", "Dr. Bo Quist (d11)", "d11"] {
-        assert_eq!(pick_option(&options, choice), OptionPick::Chosen(3), "{choice}");
+        assert_eq!(
+            pick_option(&options, choice),
+            OptionPick::Chosen(3),
+            "{choice}"
+        );
     }
 }
 
@@ -46,7 +53,11 @@ fn the_label_the_printed_form_and_the_value_all_pick_the_option() {
 fn case_and_spacing_do_not_matter_after_an_exact_miss() {
     let options = doctors();
     for choice in ["  dr. bo   quist ", "DR. BO QUIST (D11)", "D11"] {
-        assert_eq!(pick_option(&options, choice), OptionPick::Chosen(3), "{choice}");
+        assert_eq!(
+            pick_option(&options, choice),
+            OptionPick::Chosen(3),
+            "{choice}"
+        );
     }
 }
 
@@ -116,8 +127,14 @@ fn a_disabled_twin_leaves_the_enabled_one_chosen() {
 #[test]
 fn a_disabled_option_named_exactly_is_reported_as_disabled() {
     let options = doctors();
-    assert_eq!(pick_option(&options, "Dr. Cy Varga (d12)"), OptionPick::Disabled(4));
-    assert_eq!(pick_option(&options, "dr. cy varga"), OptionPick::Disabled(4));
+    assert_eq!(
+        pick_option(&options, "Dr. Cy Varga (d12)"),
+        OptionPick::Disabled(4)
+    );
+    assert_eq!(
+        pick_option(&options, "dr. cy varga"),
+        OptionPick::Disabled(4)
+    );
     assert_eq!(
         pick_option(&options, "Dr. Cy Varga (d12) (disabled)"),
         OptionPick::Disabled(4)
@@ -128,7 +145,10 @@ fn a_disabled_option_named_exactly_is_reported_as_disabled() {
 fn a_choice_that_names_nothing_is_missing() {
     let options = doctors();
     assert_eq!(pick_option(&options, "Dr. Zed"), OptionPick::Missing);
-    assert_eq!(pick_option(&options, "Dr. Bo Quist (d99)"), OptionPick::Missing);
+    assert_eq!(
+        pick_option(&options, "Dr. Bo Quist (d99)"),
+        OptionPick::Missing
+    );
     assert_eq!(pick_option(&[], "x"), OptionPick::Missing);
 }
 

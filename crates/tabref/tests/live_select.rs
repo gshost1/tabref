@@ -34,7 +34,12 @@ for (let n = 1; n <= 60; n++) ward.add(new Option('Ward number ' + n, 'w' + n));
 fn run(tabref: &Harness, args: &[&str], daemon: bool) -> Run {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tabref"));
     command
-        .args(["--cdp", &tabref.browser.port.to_string(), "--timeout", "30000"])
+        .args([
+            "--cdp",
+            &tabref.browser.port.to_string(),
+            "--timeout",
+            "30000",
+        ])
         .args(args)
         .env("TABREF_HOME", &tabref.home)
         .env("TABREF_REFS", "long");
@@ -134,13 +139,21 @@ fn duplicate_labels_in_optgroups_are_told_apart_by_the_printed_value() {
     assert!(!twins.ok);
     let lines = error_lines(&twins);
     assert_eq!(lines.len(), 1, "{}\n{}", twins.stdout, twins.stderr);
-    assert!(lines[0].starts_with("error AMBIGUOUS_TARGET"), "{}", lines[0]);
+    assert!(
+        lines[0].starts_with("error AMBIGUOUS_TARGET"),
+        "{}",
+        lines[0]
+    );
     assert!(
         lines[0].contains("Room 3 (east-3) | Room 3 (west-3)"),
         "{}",
         lines[0]
     );
-    let west = run(&site.tabref, &["select", "Clinician", "Room 3 (west-3)"], true);
+    let west = run(
+        &site.tabref,
+        &["select", "Clinician", "Room 3 (west-3)"],
+        true,
+    );
     assert!(west.ok, "{}\n{}", west.stdout, west.stderr);
     assert_eq!(out(&site), "who=west-3");
 }
@@ -151,7 +164,11 @@ fn a_disabled_option_is_refused_by_name() {
         return;
     }
     let site = site("select-disabled");
-    let refused = run(&site.tabref, &["select", "Clinician", "Dr. Lena Ortiz"], true);
+    let refused = run(
+        &site.tabref,
+        &["select", "Clinician", "Dr. Lena Ortiz"],
+        true,
+    );
     assert!(!refused.ok);
     let lines = error_lines(&refused);
     assert_eq!(lines.len(), 1, "{}\n{}", refused.stdout, refused.stderr);
@@ -172,7 +189,10 @@ fn a_missing_option_fails_once_with_the_whole_list_from_every_path() {
     let cases: [(&[&str], bool); 3] = [
         (&["select", "Ward", "Ward number 99"], true),
         (&["select", "Ward", "Ward number 99"], false),
-        (&["do", "select Ward \"Ward number 99\"\nselect Ward w2"], true),
+        (
+            &["do", "select Ward \"Ward number 99\"\nselect Ward w2"],
+            true,
+        ),
     ];
     for (args, daemon) in cases {
         let failed = run(&site.tabref, args, daemon);
@@ -187,7 +207,10 @@ fn a_missing_option_fails_once_with_the_whole_list_from_every_path() {
         );
         let line = &lines[0];
         assert!(line.starts_with("error ACTION_FAILED"), "{line}");
-        assert!(line.contains("Ward number 1 (w1) | Ward number 2 (w2)"), "{line}");
+        assert!(
+            line.contains("Ward number 1 (w1) | Ward number 2 (w2)"),
+            "{line}"
+        );
         assert!(line.contains("Ward number 30 (w30)"), "{line}");
         assert!(line.contains("… and 30 more"), "{line}");
         let all = format!("{}{}", failed.stdout, failed.stderr);
