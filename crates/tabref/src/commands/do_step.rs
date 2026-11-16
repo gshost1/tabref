@@ -186,8 +186,9 @@ fn scroll_step(
             _ => None,
         };
         let outcome = scroll::scroll(session, direction, container.as_ref(), None, deadline)?;
+        let first = outcome.text.lines().next().unwrap_or_default();
         return Ok(StepDone {
-            text: format!("ok {}", outcome.text),
+            text: format!("ok {first}"),
             data: outcome.data,
         });
     }

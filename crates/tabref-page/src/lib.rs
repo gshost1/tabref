@@ -33,7 +33,6 @@ pub use act::page_changes::PageChanges;
 pub use act::page_mark::PageMark;
 pub use act::read::read_element;
 pub use act::scroll::{box_center, scroll_into_view};
-pub use act::scroll_by::scroll_by;
 pub use act::select_option::select_option;
 pub use act::select_outcome::SelectOutcome;
 pub use act::text_change::TextChange;
@@ -69,8 +68,8 @@ pub use outline::text_search::search_text;
 pub use outline::url_resolve::{origin_of, resolve_href, short_href};
 pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
-pub use page::page_scroll::scroll_page;
 pub use page::page_text::page_text;
+pub use page::scroll_site::ScrollSite;
 pub use settle::action_settle::{follow_late_navigation, settle_action, watch_navigation};
 pub use settle::download_events::{
     cancel_download, deny_downloads, enable_downloads, next_download_event, note_downloads, now_ms,
@@ -81,6 +80,8 @@ pub use settle::download_record::DownloadRecord;
 pub use settle::download_state::DownloadState;
 pub use settle::download_timing::DownloadTiming;
 pub use settle::page_wait::{wait_for_text, wait_for_url};
+pub use settle::scroll_outcome::ScrollOutcome;
+pub use settle::scroll_settle::scroll_and_settle;
 pub use settle::settle_outcome::SettleOutcome;
 pub use settle::watched_action::WatchedAction;
 pub use tree::element_token::ElementToken;
