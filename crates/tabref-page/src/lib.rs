@@ -43,6 +43,7 @@ pub use act::select_option::select_option;
 pub use act::select_outcome::SelectOutcome;
 pub use act::text_change::TextChange;
 pub use act::unactionable::Unactionable;
+pub use act::file_input_choice::FileInputVia;
 pub use act::upload::upload_files;
 pub use act::upload_outcome::UploadOutcome;
 pub use locate::locate_intent::LocateIntent;

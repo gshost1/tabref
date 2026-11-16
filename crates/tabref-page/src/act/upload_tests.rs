@@ -2,6 +2,7 @@ use serde_json::json;
 use tabref_core::ErrorCode;
 
 use super::upload_files;
+use crate::act::file_input_choice::FileInputVia;
 use crate::CdpConnection;
 use crate::act::act_fixture::{deadline, resolved, session, token};
 use tabref_cdp::ScriptedTransport;
@@ -12,6 +13,10 @@ fn fixture_file(name: &str) -> std::path::PathBuf {
     path
 }
 
+fn listed(candidates: serde_json::Value) -> serde_json::Value {
+    json!({ "result": { "type": "object", "value": { "top": 3, "candidates": candidates } } })
+}
+
 #[test]
 fn files_are_set_on_the_input_and_read_back() {
     let file = fixture_file("report.txt");
@@ -19,13 +24,18 @@ fn files_are_set_on_the_input_and_read_back() {
     let transport = resolved(ScriptedTransport::new())
         .expect(
             "Runtime.callFunctionOn",
-            json!({ "result": { "type": "object", "value": { "multiple": false } } }),
+            listed(json!([{ "index": 0, "name": "input#file", "self": true, "depth": 0 }])),
+        )
+        .expect(
+            "Runtime.callFunctionOn",
+            json!({ "result": { "type": "object", "objectId": "I" } }),
         )
         .expect("DOM.setFileInputFiles", json!({}))
         .expect(
             "Runtime.callFunctionOn",
             json!({ "result": { "type": "object", "value": [name] } }),
         )
+        .expect("Runtime.releaseObject", json!({}))
         .expect("Runtime.releaseObject", json!({}));
     let sent = transport.sent_log();
     let mut connection = CdpConnection::new(transport.boxed());
@@ -41,12 +51,14 @@ fn files_are_set_on_the_input_and_read_back() {
     std::fs::remove_file(&file).unwrap();
 
     assert!(outcome.verified);
+    assert_eq!(outcome.input, "input#file");
+    assert_eq!(outcome.via, FileInputVia::Itself);
     let sent = sent.lock().unwrap();
     let set = sent
         .iter()
         .find(|request| request["method"] == "DOM.setFileInputFiles")
         .unwrap();
-    assert_eq!(set["params"]["backendNodeId"], 5);
+    assert_eq!(set["params"]["objectId"], "I");
     assert!(
         set["params"]["files"][0]
             .as_str()
@@ -55,27 +67,73 @@ fn files_are_set_on_the_input_and_read_back() {
     );
 }
 
-#[test]
-fn a_node_that_is_not_a_file_input_is_refused_before_anything_is_set() {
-    let file = fixture_file("x.txt");
+fn refused(candidates: serde_json::Value, count: usize) -> tabref_core::AppError {
+    let files: Vec<_> = (0..count)
+        .map(|at| fixture_file(&format!("r{at}.txt")))
+        .collect();
     let transport = resolved(ScriptedTransport::new())
-        .expect(
-            "Runtime.callFunctionOn",
-            json!({ "result": { "type": "object", "value": { "error": "not_file_input" } } }),
-        )
+        .expect("Runtime.callFunctionOn", listed(candidates))
         .expect("Runtime.releaseObject", json!({}));
+    let sent = transport.sent_log();
     let mut connection = CdpConnection::new(transport.boxed());
+    let error = upload_files(&mut connection, &session(), &token(5), &files, deadline())
+        .unwrap_err();
+    for file in &files {
+        std::fs::remove_file(file).unwrap();
+    }
+    assert!(
+        !sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request["method"] == "DOM.setFileInputFiles")
+    );
+    error
+}
 
-    let error = upload_files(
-        &mut connection,
-        &session(),
-        &token(5),
-        std::slice::from_ref(&file),
-        deadline(),
-    )
-    .unwrap_err();
-    std::fs::remove_file(&file).unwrap();
+#[test]
+fn a_page_without_a_file_input_is_refused_before_anything_is_set() {
+    let error = refused(json!([]), 1);
+    assert_eq!(error.code, ErrorCode::ActionNotSupported);
+    assert_eq!(error.kind(), Some("no_file_input"));
+    assert!(error.message.contains("no <input type=file> on the page"));
+    assert!(!error.suggestion.unwrap_or_default().contains("snap"));
+}
 
+#[test]
+fn two_equally_near_inputs_are_refused_and_named() {
+    let error = refused(
+        json!([
+            { "index": 0, "name": "input.dz-hidden-input", "depth": 3 },
+            { "index": 1, "name": "input#avatar", "depth": 3 },
+        ]),
+        1,
+    );
+    assert_eq!(error.code, ErrorCode::AmbiguousTarget);
+    assert_eq!(error.kind(), Some("ambiguous_file_input"));
+    assert!(
+        error
+            .message
+            .contains("input.dz-hidden-input, input#avatar")
+    );
+}
+
+#[test]
+fn two_files_for_a_single_file_input_are_refused() {
+    let error = refused(
+        json!([{ "index": 0, "name": "input#avatar", "depth": 1, "multiple": false }]),
+        2,
+    );
+    assert_eq!(error.code, ErrorCode::InvalidArgs);
+    assert_eq!(error.message, "input#avatar takes one file, not 2");
+}
+
+#[test]
+fn a_disabled_input_is_refused() {
+    let error = refused(
+        json!([{ "index": 0, "name": "input#off", "self": true, "depth": 0, "disabled": true }]),
+        1,
+    );
     assert_eq!(error.code, ErrorCode::ActionNotSupported);
     assert_eq!(error.kind(), Some("cdp_not_file_input"));
 }

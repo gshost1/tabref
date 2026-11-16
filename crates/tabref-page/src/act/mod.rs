@@ -16,6 +16,8 @@ pub(crate) mod element_errors;
 pub(crate) mod element_reading;
 pub(crate) mod fill;
 pub(crate) mod fill_outcome;
+pub(crate) mod file_input_choice;
+pub(crate) mod file_input_search;
 pub(crate) mod focus;
 pub(crate) mod focus_target;
 pub(crate) mod focus_watch;
