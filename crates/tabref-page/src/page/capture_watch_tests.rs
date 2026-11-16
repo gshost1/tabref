@@ -45,4 +45,8 @@ fn the_watch_is_armed_once_the_page_is_idle_or_the_wait_ran_out() {
     assert!(filled.starts_with("await new Promise"), "{filled}");
     assert!(filled.contains("requestIdleCallback"), "{filled}");
     assert!(filled.contains("{ timeout: 50 }"), "{filled}");
+    assert!(
+        filled.contains("if (document.visibilityState === 'hidden') arm();"),
+        "{filled}"
+    );
 }

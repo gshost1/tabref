@@ -2,7 +2,8 @@
 //! capture, one evaluation waits for the page's main thread to go idle (at
 //! most [`IDLE_WAIT_MS`]), so work the page had already queued, such as a
 //! fetch callback that fills a box, runs before the watch starts rather
-//! than just after it, and then starts `MutationObserver`s on the document, every
+//! than just after it (a hidden tab, whose idle callbacks and timers a
+//! browser may hold back, arms at once), and then starts `MutationObserver`s on the document, every
 //! open shadow root and every same-origin frame document, and records the
 //! roots it found and a fingerprint of the state no mutation shows: the
 //! address, scroll position, viewport and document size, the focused
@@ -84,7 +85,7 @@ const SCAN: &str = r"const scan = () => {
 /// before the capture starts, and only later changes are what it watches.
 pub const IDLE_WAIT_MS: u64 = 50;
 
-const ARM: &str = r"await new Promise(resolve => (window.requestIdleCallback || (run => setTimeout(run, 0)))(() => resolve((() => {
+const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((() => {
   KEY_AND_SCAN
   const old = window[key];
   if (old) old.observers.forEach(observer => observer.disconnect());
@@ -103,7 +104,10 @@ const ARM: &str = r"await new Promise(resolve => (window.requestIdleCallback || 
   }
   window[key] = watch;
   return { blind: now.blind };
-})()), { timeout: IDLE_MS }))";
+})());
+  if (document.visibilityState === 'hidden') arm();
+  else (window.requestIdleCallback || (run => setTimeout(run, 0)))(arm, { timeout: IDLE_MS });
+})";
 
 const CHECK: &str = r"(() => {
   KEY_AND_SCAN
