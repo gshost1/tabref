@@ -13,17 +13,33 @@ use tabref_cdp::is_protocol_error;
 
 const FOCUS_CONTROL: &str = r"function() {
   if (this.localName === 'label' && this.control) return this.control;
-  if (this.shadowRoot && this.shadowRoot.delegatesFocus) {
-    return this.shadowRoot.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], area[href], [tabindex], [contenteditable]');
-  }
-  return null;
+  const controls = 'input, select, textarea, button, a[href], area[href], [tabindex], [contenteditable]';
+  const delegates = node => !!(node.shadowRoot && node.shadowRoot.delegatesFocus);
+  const takes = node => {
+    if (!node.matches(controls) || node.matches(':disabled')) return false;
+    if (node.localName === 'input' && node.type === 'hidden') return false;
+    if (node.getAttribute('contenteditable') === 'false' && !node.hasAttribute('tabindex')) return false;
+    return !node.checkVisibility || node.checkVisibility();
+  };
+  const delegate = host => {
+    for (const node of host.shadowRoot.querySelectorAll('*')) {
+      if (delegates(node)) {
+        const inner = delegate(node);
+        if (inner) return inner;
+      } else if (takes(node)) {
+        return node;
+      }
+    }
+    return null;
+  };
+  return delegates(this) ? delegate(this) : null;
 }";
 
 const FOCUSABLE: &str = r"function() {
   const index = this.getAttribute('tabindex');
   if (index !== null && !Number.isNaN(parseInt(index, 10))) return true;
   if (this.isContentEditable) return true;
-  if (this.shadowRoot && this.shadowRoot.delegatesFocus) return true;
+  if (this.shadowRoot && this.shadowRoot.delegatesFocus) return false;
   const html = this.namespaceURI === 'http://www.w3.org/1999/xhtml';
   if (html && (this.localName === 'a' || this.localName === 'area') && !this.hasAttribute('href')) return false;
   return this.tabIndex >= 0;
@@ -111,8 +127,10 @@ pub fn focus(
 
 /// The element the `focus` command focuses for `token`: the node itself,
 /// the control a `<label>` names, or, for a shadow host that delegates
-/// focus, the first control in its shadow tree, which `DOM.focus` reaches
-/// where it refuses the host. A node `DOM.focus` would refuse (no
+/// focus, the first control in its shadow tree that can take it (shown,
+/// enabled, not a hidden input or `contenteditable="false"`, looking into
+/// nested hosts that delegate too), which `DOM.focus` reaches where it
+/// refuses the host. A host with no such control is refused. A node `DOM.focus` would refuse (no
 /// tab index and not editable, or a link or image-map area with no address
 /// and no `tabindex`) is refused here, before anything in the page changes.
 pub fn focus_target(

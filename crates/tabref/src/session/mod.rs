@@ -141,9 +141,11 @@ impl Session {
         Ok(tab)
     }
 
-    /// Makes `target_id` the tab this and later commands work in.
+    /// Makes `target_id` the tab this and later commands work in. A tab
+    /// tabref worked in before stops being told it holds the window focus.
     pub(crate) fn use_tab(&mut self, target_id: &str) -> Result<(), AppError> {
         self.scope.claim(target_id)?;
+        self.leave_other_tabs(target_id);
         if remembered_is(&self.store, &self.tab_state_name(), target_id) {
             self.scope.tab = Some(target_id.to_owned());
             return Ok(());
@@ -219,16 +221,37 @@ impl Session {
         self.browser.launched
     }
 
+    /// Stops telling each tab but `target_id` that it holds the window
+    /// focus, so a tab tabref no longer works in goes back to the
+    /// background: hidden, with throttled timers. Best effort: a cancelled
+    /// command cannot send it, and the tab is told again only once it is
+    /// current.
+    fn leave_other_tabs(&mut self, target_id: &str) {
+        let deadline = self.scope.deadline;
+        for (id, tab) in &mut self.attached {
+            if tab.focused && id != target_id {
+                let _ = self.connection.call(
+                    OWN_TAB_FOCUS,
+                    json!({ "enabled": false }),
+                    Some(&tab.session.session_id),
+                    deadline,
+                );
+                tab.focused = false;
+            }
+        }
+    }
+
     fn tab_state_name(&self) -> String {
         format!("tab-{}", self.browser.endpoint.port())
     }
 }
 
 /// The attach hook for the tab tabref works in, in a browser tabref
-/// launched: the tab reads as holding the window focus for as long as the
-/// session lasts, and is never told otherwise, so its focus handlers run
-/// and every action sees the same focus state. Other tabs keep their own
-/// state, and a browser tabref did not launch is never told this.
+/// launched: the tab reads as holding the window focus while it is the
+/// current tab, so its focus handlers run and every action sees the same
+/// focus state, and is told otherwise when tabref moves to another tab
+/// (`leave_other_tabs`). Other tabs keep their own state, and a browser
+/// tabref did not launch is never told this.
 const OWN_TAB_FOCUS: &str = "Emulation.setFocusEmulationEnabled";
 
 /// The method a protocol error names: attaching sends several, and the
