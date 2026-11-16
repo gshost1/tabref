@@ -30,6 +30,7 @@ pub(crate) mod new_tab;
 pub(crate) mod open;
 
 pub(crate) mod open_request;
+pub(crate) mod open_settle;
 pub(crate) mod page_url;
 pub(crate) mod page_view;
 pub(crate) mod press;
