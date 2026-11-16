@@ -1,6 +1,7 @@
 pub(crate) mod action_effects;
 pub(crate) mod action_watch;
 pub(crate) mod browser_choice;
+pub(crate) mod capture_cache;
 pub(crate) mod captured_snapshot;
 pub(crate) mod command_input;
 pub(crate) mod command_scope;
@@ -21,6 +22,7 @@ pub(crate) mod user_chrome;
 pub(crate) mod user_chrome_record;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde_json::json;
 use tabref_cdp::{
@@ -30,6 +32,7 @@ use tabref_cdp::{
 use tabref_core::{AppError, Deadline, RefStore};
 
 use crate::commands::app_guard::{app_has_no_page, app_runtime};
+use capture_cache::CaptureCache;
 use command_scope::CommandScope;
 use endpoint_choice::connect_browser;
 use session_options::SessionOptions;
@@ -43,7 +46,8 @@ use user_chrome_record::{choice_in_use, opt_in_guard};
 /// settled on. Commands never connect on their own. In-process, a `Session`
 /// lives for one command; the daemon keeps one alive across commands and
 /// starts a new [`CommandScope`] for each, so the connection, the attached
-/// sessions and the domains they enabled are paid for once.
+/// sessions and the domains they enabled are paid for once. A daemon command
+/// that only reads may also keep and reuse captures (see [`CaptureCache`]).
 pub(crate) struct Session {
     connection: CdpConnection,
     endpoint: BrowserEndpoint,
@@ -52,6 +56,7 @@ pub(crate) struct Session {
     scope: CommandScope,
     warning: Option<String>,
     choice: Option<String>,
+    captures: Option<Arc<CaptureCache>>,
 }
 
 impl Session {
@@ -85,6 +90,7 @@ impl Session {
             scope,
             warning: browser.warning,
             choice,
+            captures: None,
         })
     }
 

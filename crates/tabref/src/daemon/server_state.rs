@@ -8,6 +8,7 @@ use super::activity::Activity;
 use super::tab_locks::TabLocks;
 use crate::commands::{download_tend, downloads};
 use crate::session::Session;
+use crate::session::capture_cache::CaptureCache;
 use crate::session::session_options::SessionOptions;
 use crate::session::tab_claim::TabClaim;
 
@@ -27,6 +28,7 @@ pub(crate) struct ServerState {
     locks: Arc<TabLocks>,
     next_owner: AtomicU64,
     running: Mutex<Option<Vec<Weak<AtomicBool>>>>,
+    pub(crate) captures: Arc<CaptureCache>,
 }
 
 impl ServerState {
@@ -39,6 +41,7 @@ impl ServerState {
             locks: Arc::new(TabLocks::default()),
             next_owner: AtomicU64::new(1),
             running: Mutex::new(Some(Vec::new())),
+            captures: Arc::new(CaptureCache::default()),
         }
     }
 
@@ -74,6 +77,7 @@ impl ServerState {
         if let Ok(mut pool) = self.pool.lock() {
             pool.clear();
         }
+        self.captures.clear();
     }
 
     fn stopping(&self) -> bool {
