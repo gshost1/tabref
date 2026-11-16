@@ -72,7 +72,10 @@ fn room_from(value: &Value) -> Option<Room> {
     if value.get("loads").and_then(Value::as_bool) != Some(true) {
         return None;
     }
-    let left = value.get("page_left").and_then(Value::as_f64).unwrap_or(0.0);
+    let left = value
+        .get("page_left")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
     let view = value.get("view").and_then(Value::as_f64).unwrap_or(0.0);
     let page = left > 2.0;
     let list = value.get("list").and_then(Value::as_str).map(|item| {
