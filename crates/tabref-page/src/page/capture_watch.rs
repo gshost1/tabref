@@ -1,5 +1,8 @@
 //! Tells whether a page is still the page a capture read. Before the
-//! capture, one evaluation starts `MutationObserver`s on the document, every
+//! capture, one evaluation waits for the page's main thread to go idle (at
+//! most [`IDLE_WAIT_MS`]), so work the page had already queued, such as a
+//! fetch callback that fills a box, runs before the watch starts rather
+//! than just after it, and then starts `MutationObserver`s on the document, every
 //! open shadow root and every same-origin frame document, and records the
 //! roots it found and a fingerprint of the state no mutation shows: the
 //! address, scroll position, viewport and document size, the focused
@@ -76,7 +79,12 @@ const SCAN: &str = r"const scan = () => {
     return { roots, blind, active, print: place + '\u0005' + state };
   };";
 
-const ARM: &str = r"(() => {
+/// How long the arm script waits for an idle main thread before it arms
+/// anyway. Waiting never makes a capture staler: the watch is still armed
+/// before the capture starts, and only later changes are what it watches.
+pub const IDLE_WAIT_MS: u64 = 50;
+
+const ARM: &str = r"await new Promise(resolve => (window.requestIdleCallback || (run => setTimeout(run, 0)))(() => resolve((() => {
   KEY_AND_SCAN
   const old = window[key];
   if (old) old.observers.forEach(observer => observer.disconnect());
@@ -95,7 +103,7 @@ const ARM: &str = r"(() => {
   }
   window[key] = watch;
   return { blind: now.blind };
-})()";
+})()), { timeout: IDLE_MS }))";
 
 const CHECK: &str = r"(() => {
   KEY_AND_SCAN
@@ -178,6 +186,7 @@ fn script(template: &str, token: &str) -> String {
     template
         .replace("KEY_AND_SCAN", &head)
         .replace("TOKEN", &json!(token).to_string())
+        .replace("IDLE_MS", &IDLE_WAIT_MS.to_string())
 }
 
 #[cfg(test)]
