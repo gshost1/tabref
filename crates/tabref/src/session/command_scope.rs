@@ -28,6 +28,16 @@ impl CommandScope {
         })
     }
 
+    /// Whether this command holds `tab`, or can claim it without waiting.
+    /// Outside the daemon every tab is this command's.
+    pub(crate) fn try_claim(&self, tab: &str) -> bool {
+        match (&self.claim, Deadline::after(0)) {
+            (Some(claim), Ok(now)) => claim.claim(tab, now).is_ok(),
+            (Some(_), Err(_)) => false,
+            (None, _) => true,
+        }
+    }
+
     /// Claims `tab` for this command when it runs in the daemon.
     pub(crate) fn claim(&self, tab: &str) -> Result<(), AppError> {
         match &self.claim {

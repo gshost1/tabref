@@ -177,4 +177,22 @@ fn a_host_that_delegates_focus_finds_a_control_it_can_focus_or_is_refused() {
         empty["error"]["platform_detail"], "not focusable",
         "refused by tabref before DOM.focus: {empty}"
     );
+    tabref.ok(&["focus", "Bad tab host"]);
+    assert_eq!(
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
+        "good"
+    );
+    tabref.ok(&["focus", "Veiled host"]);
+    assert_eq!(
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
+        "plain"
+    );
+    tabref.ok(&["focus", "Closed host"]);
+    assert_eq!(active(&tabref), "closed");
 }

@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde_json::json;
 use tabref_core::{AppError, Deadline, ErrorCode};
 use tabref_page::{
-    ActionNeed, ElementToken, LocateIntent, focus, focus_kept, focus_target, page_focused,
+    ActionNeed, FocusTarget, LocateIntent, focus, focus_kept, focus_target, page_focused,
     release_focus_watch, wait_actionable, watch_focus,
 };
 
@@ -58,17 +58,18 @@ pub(crate) fn act(
     deadline: Deadline,
 ) -> Result<Acted, AppError> {
     target.ensure_ready(session, ActionNeed::Press, deadline)?;
-    let token = focus_target(
+    let chosen = focus_target(
         session.connection(),
         &target.session,
         &target.token,
         deadline,
     )?;
-    if token != target.token
+    let token = &chosen.token;
+    if *token != target.token
         && let Some(blocked) = wait_actionable(
             session.connection(),
             &target.session,
-            &token,
+            token,
             ActionNeed::Press,
             deadline,
         )?
@@ -77,7 +78,7 @@ pub(crate) fn act(
     }
     let background = !session.launched_by_tabref()
         && !page_focused(session.connection(), &target.session, deadline)?;
-    let (effects, held) = focus_and_settle(session, &target, &token, deadline)?;
+    let (effects, held) = focus_and_settle(session, &target, &chosen, deadline)?;
     let mut summary = target.label.clone();
     if !held {
         summary.push_str(MOVED_AWAY);
@@ -99,17 +100,18 @@ pub(crate) fn act(
     })
 }
 
-/// Focuses `token`, starts the page's watch on the focus at once, and
+/// Focuses `chosen`, starts the page's watch on the focus at once, and
 /// reads the watch once the action settled, so the 300 ms window and the
 /// settle run together. A settle that fails releases the watch first.
 fn focus_and_settle(
     session: &mut Session,
     target: &ActTarget,
-    token: &ElementToken,
+    chosen: &FocusTarget,
     deadline: Deadline,
 ) -> Result<(ActionEffects, bool), AppError> {
+    let token = &chosen.token;
     let watched = session.watch_action(&target.tab_id, deadline)?;
-    focus(session.connection(), &target.session, token, deadline)?;
+    focus(session.connection(), &target.session, chosen, deadline)?;
     let watch = watch_focus(
         session.connection(),
         &target.session,

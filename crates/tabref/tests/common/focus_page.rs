@@ -24,6 +24,9 @@ pub const PAGE: &str = r#"<!doctype html><title>Focus</title>
 <x-outer id=outer role=button aria-label="Nested"></x-outer>
 <x-skip id=skip role=button aria-label="Skips hidden"></x-skip>
 <x-empty id=empty role=button aria-label="Empty host"></x-empty>
+<x-badtab id=badtab role=button aria-label="Bad tab host"></x-badtab>
+<x-veiled id=veiled role=button aria-label="Veiled host"></x-veiled>
+<x-closed id=closed role=button aria-label="Closed host"></x-closed>
 <p id=out>Nothing</p>
 <p id=seen>Unseen</p>
 <script>
@@ -34,6 +37,11 @@ customElements.define('x-field', host('<input id=inner>'));
 customElements.define('x-outer', host('<x-field id=middle></x-field>'));
 customElements.define('x-skip', host('<input type=hidden id=secret><input id=unseen style="display:none"><span id=frozen contenteditable=false>Frozen</span><input id=real>'));
 customElements.define('x-empty', host('<span>Nothing to focus</span>'));
+customElements.define('x-badtab', host('<span id=junk tabindex=abc>Junk</span><input id=good>'));
+customElements.define('x-veiled', host('<input id=ghost style="visibility:hidden"><input id=plain>'));
+customElements.define('x-closed', class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'closed', delegatesFocus: true }).innerHTML = '<input id=hidden-inside>'; }
+});
 window.ticks = { hidden: 0, wentHidden: false };
 setInterval(() => { if (document.visibilityState === 'hidden') window.ticks.hidden += 1; }, 10);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') window.ticks.wentHidden = true; });

@@ -16,6 +16,7 @@ pub(crate) mod element_reading;
 pub(crate) mod fill;
 pub(crate) mod fill_outcome;
 pub(crate) mod focus;
+pub(crate) mod focus_target;
 pub(crate) mod focus_watch;
 pub(crate) mod hit_point;
 pub(crate) mod hit_test;
