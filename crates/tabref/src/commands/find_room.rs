@@ -1,9 +1,10 @@
 //! What a `find` with no match adds when the page could show more by
-//! scrolling: the document, or a scroll container on it, is taller than
-//! the space it shows and not scrolled to its end. tabref cannot know
-//! whether scrolling loads anything, so the note says what to run if it
-//! does, and nothing at all when nothing scrolls further. A list's note
-//! names its last link or control, which `scroll down T` can target.
+//! scrolling. It claims that only on evidence: the page fetched data
+//! after it loaded (a `fetch` or XHR resource entry) and the document, or
+//! a scroll box on it, has not reached its end. A static page, or one
+//! with nothing left to scroll, gets no note, since `find` already read
+//! all of it. A box is named by its last control whose name occurs once
+//! in it, which `scroll down T` can target.
 
 use serde_json::Value;
 use tabref_page::evaluate;
@@ -14,11 +15,14 @@ use crate::view::node_line::quote_text;
 const ITEM_CHARS: usize = 40;
 
 const ROOM_SCRIPT: &str = r#"(() => {
+  const loads = performance.getEntriesByType('resource')
+    .some((entry) => entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest');
+  if (!loads) return { loads: false };
   const root = document.scrollingElement || document.documentElement;
   const style = (node) => node ? getComputedStyle(node).overflowY : '';
   const html = style(document.documentElement), body = style(document.body);
   const locked = html === 'hidden' || html === 'clip' || (html === 'visible' && (body === 'hidden' || body === 'clip'));
-  if (!locked && root.scrollHeight - root.clientHeight - root.scrollTop > 2) return { page: true };
+  const left = locked ? 0 : root.scrollHeight - root.clientHeight - root.scrollTop;
   let best = null, area = 0, seen = 0;
   for (const node of document.body ? document.body.getElementsByTagName('*') : []) {
     if (++seen > 5000) break;
@@ -28,24 +32,35 @@ const ROOM_SCRIPT: &str = r#"(() => {
     const size = node.clientHeight * node.clientWidth;
     if (size > area) { best = node; area = size; }
   }
-  if (!best) return null;
-  const controls = best.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[tabindex]');
-  for (let index = controls.length - 1; index >= 0 && index >= controls.length - 50; index--) {
-    const text = (controls[index].innerText || controls[index].getAttribute('aria-label') || '').trim();
-    if (text && !text.includes('\n')) return { list: text };
+  const facts = { loads: true, page_left: Math.max(0, left), view: root.clientHeight };
+  if (!best) return facts;
+  const nameOf = (node) => {
+    const name = ((node.getAttribute('aria-label') || '').trim() || (node.innerText || '').trim());
+    return name.includes('\n') ? '' : name;
+  };
+  const controls = [...best.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[tabindex]')].slice(-500);
+  const names = controls.map(nameOf);
+  const counts = new Map();
+  for (const name of names) counts.set(name.toLowerCase(), (counts.get(name.toLowerCase()) || 0) + 1);
+  facts.list = '';
+  for (let index = names.length - 1; index >= 0 && index >= names.length - 50; index--) {
+    if (names[index] && counts.get(names[index].toLowerCase()) === 1) { facts.list = names[index]; break; }
   }
-  return { list: '' };
+  return facts;
 })()"#;
 
-/// Where the page could scroll to show more.
+/// Where the page could scroll to load more: the window, a scroll box
+/// (named by a control in it when one is safe to name), or both when the
+/// window still has more than a screen to go.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Room {
     Page,
     List(Option<String>),
+    Both(Option<String>),
 }
 
-/// Whether the page or a list on it scrolls further. A script that fails
-/// or a page it cannot read claims nothing.
+/// Whether the page loads data and the page or a list on it scrolls
+/// further. A script that fails or a page it cannot read claims nothing.
 pub(crate) fn scroll_room(session: &mut Session) -> Option<Room> {
     let page = session.page().ok()?;
     let deadline = session.deadline();
@@ -54,30 +69,41 @@ pub(crate) fn scroll_room(session: &mut Session) -> Option<Room> {
 }
 
 fn room_from(value: &Value) -> Option<Room> {
-    if value.get("page").and_then(Value::as_bool) == Some(true) {
-        return Some(Room::Page);
+    if value.get("loads").and_then(Value::as_bool) != Some(true) {
+        return None;
     }
-    let item = value.get("list")?.as_str()?.trim();
-    let item = (!item.is_empty() && item.chars().count() <= ITEM_CHARS).then(|| item.to_owned());
-    Some(Room::List(item))
+    let left = value.get("page_left").and_then(Value::as_f64).unwrap_or(0.0);
+    let view = value.get("view").and_then(Value::as_f64).unwrap_or(0.0);
+    let page = left > 2.0;
+    let list = value.get("list").and_then(Value::as_str).map(|item| {
+        let item = item.trim();
+        (!item.is_empty() && item.chars().count() <= ITEM_CHARS).then(|| item.to_owned())
+    });
+    match (page, list) {
+        (false, None) => None,
+        (true, None) => Some(Room::Page),
+        (true, Some(item)) if left > view => Some(Room::Both(item)),
+        (_, Some(item)) => Some(Room::List(item)),
+    }
 }
 
 /// The note after `0 matches`: what scrolls further and the steps that
-/// would load more there.
+/// load more there.
 pub(crate) fn room_note(room: &Room) -> String {
+    let list_step = |item: &Option<String>| match item {
+        Some(item) => format!("`scroll down {}`", quote_text(item)),
+        None => "`scroll down \"<text in that list>\"`".to_owned(),
+    };
     let (what, step) = match room {
-        Room::Page => ("the page".to_owned(), "scroll down".to_owned()),
-        Room::List(Some(item)) => (
-            "a list on the page".to_owned(),
-            format!("scroll down {}", quote_text(item)),
-        ),
-        Room::List(None) => (
-            "a list on the page".to_owned(),
-            "scroll down T (T: anything in that list)".to_owned(),
+        Room::Page => ("the page", "`scroll down`".to_owned()),
+        Room::List(item) => ("a list on the page", list_step(item)),
+        Room::Both(item) => (
+            "the page and a list on it",
+            format!("`scroll down` (page) or {} (list)", list_step(item)),
         ),
     };
     format!(
-        "{what} scrolls further: if it loads more as it scrolls, `{step}` loads it; \
+        "{what} scrolls further: if it loads more as it scrolls, {step} loads it; \
          repeat it in one tabref do, then find again"
     )
 }

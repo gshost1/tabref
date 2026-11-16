@@ -14,13 +14,14 @@ use crate::view::view_options::ViewOptions;
 const MAX_MATCHES: usize = 20;
 
 /// A find's result: how many matched, its first line, the line per match
-/// as far as the cap goes (with a last line for the rest), and, with no
-/// match on a page that scrolls further, the note that says how to load
-/// more.
+/// as far as the cap goes, the line `tabref find` prints for the rest,
+/// and, with no match on a page that loads more as it scrolls, the note
+/// that says how to load it.
 pub(crate) struct Found {
     pub count: usize,
     pub head: String,
     pub lines: Vec<String>,
+    pub more: Option<String>,
     pub note: Option<String>,
     pub data: Value,
 }
@@ -34,7 +35,7 @@ pub(crate) fn run(
     text: &str,
     role: Option<&str>,
 ) -> Result<Outcome, AppError> {
-    let found = search(session, text, role, MAX_MATCHES)?;
+    let found = search(session, text, role, MAX_MATCHES, false)?;
     let mut head = found.head;
     if let Some(note) = &found.note {
         head.push_str("; ");
@@ -42,16 +43,19 @@ pub(crate) fn run(
     }
     let mut lines = vec![head];
     lines.extend(found.lines);
+    lines.extend(found.more);
     Ok(Outcome::new(lines.join("\n"), found.data))
 }
 
 /// [`run`]'s search, keeping `keep` match lines, for `tabref find` and
-/// the `find` step of `do`.
+/// the `find` step of `do`. With `tree_matches`, the JSON `matches` are
+/// the snapshot's matching lines, as `do --json` has always printed them.
 pub(crate) fn search(
     session: &mut Session,
     text: &str,
     role: Option<&str>,
     keep: usize,
+    tree_matches: bool,
 ) -> Result<Found, AppError> {
     let captured = session.capture()?;
     let url = captured.info.url.clone();
@@ -66,6 +70,9 @@ pub(crate) fn search(
             let options = ViewOptions::snap(&url, false, RowWindow::default());
             let mut lines = find_lines(text, &matches, total, &options);
             let head = lines.remove(0);
+            let more = (total > matches.len()).then(|| lines.pop()).flatten();
+            let mut listed = lines.clone();
+            listed.extend(more.clone());
             Found {
                 count: total,
                 head,
@@ -73,13 +80,17 @@ pub(crate) fn search(
                     "snapshot_id": captured.snapshot_id,
                     "url": url,
                     "count": total,
-                    "matches": lines,
+                    "matches": listed,
                 }),
                 lines,
+                more,
                 note: None,
             }
         }
     };
+    if tree_matches {
+        found.data["matches"] = json!(find_matches(&captured.tree, text, role));
+    }
     if found.count == 0 {
         found.note = scroll_room(session).map(|room| room_note(&room));
         if let Some(note) = &found.note {
@@ -98,13 +109,12 @@ fn snapshot_find(
 ) -> Found {
     let matches = find_matches(tree, text, role);
     let shown: Vec<String> = matches.iter().take(keep).cloned().collect();
-    let mut lines = shown.clone();
-    if matches.len() > keep {
-        lines.push(format!(
+    let more = (matches.len() > keep).then(|| {
+        format!(
             "… {} more; search a longer text or pass --role",
             matches.len() - keep
-        ));
-    }
+        )
+    });
     let head = if matches.is_empty() {
         format!("0 matches for \"{text}\" on {url}")
     } else {
@@ -113,8 +123,9 @@ fn snapshot_find(
     Found {
         count: matches.len(),
         head,
-        lines,
-        note: None,
         data: json!({ "url": url, "count": matches.len(), "matches": shown }),
+        lines: shown,
+        more,
+        note: None,
     }
 }
