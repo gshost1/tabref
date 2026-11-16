@@ -39,7 +39,12 @@ pub(crate) fn run_step(
             click::act(session, found, count, deadline)?
         }
         "focus" => {
-            let found = target(session, args, LocateIntent::Click, deadline)?;
+            let found = match target(session, args, LocateIntent::Fill, deadline) {
+                Err(error) if error.code == tabref_core::ErrorCode::ElementNotFound => {
+                    target(session, args, LocateIntent::Click, deadline)?
+                }
+                found => found?,
+            };
             focus::act(session, found, deadline)?
         }
         "hover" => {

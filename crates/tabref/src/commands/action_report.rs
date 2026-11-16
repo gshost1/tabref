@@ -150,10 +150,14 @@ fn effect_block(
     Ok((lines, data))
 }
 
-/// Whether a click, key press or hover showed no effect at all: no
-/// navigation, tab, dialog, DOM mutation or text change. Changes inside a
-/// closed shadow root or drawn on a canvas look like this too.
+/// Whether a click, double-click, key press, hover or focus showed no
+/// effect at all: no navigation, tab, dialog, download, DOM mutation or text
+/// change. Changes inside a closed shadow root or drawn on a canvas look
+/// like this too. A focus the page moved away already says so.
 fn nothing_seen(acted: &Acted) -> bool {
+    if acted.data.get("focused") == Some(&Value::Bool(false)) {
+        return false;
+    }
     let Some(effects) = &acted.effects else {
         return false;
     };

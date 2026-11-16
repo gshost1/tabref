@@ -15,13 +15,39 @@ const PAGE: &str = r#"<!doctype html><title>Focus</title>
 <label>City <input id=city></label>
 <label>Locked <input id=locked disabled></label>
 <div id=tap onclick="document.title = 'tapped'">Tap area</div>
-<p id=out>Nothing</p>"#;
+<label id=ziplabel for=zip onclick="1">Zip code</label> <input id=zip aria-label="Postal">
+<label>Jumpy <input id=jumpy onfocus="setTimeout(() => document.getElementById('city').focus(), 50)"></label>
+<p id=out>Nothing</p>
+<p id=seen>Unseen</p>
+<script>
+document.addEventListener('visibilitychange', () => { document.getElementById('seen').textContent = 'vis changed'; });
+window.addEventListener('focus', () => { document.getElementById('seen').textContent = 'window focused'; });
+</script>"#;
 
 fn site() -> Harness {
     let port = serve(&[("/focus", PAGE)]);
     let tabref = harness("focus");
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/focus")]);
     tabref
+}
+
+/// The focus page in tab 0, behind a blank tab that has the front.
+fn background_site() -> Harness {
+    let tabref = site();
+    tabref.ok(&["open", "--new-tab", "about:blank"]);
+    in_back(
+        &tabref,
+        "document.getElementById('seen').textContent = 'Unseen'",
+    );
+    tabref
+}
+
+fn in_back(tabref: &Harness, expression: &str) -> String {
+    tabref
+        .ok(&["--tab", "0", "js", expression])
+        .stdout
+        .trim()
+        .to_owned()
 }
 
 fn active(tabref: &Harness) -> String {
@@ -84,4 +110,78 @@ fn focus_on_a_disabled_field_or_plain_text_is_refused() {
         plain.stderr
     );
     assert_ne!(active(&tabref), "tap");
+}
+
+#[test]
+fn focus_in_a_background_tab_leaves_it_in_the_background() {
+    if !live() {
+        return;
+    }
+    let tabref = background_site();
+    assert_eq!(in_back(&tabref, "document.visibilityState"), "hidden");
+    let focused = tabref.ok(&["--tab", "0", "focus", "Name"]);
+    assert!(
+        focused.stdout.contains("name focused"),
+        "{}",
+        focused.stdout
+    );
+    assert!(
+        !focused.stdout.contains("vis changed"),
+        "{}",
+        focused.stdout
+    );
+    assert!(
+        !focused.stdout.contains("window focused"),
+        "{}",
+        focused.stdout
+    );
+    assert_eq!(in_back(&tabref, "document.visibilityState"), "hidden");
+    assert_eq!(in_back(&tabref, "document.hasFocus()"), "false");
+}
+
+#[test]
+fn a_refused_focus_changes_nothing_in_the_page() {
+    if !live() {
+        return;
+    }
+    let tabref = background_site();
+    let refused = tabref.run(&["--tab", "0", "focus", "Tap area"]);
+    assert!(
+        refused
+            .stderr
+            .starts_with("error ACTION_NOT_SUPPORTED (cdp_not_focusable): "),
+        "{}",
+        refused.stderr
+    );
+    assert_eq!(
+        in_back(&tabref, "document.getElementById('seen').textContent"),
+        "Unseen"
+    );
+    let pressed = tabref.run(&["--tab", "0", "press", "Enter", "Tap area"]);
+    assert!(
+        pressed
+            .stderr
+            .starts_with("error ACTION_NOT_SUPPORTED (cdp_not_focusable): "),
+        "{}",
+        pressed.stderr
+    );
+}
+
+#[test]
+fn a_label_focuses_its_control_and_a_move_away_is_caught() {
+    if !live() {
+        return;
+    }
+    let tabref = site();
+    let label = tabref.ok(&["snap"]).ref_for("Zip code");
+    tabref.ok(&["focus", &label]);
+    assert_eq!(active(&tabref), "zip");
+    let jumpy = tabref.ok(&["focus", "Jumpy"]);
+    let first = jumpy.stdout.lines().next().unwrap();
+    assert_eq!(
+        first, "focused \"Jumpy\" (the page moved the focus away)",
+        "{}",
+        jumpy.stdout
+    );
+    assert_eq!(active(&tabref), "city");
 }
