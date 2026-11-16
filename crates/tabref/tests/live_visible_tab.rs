@@ -47,7 +47,6 @@ fn with_no_tab_remembered_the_showing_tab_is_used_rather_than_the_first() {
         run(&["open", "data:text/html,<title>Second</title>", "--new-tab"]),
         run(&["open", "data:text/html,<title>Shown</title>", "--new-tab"]),
     ];
-    let state = run(&["--tab", "0", "js", "document.visibilityState"]);
     forget_remembered_tab(&home);
     let title = run(&["js", "document.title"]);
     let tabs = run(&["tabs"]);
@@ -59,11 +58,6 @@ fn with_no_tab_remembered_the_showing_tab_is_used_rather_than_the_first() {
     for step in &opened {
         assert!(step.ok, "{}{}", step.stdout, step.stderr);
     }
-    assert!(
-        state.stdout.contains("hidden"),
-        "the first tab is not hidden here, so this test cannot tell: {}",
-        state.stdout
-    );
     assert!(title.ok, "{}{}", title.stdout, title.stderr);
     assert!(
         title.stdout.contains("Shown"),

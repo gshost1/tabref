@@ -90,6 +90,7 @@ fn a_stale_launch_record_on_its_port_does_not_make_the_users_chrome_tabrefs() {
     record["started"] = serde_json::Value::Null;
     record["profile_dir"] = serde_json::json!(site._outside.0.join("gone-profile"));
     std::fs::write(tabref.home.join("launched.json"), record.to_string()).unwrap();
+    common::private_record(&tabref.home.join("launched.json"));
     tabref.ok(&["open", "--download-max-mb", "1", &format!("{}/", site.base)]);
     tabref.ok(&["js", "location.href = '/bigslow.bin'; 1"]);
     std::thread::sleep(Duration::from_millis(3_500));

@@ -140,6 +140,7 @@ fn a_stale_launch_record_on_the_same_port_does_not_make_it_tabrefs_browser() {
     record["started"] = serde_json::Value::Null;
     record["profile_dir"] = serde_json::json!(tabref.home.join("gone-profile"));
     std::fs::write(tabref.home.join("launched.json"), record.to_string()).unwrap();
+    common::private_record(&tabref.home.join("launched.json"));
     open_page(&tabref);
     assert_eq!(read(&tabref, "document.hasFocus()"), "false");
     tabref.ok(&["focus", "City"]);
