@@ -79,10 +79,11 @@ pub(crate) fn step_report(
             line.push_str(&format!(" {}", quote_text(&page.title)));
         }
         let leaves = effects.settled.navigated && effects.url_before != page.url;
-        if !leaves && let Some(first) = page.changes.first() {
+        let changes = distinct_changes(&page.changes);
+        if !leaves && let Some(first) = changes.first() {
             line.push_str(&format!("; {first}"));
-            if page.changes.len() > 1 {
-                line.push_str(&format!(" (+{} more)", page.changes.len() - 1));
+            if changes.len() > 1 {
+                line.push_str(&format!(" (+{} more)", changes.len() - 1));
             }
         }
     }
@@ -126,7 +127,7 @@ fn effect_block(
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
-    let changes: Vec<String> = page.changes.iter().map(ToString::to_string).collect();
+    let changes = distinct_changes(&page.changes);
     lines.extend(within_budget(&changes));
     merge(&mut data, json!({ "changes": changes }));
     if effects.settled.navigated {
@@ -314,8 +315,16 @@ pub(crate) fn styled(line: &str) -> String {
     }
 }
 
+/// The changed lines as printed, each once: a page often shows the same
+/// message twice (a summary list and inline under the field), and the
+/// second copy says nothing new.
 pub(crate) fn distinct_changes(changes: &[tabref_page::TextChange]) -> Vec<String> {
-    changes.iter().map(ToString::to_string).collect()
+    let mut seen = HashSet::new();
+    changes
+        .iter()
+        .map(ToString::to_string)
+        .filter(|line| seen.insert(line.clone()))
+        .collect()
 }
 
 #[cfg(test)]

@@ -45,7 +45,7 @@ fn a_long_rewrite_shows_both_lines_cut() {
 fn added_and_removed_lines_are_marked() {
     assert_eq!(TextChange::Added("Post".into()).to_string(), "+ Post");
     assert_eq!(TextChange::Removed("Old".into()).to_string(), "- Old");
-    let long = TextChange::Added("x".repeat(300)).to_string();
+    let long = TextChange::Added("x".repeat(500)).to_string();
     assert!(long.ends_with('…'));
 }
 
