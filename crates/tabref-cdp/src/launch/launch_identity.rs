@@ -63,9 +63,10 @@ fn unverified(record: &LaunchedBrowser, what: &str, detail: &str) -> AppError {
             path.display()
         ),
     )
-    .with_suggestion(
-        "Run 'tabref close --browser' to quit it, then 'tabref open <url> --launch' for a new one",
-    )
+    .with_suggestion(format!(
+        "Quit that browser (pid {}), then run 'tabref open <url> --launch' for a new one",
+        record.pid
+    ))
     .with_platform_detail(detail)
     .with_details(serde_json::json!({
         "kind": "cdp_launch_unverified",

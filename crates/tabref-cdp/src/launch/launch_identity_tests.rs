@@ -89,6 +89,6 @@ fn a_missing_port_file_is_refused_with_its_path() {
         error
             .suggestion
             .as_deref()
-            .is_some_and(|text| text.contains("close --browser"))
+            .is_some_and(|text| text.starts_with("Quit that browser (pid 4242)"))
     );
 }
