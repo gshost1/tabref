@@ -11,7 +11,9 @@ pub(crate) const SCAN: &str = r"const scan = () => {
   let unread = 0;
   const shown = el => (!el.checkVisibility || el.checkVisibility()) || getComputedStyle(el).display === 'contents';
   const visit = root => {
-    for (const el of root.querySelectorAll('*')) {
+    const all = root.querySelectorAll('*');
+    for (let at = 0; at < all.length; at++) {
+      const el = all[at];
       if (el.shadowRoot) { roots.push(el.shadowRoot); visit(el.shadowRoot); }
       if (el.localName !== 'iframe' && el.localName !== 'frame') continue;
       if (!shown(el)) continue;
