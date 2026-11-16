@@ -6,6 +6,7 @@ pub(crate) mod download_state;
 pub(crate) mod download_timing;
 pub(crate) mod page_barrier;
 pub(crate) mod page_wait;
+pub(crate) mod response_bytes;
 pub(crate) mod settle_outcome;
 pub(crate) mod settle_tracker;
 pub(crate) mod settle_wait;
