@@ -39,7 +39,11 @@ fn the_guide_says_what_to_do_instead_of_what_not_to() {
     ] {
         assert!(guide.contains(rule), "{rule}");
     }
-    for misleading in ["not shell loops", "do not\nsnapshot again", "waits for the page itself"] {
+    for misleading in [
+        "not shell loops",
+        "do not\nsnapshot again",
+        "waits for the page itself",
+    ] {
         assert!(!guide.contains(misleading), "{misleading}");
     }
 }
