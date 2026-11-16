@@ -20,6 +20,7 @@ pub use act::append_outcome::AppendOutcome;
 pub use act::append_text::append_text;
 pub use act::assigned_input::AssignedInput;
 pub use act::blocker::Blocker;
+pub use act::captured_image::CapturedImage;
 pub use act::change_watch::{mark_page, page_changes};
 pub use act::checked::set_checked;
 pub use act::click::{click, click_times};

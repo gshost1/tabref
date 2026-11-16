@@ -1,4 +1,5 @@
-//! Where `tabref screenshot` writes its PNG: `--out FILE`, or a fresh
+//! Where `tabref screenshot` writes its PNG: `--out FILE` (a name ending in
+//! `.png`, so no other file is ever overwritten), or a fresh
 //! `tabref-screenshot-<id>.png` in the directory the command was typed in.
 //! The file's folder must exist; it is resolved through links and `..`, and
 //! a path in or under tabref's state directory is refused, so a screenshot
@@ -24,6 +25,19 @@ pub(crate) fn screenshot_path(out: &Path, state_root: &Path) -> Result<PathBuf, 
             "screenshot_path_invalid",
         ));
     };
+    let png = std::path::Path::new(name)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("png"));
+    if !png {
+        return Err(argument(
+            format!(
+                "--out {} does not end in .png; a screenshot is only written to a .png file",
+                out.display()
+            ),
+            "screenshot_not_png",
+        )
+        .with_suggestion("Pass --out with a name ending in .png"));
+    }
     let folder = std::fs::canonicalize(folder).map_err(|_| {
         argument(
             format!("The folder {} does not exist", folder.display()),

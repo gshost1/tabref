@@ -2,8 +2,10 @@
 //! PNG in the directory the command was typed in (through the daemon, which
 //! runs elsewhere), clipped to an element below the fold so the clip must
 //! follow the scroll, a relative `--out` taken from the client's directory,
-//! and an `--out` in the state directory refused with nothing written.
-//! Pixels are read back with Python's zlib. Live (`TABREF_LIVE=1`).
+//! an `--out` in the state directory refused with nothing written, an
+//! element taller than the viewport painted to its bottom, and a tab in the
+//! background refused at once. Pixels are read back with Python's zlib.
+//! Live (`TABREF_LIVE=1`).
 
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -19,10 +21,14 @@ const PAGE: &str = "<!doctype html><title>Shot</title><body style='margin:0;back
     <h1>Shot</h1><div style='height:1500px'></div>\
     <button style='display:block;width:120px;height:80px;margin-left:40px;border:0;\
     padding:0;background:#ff0000;color:#ff0000;font-size:1px'>Red</button>\
-    <div style='height:600px'></div></body>";
+    <div style='height:600px'></div>\
+    <button style='display:block;width:120px;height:2000px;border:0;padding:0;\
+    background:#0000ff;color:#0000ff;font-size:1px'>Tall</button>\
+    <div style='height:300px'></div></body>";
 
-/// The RGB of the pixel at the PNG's center, as Python reads it.
-const CENTER_PIXEL: &str = "import struct,sys,zlib
+/// The RGB of the pixel in the PNG's middle column at the fraction
+/// `sys.argv[2]` of its height, as Python reads it.
+const PIXEL: &str = "import struct,sys,zlib
 d=open(sys.argv[1],'rb').read();p=8;w=h=0;ct=0;idat=b''
 while p<len(d):
     n=struct.unpack('>I',d[p:p+4])[0];t=d[p+4:p+8];c=d[p+8:p+8+n];p+=12+n
@@ -40,7 +46,7 @@ for _ in range(h):
             q=a+b-c;pa,pb,pc=abs(q-a),abs(q-b),abs(q-c)
             row[x]=(row[x]+(a if pa<=pb and pa<=pc else b if pb<=pc else c))&255
     rows.append(row);prev=row
-r=rows[h//2];x=(w//2)*bpp;print(r[x],r[x+1],r[x+2])";
+r=rows[min(h-1,int(h*float(sys.argv[2])))];x=(w//2)*bpp;print(r[x],r[x+1],r[x+2])";
 
 fn shoot(tabref: &Harness, cwd: &Path, args: &[&str]) -> Run {
     let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
@@ -63,10 +69,11 @@ fn shoot(tabref: &Harness, cwd: &Path, args: &[&str]) -> Run {
     }
 }
 
-fn center_pixel(png: &Path) -> String {
+fn pixel_at(png: &Path, down: f64) -> String {
     let output = Command::new("python3")
-        .args(["-I", "-c", CENTER_PIXEL])
+        .args(["-I", "-c", PIXEL])
         .arg(png)
+        .arg(down.to_string())
         .output()
         .unwrap();
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
@@ -107,8 +114,8 @@ fn screenshots_land_in_the_typing_directory_clip_to_an_element_and_never_in_the_
         ],
     );
     let in_state = tabref.home.join("shot.png").exists();
-    let red = element_files.first().map(|file| center_pixel(file));
-    let page_center = page_file.exists().then(|| center_pixel(&page_file));
+    let red = element_files.first().map(|file| pixel_at(file, 0.5));
+    let page_center = page_file.exists().then(|| pixel_at(&page_file, 0.5));
     let _ = shoot(&tabref, &work.0, &["daemon", "stop"]);
 
     assert!(element.ok, "{}{}", element.stdout, element.stderr);
@@ -146,4 +153,60 @@ fn screenshots_land_in_the_typing_directory_clip_to_an_element_and_never_in_the_
         !in_state,
         "a screenshot was written into the state directory"
     );
+}
+
+#[test]
+fn a_tall_element_is_painted_to_its_bottom_and_a_background_tab_is_refused_at_once() {
+    if !live() {
+        return;
+    }
+    let tabref = harness("screenshot-tall");
+    let work = scratch("screenshot-tall-work");
+    let url = format!("http://127.0.0.1:{}/", serve(&[("/", PAGE)]));
+    tabref.ok(&["open", &url]);
+
+    let tall = shoot(
+        &tabref,
+        &work.0,
+        &["--json", "screenshot", "Tall", "--out", "tall.png"],
+    );
+    let bottom = work
+        .0
+        .join("tall.png")
+        .exists()
+        .then(|| pixel_at(&work.0.join("tall.png"), 0.98));
+    tabref.ok(&["open", "about:blank", "--new-tab"]);
+    let started = std::time::Instant::now();
+    let hidden = shoot(
+        &tabref,
+        &work.0,
+        &["--json", "--tab", "0", "screenshot", "--out", "back.png"],
+    );
+    let took = started.elapsed();
+    let written = work.0.join("back.png").exists();
+    let _ = shoot(&tabref, &work.0, &["daemon", "stop"]);
+
+    assert!(tall.ok, "{}{}", tall.stdout, tall.stderr);
+    let data = &tall.json()["data"];
+    assert_eq!(
+        (data["width"].as_u64(), data["height"].as_u64()),
+        (Some(120), Some(2000))
+    );
+    assert_eq!(
+        bottom.as_deref(),
+        Some("0 0 255"),
+        "the part of the element below the viewport was not painted"
+    );
+    assert!(!hidden.ok, "{}", hidden.stdout);
+    let error = &hidden.json()["error"];
+    assert_eq!(error["details"]["kind"], "screenshot_tab_hidden", "{error}");
+    assert!(
+        error["suggestion"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("tabref tab 0"),
+        "{error}"
+    );
+    assert!(took.as_secs() < 5, "the refusal took {took:?}");
+    assert!(!written);
 }

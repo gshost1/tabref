@@ -74,6 +74,28 @@ fn an_out_in_a_missing_folder_or_naming_a_folder_is_an_argument_error() {
 }
 
 #[test]
+fn only_a_png_file_name_is_accepted_whatever_its_case() {
+    let base = temp("png");
+    let state = base.join("state");
+    std::fs::write(base.join("notes.txt"), "mine").unwrap();
+    let refused = [
+        screenshot_path(&base.join("notes.txt"), &state),
+        screenshot_path(&base.join("shot"), &state),
+        screenshot_path(&base.join("shot.png.txt"), &state),
+    ];
+    let upper = screenshot_path(&base.join("Shot.PNG"), &state);
+    let notes = std::fs::read_to_string(base.join("notes.txt")).unwrap();
+    let _ = std::fs::remove_dir_all(&base);
+    for result in refused {
+        let error = result.unwrap_err();
+        assert_eq!(error.code, tabref_core::ErrorCode::InvalidArgs, "{error:?}");
+        assert_eq!(error.kind(), Some("screenshot_not_png"), "{error:?}");
+    }
+    assert!(upper.is_ok(), "{upper:?}");
+    assert_eq!(notes, "mine");
+}
+
+#[test]
 fn the_default_name_differs_between_two_screenshots() {
     let cwd = Path::new("/work");
     assert_ne!(default_out(cwd), default_out(cwd));

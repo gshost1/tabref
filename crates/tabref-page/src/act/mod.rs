@@ -6,6 +6,7 @@ pub(crate) mod append_outcome;
 pub(crate) mod append_text;
 pub(crate) mod assigned_input;
 pub(crate) mod blocker;
+pub(crate) mod captured_image;
 pub(crate) mod change_watch;
 pub(crate) mod checked;
 pub(crate) mod click;

@@ -1,12 +1,15 @@
 //! A PNG of the tab (`Page.captureScreenshot`): the visible part of the
-//! page, or one element clipped where it sits in the document. The element
-//! is scrolled into view first, and only an element of the tab's own main
+//! page, or one element clipped where it sits in the document. A tab that
+//! is not showing is refused first. The element is scrolled into view, and
+//! one that reaches past the viewport (taller than it) is rendered beyond
+//! it rather than left blank. Only an element of the tab's own main
 //! document is taken: the clip is in the main frame's coordinates, and an
 //! element inside a frame is refused rather than clipped at the wrong place.
 
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
+use super::captured_image::CapturedImage;
 use super::element_errors::{document_replaced, wrong_session};
 use super::scroll::{not_rendered, not_rendered_error, scroll_node};
 use super::viewport_metrics::ViewportMetrics;
@@ -21,10 +24,15 @@ pub fn capture_screenshot(
     session: &PageSession,
     element: Option<&ElementToken>,
     deadline: Deadline,
-) -> Result<Vec<u8>, AppError> {
+) -> Result<CapturedImage, AppError> {
+    let device_scale = showing_scale(connection, session, deadline)?;
     let mut params = json!({ "format": "png" });
     if let Some(token) = element {
-        params["clip"] = element_clip(connection, session, token, deadline)?;
+        let (clip, beyond) = element_clip(connection, session, token, deadline)?;
+        params["clip"] = clip;
+        if beyond {
+            params["captureBeyondViewport"] = json!(true);
+        }
     }
     let reply = connection.call(
         "Page.captureScreenshot",
@@ -36,7 +44,10 @@ pub fn capture_screenshot(
         .get("data")
         .and_then(Value::as_str)
         .ok_or_else(|| AppError::internal("Page.captureScreenshot returned no image"))?;
-    decode_base64(data)
+    Ok(CapturedImage {
+        png: decode_base64(data)?,
+        device_scale,
+    })
 }
 
 /// The width and height a PNG's header gives, or `None` for other bytes.
@@ -48,12 +59,47 @@ pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
     Some((number(16)?, number(20)?))
 }
 
+/// The tab's device scale, once it says it is showing: Chrome does not paint
+/// a tab in the background of a headed window, so a capture of one would
+/// only wait out the deadline. The tab is never brought to the front here.
+fn showing_scale(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    deadline: Deadline,
+) -> Result<f64, AppError> {
+    let reply = connection.call(
+        "Runtime.evaluate",
+        json!({
+            "expression": "[document.visibilityState, window.devicePixelRatio]",
+            "returnByValue": true,
+        }),
+        Some(&session.session_id),
+        deadline,
+    )?;
+    let answer = &reply["result"]["value"];
+    if answer[0].as_str() == Some("hidden") {
+        return Err(AppError::new(
+            ErrorCode::ActionFailed,
+            "The tab is not showing (it is in the background of its window), so Chrome does \
+             not paint it",
+        )
+        .with_details(json!({ "kind": "screenshot_tab_hidden" }))
+        .with_disposition(DeliverySemantics::not_delivered()));
+    }
+    Ok(answer[1]
+        .as_f64()
+        .filter(|scale| *scale > 0.0)
+        .unwrap_or(1.0))
+}
+
+/// The element's clip in document coordinates, and whether it reaches past
+/// the viewport (so the capture must render beyond it).
 fn element_clip(
     connection: &mut CdpConnection,
     session: &PageSession,
     token: &ElementToken,
     deadline: Deadline,
-) -> Result<Value, AppError> {
+) -> Result<(Value, bool), AppError> {
     if session.target_id != token.target_id {
         return Err(wrong_session(token, &session.target_id));
     }
@@ -83,13 +129,18 @@ fn element_clip(
     let (x, y, width, height) = bounds(reply.pointer("/model/border"))
         .ok_or_else(|| not_rendered_error(token.backend_node_id, "the node has an empty box"))?;
     let viewport = ViewportMetrics::read(connection, session, deadline)?;
-    Ok(json!({
+    let beyond = x < 0.0
+        || y < 0.0
+        || (x + width) / viewport.zoom > viewport.width + 0.5
+        || (y + height) / viewport.zoom > viewport.height + 0.5;
+    let clip = json!({
         "x": viewport.page_x + x / viewport.zoom,
         "y": viewport.page_y + y / viewport.zoom,
         "width": width / viewport.zoom,
         "height": height / viewport.zoom,
         "scale": 1.0,
-    }))
+    });
+    Ok((clip, beyond))
 }
 
 /// The left, top, width and height of a quad's bounding box, when it has

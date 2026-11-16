@@ -92,10 +92,13 @@ pub(crate) enum Command {
         target: Option<String>,
     },
     /// Save a PNG of the visible page, or of one element (TARGET)
+    ///
+    /// The PNG holds whatever the page shows, logged-in content included, and
+    /// lands in this directory (often a repository) unless --out names another.
     Screenshot {
         #[arg(value_name = "TARGET")]
         target: Option<String>,
-        /// The file to write (default: tabref-screenshot-<id>.png in this directory)
+        /// The .png file to write (default: tabref-screenshot-<id>.png in this directory)
         #[arg(long, value_name = "FILE")]
         out: Option<PathBuf>,
     },
