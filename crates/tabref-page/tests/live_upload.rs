@@ -6,15 +6,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
+mod upload_common;
 
-use std::path::PathBuf;
-
-use serde_json::{Value, json};
-use tabref_cdp::{CdpConnection, PageSession};
 use tabref_core::ErrorCode;
-use tabref_page::{ElementToken, upload_files};
+use tabref_page::upload_files;
 
 use common::{connect_to, deadline, launch, live, open_tab, serve};
+use upload_common::{files_of, fixture, name_of, token_of};
 
 const DROPZONE: &str = r##"<!doctype html><html><head><title>Report</title></head><body>
 <form id="report" action="/r">
@@ -50,82 +48,6 @@ input.className = 'dz-hidden-input';
 input.style.display = 'none';
 document.body.appendChild(input);
 </script></body></html>"##;
-
-fn token_of(connection: &mut CdpConnection, page: &PageSession, css: &str) -> ElementToken {
-    let session = Some(page.session_id.as_str());
-    let document = connection
-        .call(
-            "DOM.getDocument",
-            json!({ "depth": 0 }),
-            session,
-            deadline(),
-        )
-        .unwrap();
-    let root = document.pointer("/root/nodeId").unwrap().clone();
-    let found = connection
-        .call(
-            "DOM.querySelector",
-            json!({ "nodeId": root, "selector": css }),
-            session,
-            deadline(),
-        )
-        .unwrap();
-    let described = connection
-        .call(
-            "DOM.describeNode",
-            json!({ "nodeId": found["nodeId"] }),
-            session,
-            deadline(),
-        )
-        .unwrap();
-    let tree = connection
-        .call("Page.getFrameTree", json!({}), session, deadline())
-        .unwrap();
-    let frame = tree.pointer("/frameTree/frame").unwrap();
-    ElementToken {
-        target_id: page.target_id.clone(),
-        frame_id: frame["id"].as_str().unwrap().to_owned(),
-        loader_id: frame["loaderId"].as_str().unwrap().to_owned(),
-        backend_node_id: described
-            .pointer("/node/backendNodeId")
-            .unwrap()
-            .as_i64()
-            .unwrap(),
-    }
-}
-
-fn files_of(connection: &mut CdpConnection, page: &PageSession, css: &str) -> Vec<String> {
-    let reply = connection
-        .call(
-            "Runtime.evaluate",
-            json!({
-                "expression": format!(
-                    "Array.from(document.querySelector({css:?}).files).map((f) => f.name)"
-                ),
-                "returnByValue": true,
-            }),
-            Some(&page.session_id),
-            deadline(),
-        )
-        .unwrap();
-    reply
-        .pointer("/result/value")
-        .and_then(Value::as_array)
-        .unwrap()
-        .iter()
-        .map(|name| name.as_str().unwrap().to_owned())
-        .collect()
-}
-
-fn fixture(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("tabref-live-up-{}-{name}", std::process::id()));
-    std::fs::write(&path, b"hello").unwrap();
-    path
-}
-
-fn name_of(path: &std::path::Path) -> String {
-    path.file_name().unwrap().to_string_lossy().into_owned()
-}
 
 #[test]
 fn a_drop_zone_link_label_and_form_each_reach_their_own_file_input() {
