@@ -6,7 +6,8 @@
 //! next `find` or `snap` capture again. A page whose main thread is held
 //! when the watch is armed is not kept, and page work already queued when
 //! a capture starts runs before the watch is armed, so it neither goes
-//! unseen nor spoils the kept capture.
+//! unseen nor spoils the kept capture. A hidden tab, whose idle callbacks
+//! a browser may hold back, arms at once.
 //! Opt-in: `TABREF_LIVE=1 cargo test -p tabref --test live_capture_reuse_more`.
 
 #![cfg(unix)]
@@ -72,6 +73,9 @@ const BUSY: &str = r#"<!doctype html><html><head><title>Busy</title></head><body
 const QUEUED: &str = "{ setTimeout(() => { \
 fetch(location.href).then(reply => reply.text()).then(() => { const p = document.createElement('p'); p.textContent = 'Queued needle words'; document.body.append(p); }); \
 const until = Date.now() + 250; while (Date.now() < until); }, 0); 1 }";
+
+const HIDDEN: &str = "{ Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true }); \
+window.requestIdleCallback = () => 0; 1 }";
 
 fn run(tabref: &Harness, args: &[&str], env: &[(&str, &str)]) -> Run {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tabref"));
@@ -232,5 +236,25 @@ fn work_queued_before_a_capture_runs_before_the_watch_is_armed() {
             "round {round}: the queued work spoiled the kept capture"
         );
     }
+    stop(&tabref);
+}
+
+#[test]
+fn a_hidden_tab_arms_the_watch_without_waiting_for_idle() {
+    if !live() {
+        return;
+    }
+    let tabref = common::harness("reuse-hidden");
+    open(&tabref, STILL);
+    run(&tabref, &["js", HIDDEN], &[]);
+    let started = std::time::Instant::now();
+    let snapped = run(&tabref, &["snap"], &[]);
+    let took = started.elapsed();
+    let found = run(&tabref, &["find", "needle"], &[]);
+    assert_eq!(
+        snapshot_id(&found),
+        snapshot_id(&snapped),
+        "the hidden tab's capture was not kept (snap took {took:?})"
+    );
     stop(&tabref);
 }
