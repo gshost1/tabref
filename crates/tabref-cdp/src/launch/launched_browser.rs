@@ -3,13 +3,15 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tabref_core::AppError;
 
+use super::profile_use::ProfileUse;
 use crate::{BrowserEndpoint, EndpointSource, WebSocketUrl};
 
 /// A browser tabref started, as it records it so later invocations reach
 /// the same browser without being told where it listens. `started` names
 /// when its process started (see `process_start`), so a later process that
-/// reuses the pid is never taken for it. `persistent` marks a profile the
-/// user named (`--profile`), which tabref never deletes.
+/// reuses the pid is never taken for it. `profile_use` says whether the
+/// profile is one the user named and whether this launch adopted the
+/// browser rather than starting it (see `ProfileUse`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchedBrowser {
     pub pid: u32,
@@ -19,8 +21,8 @@ pub struct LaunchedBrowser {
     pub headless: bool,
     #[serde(default)]
     pub started: Option<String>,
-    #[serde(default)]
-    pub persistent: bool,
+    #[serde(flatten)]
+    pub profile_use: ProfileUse,
 }
 
 impl LaunchedBrowser {

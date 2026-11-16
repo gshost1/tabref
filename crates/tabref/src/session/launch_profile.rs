@@ -15,8 +15,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use tabref_cdp::{
-    LaunchedBrowser, ListenerVerdict, ProcessView, check_listener, default_user_data_dirs,
-    is_chrome_family, process_start, profile_lock_pid, read_active_port,
+    LaunchedBrowser, ListenerVerdict, ProcessView, ProfileUse, check_listener,
+    default_user_data_dirs, is_chrome_family, process_start, profile_lock_pid, read_active_port,
 };
 use tabref_core::{
     AppError, Deadline, DeliverySemantics, ErrorCode, create_private_dir, resolve_state_root,
@@ -222,7 +222,7 @@ pub(crate) fn running_on_profile(dir: &Path, headless: bool) -> Option<LaunchedB
         profile_dir: dir.to_path_buf(),
         headless,
         started: Some(started),
-        persistent: true,
+        profile_use: ProfileUse::ADOPTED,
     })
 }
 
