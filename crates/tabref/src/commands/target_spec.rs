@@ -40,7 +40,8 @@ impl TargetSpec {
     }
 }
 
-fn looks_like_ref(text: &str) -> bool {
+/// Whether `text` is written as a ref: `@s8f3k2p9:e4`, or `e4`.
+pub(crate) fn looks_like_ref(text: &str) -> bool {
     RefId::looks_like_ref(text) || is_short_ref(text)
 }
 

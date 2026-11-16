@@ -1,7 +1,7 @@
 use tabref_core::AppError;
 use tabref_page::{ElementState, Word};
 
-use super::target_spec::TargetSpec;
+use super::target_spec::{TargetSpec, looks_like_ref};
 use super::wait_flags::WaitFlags;
 
 /// What `wait` waits for, and what a `do` batch's `expect` checks.
@@ -54,8 +54,11 @@ impl Condition {
         }
     }
 
-    /// `text "Saved"`, `gone "Loading"`, `url ~saved=1`, `idle`, `download`, or bare
-    /// text, which waits for that text to show.
+    /// `text "Saved"`, `gone "Loading"`, `url ~saved=1`, `idle`, `download`,
+    /// `T is S` with T one unquoted ref or one quoted name (`"Save" is
+    /// enabled`, `e4 is "value=62 00"` quoted whole when it has spaces), or
+    /// bare text, which waits for that text to show. A keyword comes first,
+    /// so `text Notifications is enabled` waits for that text.
     pub(crate) fn from_words(words: &[Word]) -> Result<Self, AppError> {
         let joined = |rest: &[Word]| {
             rest.iter()
@@ -63,29 +66,26 @@ impl Condition {
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        if let [target @ .., is, state] = words
-            && !target.is_empty()
-            && is.is_keyword("is")
-        {
-            let label = target
-                .iter()
-                .map(|word| {
-                    if word.quoted {
-                        format!("{:?}", word.text)
-                    } else {
-                        word.text.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            return Self::element(TargetSpec::from_words(target)?, label, &state.text);
-        }
         let condition = match words {
             [first, rest @ ..] if first.is_keyword("text") => Self::Text(joined(rest)),
             [first, rest @ ..] if first.is_keyword("gone") => Self::Gone(joined(rest)),
             [first, rest @ ..] if first.is_keyword("url") => Self::Url(url_part(&joined(rest))),
             [first] if first.is_keyword("idle") => Self::Idle,
             [first] if first.is_keyword("download") => Self::Download,
+            [target, is, state] if is.is_keyword("is") && names_element(target) => {
+                return Self::element(
+                    TargetSpec::from_words(std::slice::from_ref(target))?,
+                    label(target),
+                    &state.text,
+                );
+            }
+            [target, is, state, _, ..]
+                if is.is_keyword("is") && names_element(target) && is_value(&state.text) =>
+            {
+                return Err(AppError::invalid_args(
+                    "quote a value with spaces, as in: expect \"Total\" is \"value=62 00\"",
+                ));
+            }
             rest => Self::Text(joined(rest)),
         };
         match &condition {
@@ -123,6 +123,24 @@ impl Condition {
             state,
         })
     }
+}
+
+fn names_element(word: &Word) -> bool {
+    word.quoted || looks_like_ref(&word.text)
+}
+
+fn label(word: &Word) -> String {
+    if word.quoted {
+        format!("{:?}", word.text)
+    } else {
+        word.text.clone()
+    }
+}
+
+fn is_value(state: &str) -> bool {
+    state
+        .get(..6)
+        .is_some_and(|name| name.eq_ignore_ascii_case("value="))
 }
 
 /// The part of an address to look for: `~saved=1` and `/saved/` both look

@@ -24,3 +24,24 @@ fn a_value_state_describes_its_value() {
         "value \"a b\""
     );
 }
+
+#[test]
+fn one_pair_of_matching_quotes_around_a_value_is_stripped() {
+    assert_eq!(
+        ElementState::parse("value=\"a b\""),
+        Some(ElementState::Value("a b".into()))
+    );
+    assert_eq!(
+        ElementState::parse("value='62.00'"),
+        Some(ElementState::Value("62.00".into()))
+    );
+    assert_eq!(
+        ElementState::parse("value=\"a'"),
+        Some(ElementState::Value("\"a'".into()))
+    );
+    assert_eq!(
+        ElementState::parse("value=\"\"x\"\""),
+        Some(ElementState::Value("\"x\"".into()))
+    );
+    assert_eq!(ElementState::parse("shown"), None);
+}

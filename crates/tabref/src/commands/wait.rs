@@ -81,7 +81,7 @@ pub(crate) fn wait_for(
         }
         Condition::Element { target, state, .. } => {
             let Some((page, token)) = element_target(session, target, state, deadline)? else {
-                return Ok((String::new(), json!({ "now": state.describe() })));
+                return Ok((String::new(), json!({ "now": "gone" })));
             };
             let waited = wait_for_state(session.connection(), &page, &token, state, deadline)?;
             if !waited.held {
@@ -164,16 +164,16 @@ fn wait_idle(
 }
 
 /// The element `target` names, for a wait on `state`: a ref even while it
-/// is hidden, a name as the page shows it. `None` when it is already not
-/// there and the state asks for that (`gone`, or `hidden` for a name the
-/// page no longer shows).
+/// is hidden, a name as the page shows it. `None` when it is not there (a
+/// stale ref, a name the page does not show) and the state is `gone` or
+/// `hidden`, which both mean no longer shown, so a name and a ref agree.
 fn element_target(
     session: &mut Session,
     target: &TargetSpec,
     state: &ElementState,
     deadline: Deadline,
 ) -> Result<Option<(PageSession, ElementToken)>, AppError> {
-    let absent_is_enough = matches!(state, ElementState::Gone | ElementState::Hidden);
+    let absent_is_enough = state.absent();
     let found = match target {
         TargetSpec::Ref(text) => session
             .resolve_ref_or_hidden(text)
