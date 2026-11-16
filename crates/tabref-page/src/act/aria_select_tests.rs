@@ -1,53 +1,66 @@
 use serde_json::json;
 
-use super::{OptionPick, listed, pick_shown, took};
+use super::{OptionPick, pick_shown, took};
+use crate::act::aria_select_read::{Listed, listed};
 
-fn read() -> serde_json::Value {
-    json!({
+fn state(value: &str, open: bool, focused: bool, selected: usize) -> Listed {
+    let option = |label: &str, at: usize| json!({ "label": label, "text": label, "value": "", "disabled": false, "shown": label != "Bergen", "selected": at == selected });
+    listed(&json!({
         "kind": "combobox",
         "editable": true,
-        "open": true,
-        "value": "Ber",
+        "open": open,
+        "focused": focused,
+        "value": value,
         "describe": "<input role=combobox>",
-        "options": [
-            { "label": "Bergen", "text": "Bergen", "value": "", "disabled": false, "shown": false, "selected": false },
-            { "label": "Berlin", "text": "Berlin", "value": "", "disabled": false, "shown": true, "selected": false },
-            { "label": "Bern", "text": "Bern", "value": "", "disabled": false, "shown": true, "selected": true }
-        ]
-    })
+        "options": [option("Bergen", 0), option("Berlin", 1), option("Bern", 2), option("Bern (BE)", 3)]
+    }))
 }
 
 #[test]
 fn only_shown_options_are_matched_and_mapped_back() {
-    let state = listed(&read());
-    assert!(state.editable && state.open);
-    let (pick, indices) = pick_shown(&state, "Bern");
+    let now = state("Ber", true, true, 9);
+    assert!(now.editable && now.open);
+    let (pick, indices) = pick_shown(&now, "Bern");
     assert_eq!(pick, OptionPick::Chosen(1));
-    assert_eq!(indices, vec![1, 2]);
-    assert_eq!(pick_shown(&state, "Bergen").0, OptionPick::Missing);
-    assert_eq!(
-        pick_shown(&state, "ber").0,
-        OptionPick::Ambiguous(vec![0, 1])
-    );
+    assert_eq!(indices, vec![1, 2, 3]);
+    assert_eq!(pick_shown(&now, "Bergen").0, OptionPick::Missing);
 }
 
 #[test]
-fn the_control_took_the_option_when_it_shows_its_label() {
-    let mut state = listed(&read());
-    state.value = "Bern".to_owned();
-    assert!(took(&state, 2, "Bern", "Oslo"));
-    state.value = "Colour: Bern".to_owned();
-    assert!(took(&state, 2, "Bern", "Oslo"));
-    state.value = "Item 187".to_owned();
-    assert!(!took(&state, 2, "Item 18", "Item 187"));
-    state.value = "Oslo".to_owned();
-    assert!(!took(&state, 2, "Bern", "Oslo"));
+fn typed_text_alone_never_proves_the_pick() {
+    let before = state("Bern", true, true, 9);
+    assert!(!took(&state("Bern", true, true, 9), &before, 2, "Bern"));
+    assert!(!took(&state("Bern", false, false, 9), &before, 2, "Bern"));
+    assert!(took(&state("Bern", false, true, 9), &before, 2, "Bern"));
+    assert!(took(&state("Bern", true, true, 2), &before, 2, "Bern"));
 }
 
 #[test]
-fn a_listbox_took_the_option_when_it_is_selected() {
-    let mut state = listed(&read());
-    state.kind = "listbox".to_owned();
-    assert!(took(&state, 2, "Bern", ""));
-    assert!(!took(&state, 1, "Berlin", ""));
+fn a_changed_value_proves_it_only_when_it_reads_as_the_label() {
+    let before = state("Oslo", true, true, 9);
+    assert!(took(&state("Berlin", true, false, 9), &before, 1, "Berlin"));
+    assert!(!took(
+        &state("Bern (BE)", false, true, 9),
+        &before,
+        2,
+        "Bern"
+    ));
+    assert!(!took(&state("Lima", false, true, 9), &before, 2, "Bern"));
+    assert!(took(
+        &state("City: Berlin", false, false, 9),
+        &before,
+        1,
+        "Berlin"
+    ));
+}
+
+#[test]
+fn a_listbox_took_the_option_when_it_is_selected_under_its_label() {
+    let mut before = state("Berlin", true, true, 1);
+    before.kind = "listbox".to_owned();
+    let mut now = state("Bern", true, true, 2);
+    now.kind = "listbox".to_owned();
+    assert!(took(&now, &before, 2, "Bern"));
+    assert!(!took(&now, &before, 2, "Bern (BE)"));
+    assert!(!took(&before, &before, 2, "Bern"));
 }

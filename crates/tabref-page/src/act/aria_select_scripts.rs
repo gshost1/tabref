@@ -17,15 +17,18 @@ macro_rules! find {
   const named = (el, attr) => norm(el.getAttribute(attr)).split(' ').filter(Boolean).map(byId).filter(Boolean);
   const shown = el => !!el && el.isConnected && !el.closest('[hidden]') && el.getClientRects().length > 0
     && (!el.checkVisibility || el.checkVisibility({ visibilityProperty: true, opacityProperty: true }));
-  const typable = el => !!el && (el.localName === 'textarea' || el.isContentEditable
-    || (el.localName === 'input' && /^(text|search|email|url|tel|)$/.test(norm(el.getAttribute('type')).toLowerCase())));
+  const typable = el => !!el && !el.readOnly && !el.disabled && el.getAttribute('aria-readonly') !== 'true'
+    && (el.localName === 'textarea' || el.isContentEditable
+      || (el.localName === 'input' && /^(text|search|email|url|tel|)$/.test(norm(el.getAttribute('type')).toLowerCase())));
   const role = roleOf(this);
   const tag = this.localName;
   let kind = 'none';
   let field = typable(this) ? this : null;
   if (role === 'combobox') {
     kind = 'combobox';
-    if (!field) field = this.querySelector('input, textarea, [role=textbox], [role=searchbox]');
+    if (!field && !(this.localName === 'input' || this.localName === 'textarea')) {
+      field = this.querySelector('input, textarea, [role=textbox], [role=searchbox]');
+    }
     if (field && !typable(field)) field = null;
   } else if (role === 'listbox') {
     kind = 'listbox';
@@ -73,13 +76,29 @@ pub(crate) const READ: &str = concat!(
     shown: shown(option),
     selected: option.getAttribute('aria-selected') === 'true',
   }));
-  const value = field ? norm(field.value !== undefined && !field.isContentEditable ? field.value : field.textContent)
-    : norm(this.textContent);
+  const own = el => {
+    let text = '';
+    const walk = node => {
+      for (const child of node.childNodes) {
+        if (child.nodeType === 3) text += ' ' + child.data;
+        else if (child.nodeType === 1 && child !== popup && !['listbox', 'option'].includes(roleOf(child))
+          && !['script', 'style', 'template'].includes(child.localName)) walk(child);
+      }
+    };
+    walk(el);
+    return norm(text);
+  };
+  const value = kind === 'listbox' ? list.filter(option => option.selected).map(option => option.label).join(', ')
+    : field ? norm(field.isContentEditable ? field.textContent : field.value)
+    : (this.localName === 'input' || this.localName === 'textarea') ? norm(this.value) : own(this);
+  let focus = doc.activeElement;
+  while (focus && focus.shadowRoot && focus.shadowRoot.activeElement) focus = focus.shadowRoot.activeElement;
   return {
     kind,
     editable: !!field,
     open: !!popup && shown(popup) && list.some(option => option.shown),
-    popup: !!popup,
+    multi: !!popup && popup.getAttribute('aria-multiselectable') === 'true',
+    focused: !!focus && (focus === this || focus === field || this.contains(focus)),
     options: list,
     value,
     describe: '<' + tag + (role ? ' role=' + role : '') + '>',
@@ -87,11 +106,17 @@ pub(crate) const READ: &str = concat!(
 }"
 );
 
-/// The option at `index` of the control's popup, as an element.
+/// The option at `index` of the control's popup, as an element, only when
+/// its label is still `label`: options that were drawn again since the
+/// read give `null`, never a neighbour.
 pub(crate) const OPTION_AT: &str = concat!(
-    "function(index) {",
+    "function(index, label) {",
     find!(),
-    "  return options[index] || null;\n}"
+    r"  const option = options[index];
+  if (!option) return null;
+  const now = norm(option.getAttribute('aria-label')) || norm(option.textContent);
+  return now === label ? option : null;
+}"
 );
 
 /// The text field inside an ARIA 1.1 combobox, as an element.

@@ -99,11 +99,11 @@ fn a_disabled_ambiguous_or_missing_option_is_refused_with_the_options() {
     let page = page("aria-refused", SELECT_ONLY);
     let fruit = page.opened.ref_for("combobox Fruit");
     for (choice, says) in [
-        ("Durian", "option 'Durian' is disabled"),
-        ("B", "'B' matches 2 options: Banana | Blueberry"),
+        ("Durian", r#"option "Durian" is disabled"#),
+        ("B", r#""B" matches 2 options: Banana | Blueberry"#),
         (
             "Mango",
-            "no option matches 'Mango'; options: Apple | Banana | Blueberry | Cherry | Durian (disabled)",
+            r#"no option matches "Mango"; shown options: Apple | Banana | Blueberry | Cherry | Durian (disabled); more may load as the list scrolls or as you type"#,
         ),
     ] {
         let refused = page.tabref.run(&["select", &fruit, choice]);
@@ -158,7 +158,8 @@ fn an_editable_combobox_gets_the_text_typed_when_no_option_shows() {
     let missing = page.tabref.run(&["select", &city, "Paris"]);
     assert!(!missing.ok, "{}", missing.stdout);
     assert!(
-        missing.stderr.contains("no option matches 'Paris'"),
+        missing.stderr.contains(r#"no option matches "Paris""#)
+            && missing.stderr.contains(r#"put back "Bern""#),
         "{}",
         missing.stderr
     );
