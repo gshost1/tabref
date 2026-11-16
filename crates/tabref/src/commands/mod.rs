@@ -31,6 +31,8 @@ pub(crate) mod page_url;
 pub(crate) mod page_view;
 pub(crate) mod press;
 pub(crate) mod read;
+pub(crate) mod screenshot;
+pub(crate) mod screenshot_path;
 pub(crate) mod scroll;
 pub(crate) mod select;
 pub(crate) mod skill;
@@ -140,6 +142,9 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
         Command::Uncheck { target } => check::run(session, target, false),
         Command::Press { key, target } => press::run(session, key, target.as_deref()),
         Command::Hover { target } => hover::run(session, target),
+        Command::Screenshot { target, out } => {
+            screenshot::run(session, target.as_deref(), out.as_deref())
+        }
         Command::Scroll {
             direction,
             target,

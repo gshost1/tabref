@@ -8,10 +8,12 @@ use std::path::PathBuf;
 
 use crate::cli::command::Command;
 use crate::commands::open::normalize_url;
+use crate::commands::screenshot_path::default_out;
 
 /// The command's path arguments, resolved in this process's directory: the
 /// address `open` navigates to, its download folder and its launch profile
-/// (each in its own place, empty when not given), the files `upload` sets.
+/// (each in its own place, empty when not given), the files `upload` sets,
+/// the file `screenshot` writes (its default name made here).
 /// `None` for a command that takes no path.
 pub(crate) fn resolved_paths(command: &Command) -> Option<Vec<String>> {
     match command {
@@ -32,6 +34,10 @@ pub(crate) fn resolved_paths(command: &Command) -> Option<Vec<String>> {
         Command::Upload { files, .. } => {
             Some(files.iter().map(|file| absolute_text(file)).collect())
         }
+        Command::Screenshot { out, .. } => Some(vec![match out {
+            Some(out) => absolute_text(out),
+            None => absolute_text(&default_out(&std::env::current_dir().unwrap_or_default())),
+        }]),
         _ => None,
     }
 }
@@ -66,6 +72,11 @@ pub(crate) fn apply_paths(command: &mut Command, paths: Option<Vec<String>>) {
         }
         Command::Upload { files, .. } => {
             *files = paths.into_iter().map(PathBuf::from).collect();
+        }
+        Command::Screenshot { out, .. } => {
+            if let Some(path) = paths.into_iter().next() {
+                *out = Some(PathBuf::from(path));
+            }
         }
         _ => {}
     }
