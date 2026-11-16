@@ -16,11 +16,27 @@ use common::{harness, live};
 const PAGE: &str = r#"<!doctype html><title>Alerts</title><h1>Alert rules</h1>
 <button id=save>Keep rules</button><p id=note>Not kept yet</p>
 <script>
+let saves = 0;
 document.getElementById('save').addEventListener('click', () => {
   fetch('/rules', { method: 'POST', body: 'on' }).then(reply => {
-    document.getElementById('note').textContent = reply.ok ? 'Rules kept' : 'Failed';
+    saves += 1;
+    document.getElementById('note').textContent = reply.ok ? 'Rules kept ' + saves : 'Failed';
   });
 });
+</script>"#;
+
+const DELAYED: &str = r#"<!doctype html><title>Delayed</title><h1>Delayed read</h1><p id=out>Nothing yet</p>
+<button onclick="go(0, 0)">Read 0</button><button onclick="go(150, 0)">Read 150</button>
+<button onclick="go(0, 1)">Read 0 stored</button>
+<script>
+let reads = 0;
+async function go(delay, store) {
+  const reply = await fetch('/data?store=' + store, { method: 'POST', body: 'x' });
+  await new Promise(done => setTimeout(done, delay));
+  const body = await reply.json();
+  reads += 1;
+  document.getElementById('out').textContent = 'Loaded ' + body.kept + ' ' + reads;
+}
 </script>"#;
 
 const SLOWEST_SETTLE: Duration = Duration::from_millis(1_000);
@@ -46,6 +62,10 @@ fn answer(mut stream: TcpStream) {
         }
     }
     let head = String::from_utf8_lossy(&request).into_owned();
+    let stored = head
+        .lines()
+        .next()
+        .is_some_and(|line| line.contains("store=1"));
     let (kind, body) = if head.starts_with("POST") {
         let length = head
             .lines()
@@ -64,11 +84,18 @@ fn answer(mut stream: TcpStream) {
             }
         }
         ("application/json", r#"{"kept":true}"#.to_owned())
+    } else if head.starts_with("GET /delayed") {
+        ("text/html; charset=utf-8", DELAYED.to_owned())
     } else {
         ("text/html; charset=utf-8", PAGE.to_owned())
     };
+    let cache = if stored {
+        ""
+    } else {
+        "Cache-Control: no-store\r\n"
+    };
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n{cache}Connection: close\r\n\r\n{body}",
         body.len()
     );
     let _ = stream.write_all(response.as_bytes());
@@ -91,4 +118,27 @@ fn a_click_whose_unread_no_store_reply_has_fully_arrived_does_not_wait_out_the_n
         "the click took {took:?}, so it waited out a cap:\n{}",
         run.stdout
     );
+    assert!(
+        run.stdout.contains("Rules kept {1 -> 2}"),
+        "the click reported before the page rendered its reply:\n{}",
+        run.stdout
+    );
+}
+
+#[test]
+fn a_page_that_reads_its_reply_a_little_later_is_reported_after_it_renders() {
+    if !live() {
+        return;
+    }
+    let port = serve_no_store();
+    let tabref = harness("settle-delayed");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/delayed")]);
+    for (at, button) in ["Read 0", "Read 150", "Read 0 stored"].iter().enumerate() {
+        let run = tabref.ok(&["click", button]);
+        assert!(
+            run.stdout.contains("Loaded") && run.stdout.contains(&format!("{}}}", at + 1)),
+            "{button} reported before the page rendered its reply:\n{}",
+            run.stdout
+        );
+    }
 }
