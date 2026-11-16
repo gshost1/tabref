@@ -32,6 +32,7 @@ use tabref_core::{AppError, Deadline, RefStore};
 use crate::commands::app_guard::{app_has_no_page, app_runtime};
 use command_scope::CommandScope;
 use endpoint_choice::connect_browser;
+use launch_record::load_launched;
 use session_options::SessionOptions;
 use tab_choice::choose_tab;
 use tab_claim::TabClaim;
@@ -163,19 +164,23 @@ impl Session {
 
     /// The flattened session for `target_id`, attached once per connection,
     /// with page and lifecycle events on so navigations, loads and dialogs
-    /// are seen. Turning them on rides in the attach's own round trip. A
-    /// target the browser no longer has is `WINDOW_NOT_FOUND` with kind
-    /// `cdp_target_gone`.
+    /// are seen, and, in a browser tabref launched, the tab told it holds
+    /// the window focus (`OWN_TAB_FOCUS`). Turning them on rides in the
+    /// attach's own round trip. A target the browser no longer has is
+    /// `WINDOW_NOT_FOUND` with kind `cdp_target_gone`.
     pub(crate) fn attach(&mut self, target_id: &str) -> Result<PageSession, AppError> {
         self.scope.claim(target_id)?;
         if let Some(session) = self.attached.get(target_id) {
             return Ok(session.clone());
         }
         let deadline = self.scope.deadline;
-        let events = [
+        let mut events = vec![
             ("Page.enable", json!({})),
             ("Page.setLifecycleEventsEnabled", json!({ "enabled": true })),
         ];
+        if self.launched_by_tabref() {
+            events.push((OWN_TAB_FOCUS, json!({ "enabled": true })));
+        }
         let session = attach_to_target_with(&mut self.connection, target_id, &events, deadline)
             .map_err(|error| {
                 if is_protocol_error(&error) {
@@ -189,10 +194,22 @@ impl Session {
         Ok(session)
     }
 
+    /// Whether `open --launch` started this browser: its tabs are tabref's
+    /// own and headless, so tabref may tell them they hold the window focus.
+    pub(crate) fn launched_by_tabref(&self) -> bool {
+        load_launched(&self.store).is_some_and(|browser| browser.port == self.endpoint.port())
+    }
+
     fn tab_state_name(&self) -> String {
         format!("tab-{}", self.endpoint.port())
     }
 }
+
+/// The attach hook for a tab of a browser tabref launched: the tab reads as
+/// holding the window focus from its attach on, and is never told
+/// otherwise, so its focus handlers run and every command sees the same
+/// focus state. A browser tabref did not launch is never told this.
+const OWN_TAB_FOCUS: &str = "Emulation.setFocusEmulationEnabled";
 
 /// The method a protocol error names: attaching sends several, and the
 /// error should say which one the browser refused.

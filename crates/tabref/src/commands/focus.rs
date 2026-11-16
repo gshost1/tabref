@@ -3,7 +3,8 @@ use std::time::Duration;
 use serde_json::json;
 use tabref_core::{AppError, Deadline, ErrorCode};
 use tabref_page::{
-    ActionNeed, LocateIntent, emulate_focus, focus, focus_target, holds_focus, page_focused,
+    ActionNeed, ElementToken, LocateIntent, focus, focus_kept, focus_target, page_focused,
+    wait_actionable, watch_focus,
 };
 
 use super::act_target::{ActTarget, resolve_target};
@@ -12,9 +13,12 @@ use super::action_report::full_report;
 use super::target_spec::TargetSpec;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
+use crate::session::action_effects::ActionEffects;
 
-const MOVE_GRACE: Duration = Duration::from_millis(60);
-const MOVE_POLL: Duration = Duration::from_millis(20);
+const MOVE_WINDOW: Duration = Duration::from_millis(300);
+const MOVED_AWAY: &str = " (the page moved the focus away)";
+const IN_BACKGROUND: &str =
+    " (the tab is in the background: the page may not run its focus handlers)";
 
 /// Moves the keyboard focus to the element `target` names and reports what
 /// the page did on focus. A name finds a field first, so a field wins over
@@ -33,13 +37,14 @@ pub(crate) fn run(session: &mut Session, target: &str) -> Result<Outcome, AppErr
 }
 
 /// Focuses the element (a label's control for a label) once the gate finds
-/// it shown and enabled and it can take focus; nothing in the page changes
-/// before that. A tab that is in the background or lacks the window focus
-/// is told it has it for this command only, before the watch starts, so
-/// its own visibility and focus events stay out of the report, and is told
-/// so no longer when the command ends. A page that moves the focus away,
-/// even from a short timer, is reported: the focus is checked after the
-/// action settled and for 60 ms more.
+/// it, and a label's control too, shown and enabled, and it can take focus;
+/// nothing in the page changes before that. Only `DOM.focus` is sent: the
+/// tab's window focus is never changed here. A tab of a browser tabref
+/// launched was told at attach that it holds the window focus; in any other
+/// browser a tab that is in the background or lacks the window focus is
+/// focused all the same and said to be in the background, as its page may
+/// not run its focus handlers. A page that moves the focus away within
+/// 300 ms of the focus is reported.
 pub(crate) fn act(
     session: &mut Session,
     target: ActTarget,
@@ -52,43 +57,60 @@ pub(crate) fn act(
         &target.token,
         deadline,
     )?;
-    let emulated = !page_focused(session.connection(), &target.session, deadline)?;
-    if emulated {
-        emulate_focus(session.connection(), &target.session, true, deadline)?;
+    if token != target.token
+        && let Some(blocked) = wait_actionable(
+            session.connection(),
+            &target.session,
+            &token,
+            ActionNeed::Press,
+            deadline,
+        )?
+    {
+        return Err(blocked.error(&target.subject));
     }
-    let focused = focus_and_settle(session, &target, &token, deadline);
-    if emulated {
-        let _ = emulate_focus(session.connection(), &target.session, false, deadline);
-    }
-    let (effects, held) = focused?;
+    let background = !session.launched_by_tabref()
+        && !page_focused(session.connection(), &target.session, deadline)?;
+    let (effects, held) = focus_and_settle(session, &target, &token, deadline)?;
     let mut summary = target.label.clone();
     if !held {
-        summary.push_str(" (the page moved the focus away)");
+        summary.push_str(MOVED_AWAY);
+    }
+    if background {
+        summary.push_str(IN_BACKGROUND);
     }
     Ok(Acted {
         verb: "focus",
-        data: json!({ "action": "focus", "target": target.label, "focused": held }),
+        data: json!({
+            "action": "focus",
+            "target": target.label,
+            "focused": held,
+            "background": background,
+        }),
         summary,
         effects: Some(effects),
         known: target.known,
     })
 }
 
+/// Focuses `token`, starts the page's watch on the focus at once, and
+/// reads the watch once the action settled, so the 300 ms window and the
+/// settle run together.
 fn focus_and_settle(
     session: &mut Session,
     target: &ActTarget,
-    token: &tabref_page::ElementToken,
+    token: &ElementToken,
     deadline: Deadline,
-) -> Result<(crate::session::action_effects::ActionEffects, bool), AppError> {
+) -> Result<(ActionEffects, bool), AppError> {
     let watched = session.watch_action(&target.tab_id, deadline)?;
     focus(session.connection(), &target.session, token, deadline)?;
+    let watch = watch_focus(
+        session.connection(),
+        &target.session,
+        token,
+        MOVE_WINDOW,
+        deadline,
+    )?;
     let effects = session.finish_action(&watched, deadline)?;
-    let grace = deadline.capped(MOVE_GRACE);
-    loop {
-        let held = holds_focus(session.connection(), &target.session, token, deadline)?;
-        if !held || grace.is_expired() {
-            return Ok((effects, held));
-        }
-        std::thread::sleep(MOVE_POLL.min(grace.remaining()));
-    }
+    let held = focus_kept(session.connection(), &target.session, watch, deadline)?;
+    Ok((effects, held))
 }

@@ -1,6 +1,7 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod exports;
+pub mod focus_page;
 #[cfg(unix)]
 pub mod own_chrome;
 
