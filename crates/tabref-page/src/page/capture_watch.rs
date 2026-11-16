@@ -7,8 +7,13 @@
 //! whether any of that changed. The state hangs off a registered symbol of
 //! `window`, apart from the action watch's, and a document that replaced the
 //! watched one has none, which is how a navigation shows. A page with a
-//! frame or embedded object whose document the script cannot read is blind:
-//! it never counts as unchanged.
+//! frame or embedded object whose document the script cannot read, or with
+//! a CSS animation or transition running or pending in any document or
+//! shadow root (each root asked on its own, as a document's list leaves out
+//! frames), is blind: it never counts as unchanged, and the scan stops as
+//! soon as it knows. Form state includes a checkbox's `indeterminate` and a
+//! multi-select's whole selection; focus is followed into open shadow roots
+//! and same-origin frames.
 
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
@@ -20,9 +25,25 @@ const SCAN: &str = r"const scan = () => {
     const roots = [];
     let blind = false;
     let state = '';
+    const frames = 'iframe, frame, object, embed';
+    const moving = root => {
+      try {
+        return root.getAnimations().some(animation => animation.pending || animation.playState === 'running');
+      } catch (error) { return true; }
+    };
+    const unreadable = root => {
+      for (const el of root.querySelectorAll(frames)) {
+        let inner = null;
+        try { inner = el.contentDocument; } catch (error) { inner = null; }
+        if (!inner) return true;
+      }
+      return false;
+    };
     const walk = root => {
       roots.push(root);
+      if (moving(root) || unreadable(root)) { blind = true; return; }
       for (const el of root.querySelectorAll('*')) {
+        if (blind) return;
         if (el.shadowRoot) walk(el.shadowRoot);
         const tag = el.localName;
         if (tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed') {
@@ -30,7 +51,9 @@ const SCAN: &str = r"const scan = () => {
           try { inner = el.contentDocument; } catch (error) { inner = null; }
           if (inner) walk(inner); else blind = true;
         } else if (tag === 'input' || tag === 'textarea' || tag === 'select') {
-          state += '\u0001' + el.value + '\u0002' + (el.checked ? 1 : 0) + '\u0002' + (el.selectedIndex ?? '');
+          state += '\u0001' + el.value + '\u0002' + (el.checked ? 1 : 0) + (el.indeterminate ? 1 : 0)
+            + '\u0002' + (el.selectedIndex ?? '');
+          if (el.multiple && el.selectedOptions) state += '\u0002' + [...el.selectedOptions].map(option => option.index).join(',');
         }
         if (el.hasAttribute('popover')) {
           try { state += '\u0003' + (el.matches(':popover-open') ? 1 : 0); } catch (error) { blind = true; }
@@ -38,8 +61,15 @@ const SCAN: &str = r"const scan = () => {
       }
     };
     walk(document);
+    if (blind) return { roots, blind, active: null, print: '' };
     let active = document.activeElement;
-    while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement;
+    for (;;) {
+      if (active && active.shadowRoot && active.shadowRoot.activeElement) { active = active.shadowRoot.activeElement; continue; }
+      let inner = null;
+      try { inner = active && active.contentDocument; } catch (error) { inner = null; }
+      if (inner && inner.activeElement) { active = inner.activeElement; continue; }
+      break;
+    }
     const box = document.documentElement;
     const place = [location.href, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio,
       box ? box.scrollWidth : 0, box ? box.scrollHeight : 0].join('\u0004');
@@ -51,6 +81,7 @@ const ARM: &str = r"(() => {
   const old = window[key];
   if (old) old.observers.forEach(observer => observer.disconnect());
   const now = scan();
+  if (now.blind) { delete window[key]; return { blind: true }; }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
     active: now.active, print: now.print, blind: now.blind };
   const stop = () => {

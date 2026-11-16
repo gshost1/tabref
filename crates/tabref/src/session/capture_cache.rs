@@ -4,7 +4,14 @@
 //! command clears them all, before and after it runs. A kept capture is used
 //! only while the page's own watch says nothing changed since (see
 //! [`tabref_page::check_capture_watch`]), it is the tab's latest snapshot,
-//! and it is younger than [`MAX_AGE`]. In-process runs keep nothing.
+//! and it is younger than [`MAX_AGE`]. In-process runs keep nothing, and
+//! every in-process command that is not a read writes a new page-actions
+//! stamp to the ref store, which a kept capture must still match, so an
+//! in-process hover between two daemon reads is never missed. The page
+//! scripts that arm and check the watch get [`WATCH_WAIT`] each: a page
+//! whose main thread is held (an open dialog, a long task) is not kept or
+//! reused, and the command goes on as without the cache. At most
+//! [`MAX_KEPT`] tabs keep one.
 #![cfg_attr(not(unix), allow(dead_code))]
 
 use std::collections::HashMap;
@@ -12,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tabref_cdp::PageSession;
-use tabref_core::new_snapshot_id;
+use tabref_core::{RefStore, new_snapshot_id};
 use tabref_page::{CaptureWatch, arm_capture_watch, check_capture_watch, has_closed_shadow_root};
 
 use super::Session;
@@ -20,6 +27,9 @@ use super::captured_snapshot::CapturedSnapshot;
 use super::ref_target::latest_snapshot_of;
 
 const MAX_AGE: Duration = Duration::from_secs(60);
+const WATCH_WAIT: Duration = Duration::from_millis(300);
+const MAX_KEPT: usize = 4;
+const PAGE_ACTIONS: &str = "page-actions";
 
 /// The kept captures, by browser and tab, shared by the daemon's sessions.
 #[derive(Debug, Default)]
@@ -32,6 +42,7 @@ struct Kept {
     captured: Arc<CapturedSnapshot>,
     watch: CaptureWatch,
     taken: Instant,
+    actions: Option<String>,
 }
 
 impl CaptureCache {
@@ -48,7 +59,18 @@ impl CaptureCache {
 
     fn put(&self, key: (String, String), kept: Kept) {
         if let Ok(mut map) = self.kept.lock() {
+            map.retain(|_, old| old.taken.elapsed() < MAX_AGE);
             map.insert(key, kept);
+            while map.len() > MAX_KEPT {
+                let oldest = map
+                    .iter()
+                    .min_by_key(|(_, old)| old.taken)
+                    .map(|(key, _)| key.clone());
+                match oldest {
+                    Some(oldest) => map.remove(&oldest),
+                    None => break,
+                };
+            }
         }
     }
 
@@ -67,36 +89,45 @@ impl Session {
 
     /// A capture of the current tab: the kept one when the page provably
     /// has not changed since it was taken, else a new one.
-    pub(crate) fn current_capture(&mut self) -> Result<CapturedSnapshot, tabref_core::AppError> {
+    pub(crate) fn current_capture(
+        &mut self,
+    ) -> Result<Arc<CapturedSnapshot>, tabref_core::AppError> {
         match self.reusable_capture() {
             Some(captured) => Ok(captured),
-            None => self.capture(),
+            None => self.shared_capture(),
         }
     }
 
     /// The kept capture of the current tab, when it may stand for the page
     /// as it is now. A capture found stale is forgotten.
-    pub(crate) fn reusable_capture(&mut self) -> Option<CapturedSnapshot> {
+    pub(crate) fn reusable_capture(&mut self) -> Option<Arc<CapturedSnapshot>> {
         let cache = self.captures.clone()?;
         let page = self.page().ok()?;
         let key = self.capture_key(&page);
         let kept = cache.take(&key)?;
         let latest = latest_snapshot_of(self.store(), &page.target_id);
         let fresh = kept.taken.elapsed() < MAX_AGE
-            && latest.as_deref() == Some(kept.captured.snapshot_id.as_str());
-        let deadline = self.deadline();
+            && latest.as_deref() == Some(kept.captured.snapshot_id.as_str())
+            && page_actions(self.store()) == kept.actions;
+        let deadline = self.deadline().capped(WATCH_WAIT);
         if fresh && check_capture_watch(self.connection(), &page, &kept.watch, deadline) == "same" {
-            return Some(CapturedSnapshot::clone(&kept.captured));
+            return Some(kept.captured);
         }
         cache.forget(&key);
         None
+    }
+
+    /// Marks that a command which may change the page ran outside the
+    /// daemon, so no capture the daemon kept before it is used again.
+    pub(crate) fn note_page_action(&self) {
+        let _ = self.store().write_state(PAGE_ACTIONS, &new_snapshot_id());
     }
 
     /// Arms the page's watch before a capture, when this command keeps
     /// captures.
     pub(super) fn arm_watch(&mut self, page: &PageSession) -> Option<CaptureWatch> {
         self.captures.as_ref()?;
-        let deadline = self.deadline();
+        let deadline = self.deadline().capped(WATCH_WAIT);
         let token = new_snapshot_id();
         arm_capture_watch(self.connection(), page, &token, deadline)
             .ok()
@@ -108,7 +139,7 @@ impl Session {
     pub(super) fn keep(
         &mut self,
         page: &PageSession,
-        captured: &CapturedSnapshot,
+        captured: &Arc<CapturedSnapshot>,
         watch: Option<CaptureWatch>,
     ) {
         let Some(cache) = self.captures.clone() else {
@@ -123,9 +154,10 @@ impl Session {
             Some(watch) if whole => cache.put(
                 key,
                 Kept {
-                    captured: Arc::new(captured.clone()),
+                    captured: Arc::clone(captured),
                     watch,
                     taken: Instant::now(),
+                    actions: page_actions(self.store()),
                 },
             ),
             _ => cache.forget(&key),
@@ -138,4 +170,8 @@ impl Session {
             page.target_id.clone(),
         )
     }
+}
+
+fn page_actions(store: &RefStore) -> Option<String> {
+    store.read_state(PAGE_ACTIONS)
 }

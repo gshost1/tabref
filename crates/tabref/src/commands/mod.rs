@@ -62,8 +62,27 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         return Ok(skill::run());
     }
     let mut session = Session::open(&session_options(cli))?;
+    let reads = only_reads(&cli.command);
+    if !reads {
+        session.note_page_action();
+    }
     let outcome = dispatch(&mut session, &cli.command);
+    if !reads {
+        session.note_page_action();
+    }
     session.with_warning(outcome)
+}
+
+/// Whether `command` only reads the page (or navigates and reads it), so it
+/// may keep and reuse a capture in the daemon. Any other command may change
+/// a page in ways no page script sees, such as a hover: in the daemon it
+/// clears every kept capture, and in-process it stamps the ref store so the
+/// daemon's kept captures are not used again.
+pub(crate) fn only_reads(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Open { .. } | Command::Snap { .. } | Command::Find { .. } | Command::Read { .. }
+    )
 }
 
 /// What the parsed command asks of its session.

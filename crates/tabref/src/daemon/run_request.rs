@@ -33,7 +33,7 @@ pub(crate) fn run_request(
     }
     let mut options = commands::session_options(&cli);
     options.stdin = request.stdin;
-    let reads = only_reads(&cli.command);
+    let reads = commands::only_reads(&cli.command);
     if !reads {
         state.captures.clear();
     }
@@ -48,14 +48,4 @@ pub(crate) fn run_request(
     let outcome = session.with_warning(outcome);
     state.checkin(session);
     outcome
-}
-
-/// Whether `command` only reads the page (or navigates and reads it), so it
-/// may keep and reuse a capture. Any other command may change a page in ways
-/// no page script sees, such as a hover, so it clears every kept capture.
-fn only_reads(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::Open { .. } | Command::Snap { .. } | Command::Find { .. } | Command::Read { .. }
-    )
 }
