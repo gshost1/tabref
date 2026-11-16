@@ -4,7 +4,9 @@
 //! checkbox's `indeterminate`, focus inside a same-origin frame), a `js`
 //! run, and an in-process command between two daemon ones all make the
 //! next `find` or `snap` capture again. A page whose main thread is held
-//! when the watch is armed is not kept.
+//! when the watch is armed is not kept, and page work already queued when
+//! a capture starts runs before the watch is armed, so it neither goes
+//! unseen nor spoils the kept capture.
 //! Opt-in: `TABREF_LIVE=1 cargo test -p tabref --test live_capture_reuse_more`.
 
 #![cfg(unix)]
@@ -66,6 +68,10 @@ const BUSY: &str = r#"<!doctype html><html><head><title>Busy</title></head><body
 <h1>Guide</h1><p>Alpha needle text.</p>
 <script>addEventListener('load', () => setTimeout(() => { const until = Date.now() + 1500; while (Date.now() < until); }, 0));</script>
 </body></html>"#;
+
+const QUEUED: &str = "{ setTimeout(() => { \
+fetch(location.href).then(reply => reply.text()).then(() => { const p = document.createElement('p'); p.textContent = 'Queued needle words'; document.body.append(p); }); \
+const until = Date.now() + 250; while (Date.now() < until); }, 0); 1 }";
 
 fn run(tabref: &Harness, args: &[&str], env: &[(&str, &str)]) -> Run {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tabref"));
@@ -201,5 +207,30 @@ fn a_page_too_busy_to_arm_the_watch_is_not_kept() {
         "kept a capture whose watch was armed late"
     );
     assert!(started.elapsed() < Duration::from_secs(8));
+    stop(&tabref);
+}
+
+#[test]
+fn work_queued_before_a_capture_runs_before_the_watch_is_armed() {
+    if !live() {
+        return;
+    }
+    let tabref = common::harness("reuse-queued");
+    for round in 0..3 {
+        open(&tabref, STILL);
+        run(&tabref, &["js", QUEUED], &[]);
+        let snapped = run(&tabref, &["snap"], &[]);
+        assert!(
+            snapped.stdout.contains("Queued needle"),
+            "round {round}: the capture missed work queued before it:\n{}",
+            snapped.stdout
+        );
+        let found = run(&tabref, &["find", "needle"], &[]);
+        assert_eq!(
+            snapshot_id(&found),
+            snapshot_id(&snapped),
+            "round {round}: the queued work spoiled the kept capture"
+        );
+    }
     stop(&tabref);
 }
