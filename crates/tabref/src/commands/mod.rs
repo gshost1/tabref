@@ -64,18 +64,20 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         return Ok(skill::run());
     }
     let mut session = Session::open(&session_options(cli))?;
+    session.connection().answer_next_dialog(cli.dialog.clone());
     let outcome = dispatch_cli(&mut session, cli);
     session.with_warning(outcome)
 }
 
-/// Runs the parsed command line against `session`: its `--dialog` answer
-/// is set for the first dialog it applies to that the whole command meets
-/// (`do` included), and cleared after it, so a kept connection never
-/// carries it into the next command. The dialogs no part of the report
-/// took are added to it (or to its error), and a result says when no
-/// dialog used the answer.
+/// Runs the parsed command line against `session`, whose connection holds
+/// the command's `--dialog` answer for the first dialog it applies to that
+/// the whole command meets (`do` included; set when the session opened, or
+/// when the daemon began the command, so a dialog left from the last
+/// command gets it too). The answer is cleared after the command, so a kept
+/// connection never carries it into the next one. The dialogs no part of
+/// the report took are added to it (or to its error), and a result says
+/// when no dialog used the answer.
 pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, AppError> {
-    session.connection().answer_next_dialog(cli.dialog.clone());
     let outcome = dispatch(session, &cli.command);
     let unused = session.connection().take_dialog_choice();
     let left = dialog_report::navigation_dialogs(session);
@@ -136,6 +138,7 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
         timeout_ms: cli.timeout_ms(),
         launch,
         stdin: None,
+        dialog: cli.dialog.clone(),
     }
 }
 

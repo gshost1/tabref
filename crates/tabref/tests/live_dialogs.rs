@@ -158,7 +158,10 @@ fn dialog_answers_are_chosen_for_the_next_dialog_and_reported() {
         "{}",
         later.stdout
     );
-    assert_eq!(after_later, "ly");
+    assert_eq!(
+        after_later, "ly\ndialog confirm \"Later?\" accepted",
+        "the next command without --dialog accepts the late dialog and reports it"
+    );
     assert!(batch.ok, "{}{}", batch.stdout, batch.stderr);
     assert!(
         batch.stdout.contains("stayed on the page"),
@@ -182,4 +185,56 @@ fn dialog_answers_are_chosen_for_the_next_dialog_and_reported() {
         left.stdout
     );
     assert_eq!(left_title, "Elsewhere");
+}
+
+const LATER: &str = "<!doctype html><title>Later</title>\
+    <button onclick=\"setTimeout(() => { document.title = String(confirm('Later?')); }, 300)\">\
+    Later</button>";
+
+/// A dialog that opens after its command ended (here from a timer) is
+/// answered when the next command starts, under that command's `--dialog`,
+/// and reported by it; a next command without `--dialog` accepts it and
+/// reports that.
+#[test]
+fn a_dialog_that_opens_after_a_command_is_answered_and_reported_by_the_next() {
+    if !live() {
+        return;
+    }
+    let tabref = harness("dialogs-later");
+    let port = serve(&[("/", LATER)]);
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+
+    let first = tabref.ok(&["--dialog", "dismiss", "click", "Later"]);
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    let next = tabref.ok(&["--dialog", "dismiss", "js", "1"]);
+    let dismissed_title = tabref
+        .ok(&["js", "document.title"])
+        .stdout
+        .trim()
+        .to_owned();
+
+    tabref.ok(&["click", "Later"]);
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    let plain = tabref.ok(&["js", "1"]);
+    let accepted_title = tabref
+        .ok(&["js", "document.title"])
+        .stdout
+        .trim()
+        .to_owned();
+    let _ = tabref.run(&["daemon", "stop"]);
+
+    assert!(first.stdout.contains("was not used"), "{}", first.stdout);
+    assert!(
+        next.stdout.contains("dialog confirm \"Later?\" dismissed"),
+        "the next command did not answer and report the late dialog: {}",
+        next.stdout
+    );
+    assert!(!next.stdout.contains("was not used"), "{}", next.stdout);
+    assert_eq!(dismissed_title, "false");
+    assert!(
+        plain.stdout.contains("dialog confirm \"Later?\" accepted"),
+        "{}",
+        plain.stdout
+    );
+    assert_eq!(accepted_title, "true");
 }
