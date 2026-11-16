@@ -3,6 +3,8 @@
 pub mod exports;
 #[cfg(unix)]
 pub mod own_chrome;
+#[cfg(unix)]
+pub mod slow_serve;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};

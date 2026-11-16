@@ -83,7 +83,7 @@ pub use settle::download_origin::DownloadOrigin;
 pub use settle::download_record::DownloadRecord;
 pub use settle::download_state::DownloadState;
 pub use settle::download_timing::DownloadTiming;
-pub use settle::load_settle::{LOAD_SETTLE_CAP, LoadSettle, RENDER_CAP, settle_load};
+pub use settle::load_settle::{LOAD_SETTLE_CAP, LoadSettle, RENDER_CAP, SettleScope, settle_load};
 pub use settle::load_watch::LoadWatch;
 pub use settle::page_wait::{wait_for_text, wait_for_url};
 pub use settle::settle_outcome::SettleOutcome;
