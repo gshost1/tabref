@@ -65,7 +65,12 @@ fn a_click_whose_effect_lands_in_an_open_shadow_root_reports_the_change() {
     tabref.ok(&["open", &format!("{base}/shadow")]);
     let kept = tabref.ok(&["click", "Keep address"]);
     assert!(!kept.stdout.contains(NOTHING), "{}", kept.stdout);
-    assert!(kept.stdout.contains("kept for billing"), "{}", kept.stdout);
+    assert_eq!(
+        kept.stdout.matches("kept for billing").count(),
+        1,
+        "{}",
+        kept.stdout
+    );
     assert!(!kept.stdout.contains("color: teal"), "{}", kept.stdout);
     let noop = tabref.ok(&["click", "Noop"]);
     assert_eq!(noop.stdout.trim(), format!("clicked \"Noop\" {NOTHING}"));
