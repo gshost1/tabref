@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::json;
 use tabref_core::{AppError, Deadline};
-use tabref_page::{ActionNeed, LocateIntent, focus, press_key};
+use tabref_page::{ActionNeed, FocusTarget, LocateIntent, focus, press_key};
 
 use super::act_target::{ActTarget, resolve_target};
 use super::acted::Acted;
@@ -42,12 +42,11 @@ pub(crate) fn act(
     let (page, tab, label, known) = match target {
         Some(target) => {
             target.ensure_ready(session, ActionNeed::Press, deadline)?;
-            focus(
-                session.connection(),
-                &target.session,
-                &target.token,
-                deadline,
-            )?;
+            let plain = FocusTarget {
+                token: target.token.clone(),
+                in_page: false,
+            };
+            focus(session.connection(), &target.session, &plain, deadline)?;
             let label = format!(" in {}", target.label);
             (target.session, target.tab_id, label, target.known)
         }

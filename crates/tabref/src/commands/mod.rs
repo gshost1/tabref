@@ -21,6 +21,7 @@ pub(crate) mod download_wait;
 pub(crate) mod downloads;
 pub(crate) mod fill;
 pub(crate) mod find;
+pub(crate) mod focus;
 pub(crate) mod hover;
 pub(crate) mod js;
 pub(crate) mod kept_download;
@@ -141,6 +142,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
         Command::Check { target } => check::run(session, target, true),
         Command::Uncheck { target } => check::run(session, target, false),
         Command::Press { key, target } => press::run(session, key, target.as_deref()),
+        Command::Focus { target } => focus::run(session, target),
         Command::Hover { target } => hover::run(session, target),
         Command::Screenshot { target, out } => {
             screenshot::run(session, target.as_deref(), out.as_deref())

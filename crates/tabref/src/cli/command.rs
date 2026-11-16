@@ -91,6 +91,11 @@ pub(crate) enum Command {
         #[arg(value_name = "TARGET")]
         target: Option<String>,
     },
+    /// Move the keyboard focus to an element
+    Focus {
+        #[arg(value_name = "TARGET")]
+        target: String,
+    },
     /// Save a PNG of the visible page, or of one element (TARGET)
     ///
     /// The PNG holds whatever the page shows, logged-in content included, and
@@ -233,6 +238,7 @@ impl Command {
             Self::Check { .. } => "check",
             Self::Uncheck { .. } => "uncheck",
             Self::Press { .. } => "press",
+            Self::Focus { .. } => "focus",
             Self::Screenshot { .. } => "screenshot",
             Self::Hover { .. } => "hover",
             Self::Scroll { .. } => "scroll",

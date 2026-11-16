@@ -20,7 +20,7 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
 
 ## Acting
 `click T`, `fill T VALUE`, `type T TEXT` (adds), `select T LABEL|VALUE`, `check T`, `uncheck T`,
-`press KEY [T]`, `hover T`, `scroll down|T`, `double-click T`, `upload T FILE`.
+`press KEY [T]`, `focus T`, `hover T`, `scroll down|T`, `double-click T`, `upload T FILE`.
 T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
 `"Edit" in "<row text>"`, `"Reply" after "<text>"`. Several or no matches fail with candidates.
 Each action prints what changed (new address, `{3 -> 4}`, `"67.00" -> "62.00"`, new controls), so do not

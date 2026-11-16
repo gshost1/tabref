@@ -38,7 +38,7 @@ impl Session {
         self.connection.take_events();
         let connection = &self.connection;
         self.attached
-            .retain(|_, session| !connection.is_session_detached(&session.session_id));
+            .retain(|_, tab| !connection.is_session_detached(&tab.session.session_id));
         Ok(())
     }
 
@@ -54,12 +54,12 @@ impl Session {
     }
 
     pub(crate) fn endpoint(&self) -> &BrowserEndpoint {
-        &self.endpoint
+        &self.browser.endpoint
     }
 
     /// Keeps the user agent the browser gave, so a kept session asks once.
     pub(crate) fn remember_user_agent(&mut self, agent: &str) {
-        self.endpoint.user_agent = Some(agent.to_owned());
+        self.browser.endpoint.user_agent = Some(agent.to_owned());
     }
 
     pub(crate) fn attached_count(&self) -> usize {
