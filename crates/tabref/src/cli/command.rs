@@ -190,8 +190,11 @@ pub(crate) enum Command {
         #[arg(long)]
         off: bool,
     },
-    /// Print the agent guide
-    Skill,
+    /// Print the agent guide (`more` adds the rare commands)
+    Skill {
+        #[arg(value_parser = ["more"])]
+        topic: Option<String>,
+    },
     /// Start, inspect or stop the background daemon that keeps the browser connection
     Daemon {
         #[arg(value_parser = ["start", "status", "stop"])]
@@ -225,7 +228,7 @@ impl Command {
             Self::Tab { .. } => "tab",
             Self::Close { .. } => "close",
             Self::Connect { .. } => "connect",
-            Self::Skill => "skill",
+            Self::Skill { .. } => "skill",
             Self::Daemon { .. } => "daemon",
         }
     }
