@@ -41,6 +41,7 @@ pub(crate) mod select_option;
 pub(crate) mod select_outcome;
 pub(crate) mod text_change;
 pub(crate) mod text_diff;
+pub(crate) mod text_reorder;
 pub(crate) mod unactionable;
 pub(crate) mod upload;
 pub(crate) mod upload_outcome;
