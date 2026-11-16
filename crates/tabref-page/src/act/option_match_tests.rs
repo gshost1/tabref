@@ -153,9 +153,15 @@ fn a_choice_that_names_nothing_is_missing() {
 }
 
 #[test]
-fn a_value_that_is_another_label_prefers_the_label() {
+fn a_label_and_another_option_s_value_alike_are_ambiguous() {
     let options = vec![option("2", "1"), option("3", "2")];
-    assert_eq!(pick_option(&options, "2"), OptionPick::Chosen(0));
+    assert_eq!(pick_option(&options, "2"), OptionPick::Ambiguous(vec![0, 1]));
+    let printed_alike = vec![option("2", "x"), option("Two", "2")];
+    assert_eq!(
+        pick_option(&printed_alike, "2"),
+        OptionPick::Ambiguous(vec![0, 1])
+    );
+    assert_eq!(pick_option(&printed_alike, "Two (2)"), OptionPick::Chosen(1));
 }
 
 #[test]
@@ -174,4 +180,50 @@ fn the_listing_prints_each_option_as_the_view_does_and_caps_the_rest() {
     assert!(text.starts_with("Item 0 (i0) | Item 1 (i1)"), "{text}");
     assert!(text.ends_with(" … and 70 more"), "{text}");
     assert!(!text.contains("Item 30 "), "{text}");
+}
+
+#[test]
+fn a_start_shared_with_a_disabled_option_is_ambiguous() {
+    let options = vec![
+        disabled("Saturday 9:00", "sat9"),
+        option("Saturday 11:00", "sat11"),
+    ];
+    assert_eq!(
+        pick_option(&options, "Sat"),
+        OptionPick::Ambiguous(vec![0, 1])
+    );
+    let long = "Department of Cardiovascular and Thoracic Surgery";
+    let cut = vec![
+        disabled(&format!("{long}, North"), "n"),
+        option(&format!("{long}, South"), "s"),
+    ];
+    assert_eq!(
+        pick_option(&cut, "Department of Cardiovascular and Thorac…"),
+        OptionPick::Ambiguous(vec![0, 1])
+    );
+}
+
+#[test]
+fn the_exact_printed_form_picks_a_duplicate_label() {
+    let options = vec![option("Paris", "paris"), option("Paris", "paris-tx")];
+    assert_eq!(pick_option(&options, "Paris"), OptionPick::Chosen(0));
+    assert_eq!(
+        pick_option(&options, "Paris (paris-tx)"),
+        OptionPick::Chosen(1)
+    );
+}
+
+#[test]
+fn a_label_that_ends_in_disabled_is_its_own_label() {
+    let options = vec![option("Seat (disabled)", "s1"), option("Seat", "s2")];
+    assert_eq!(
+        pick_option(&options, "Seat (disabled)"),
+        OptionPick::Chosen(0)
+    );
+}
+
+#[test]
+fn the_listing_escapes_bars_and_control_characters() {
+    let options = vec![option("A | B\u{1b}[1m", "ab")];
+    assert_eq!(listing(&options, &[0]), "A \\| B\\u001b[1m (ab)");
 }
