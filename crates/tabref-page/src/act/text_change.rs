@@ -4,14 +4,20 @@ const CONTEXT_CHARS: usize = 40;
 const LINE_CHARS: usize = 100;
 const ADDED_CHARS: usize = 400;
 const MIDDLE_CHARS: usize = 60;
+const BRIEF_ROWS_CHARS: usize = 80;
+const ROWS_LABEL: &str = "now starting:";
+const ROWS_SHOWN: usize = 5;
 
 /// One line of a page's rendered text that an action changed: rewritten in
-/// place, added or removed.
+/// place, added or removed; or a run of lines the action put in a new
+/// order (a sorted table drawn again), as how many lines the run holds now
+/// and the first of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextChange {
     Changed { before: String, after: String },
     Added(String),
     Removed(String),
+    Reordered { count: usize, first: Vec<String> },
 }
 
 impl TextChange {
@@ -20,6 +26,7 @@ impl TextChange {
     pub fn brief(&self) -> String {
         match self {
             Self::Added(line) => format!("+ {}", cut(line, LINE_CHARS)),
+            Self::Reordered { count, first } => brief_rows(*count, first),
             other => other.to_string(),
         }
     }
@@ -29,14 +36,48 @@ impl fmt::Display for TextChange {
     /// `▲ {3 -> 4} ▼ Books set in winter` for a rewritten line, keeping the
     /// words around the change; `+ line` otherwise, whole up to 400
     /// characters so a validation message keeps its list, and `- line` cut
-    /// to 100. A cut ends after a whole word.
+    /// to 100. A cut ends after a whole word. A reorder prints its first
+    /// rows, one per indented line, and how to see the rest.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Reordered { count, first } => formatter.write_str(&rows_block(*count, first)),
             Self::Changed { before, after } => formatter.write_str(&inline_change(before, after)),
             Self::Added(line) => write!(formatter, "+ {}", cut(line, ADDED_CHARS)),
             Self::Removed(line) => write!(formatter, "- {}", cut(line, LINE_CHARS)),
         }
     }
+}
+
+fn rows_block(count: usize, first: &[String]) -> String {
+    let mut block = format!("reordered {count} rows, {ROWS_LABEL}");
+    let shown = first.len().min(ROWS_SHOWN);
+    for row in &first[..shown] {
+        block.push_str("\n  ");
+        block.push_str(&cut(row, LINE_CHARS));
+    }
+    if count > shown {
+        block.push_str(&format!("\n  (+{} more: tabref snap)", count - shown));
+    }
+    block
+}
+
+fn brief_rows(count: usize, first: &[String]) -> String {
+    let mut rows = String::new();
+    let mut shown = 0;
+    for row in first {
+        let row = cut(row, BRIEF_ROWS_CHARS);
+        let joined = rows.chars().count() + row.chars().count() + 3;
+        if shown > 0 && joined > BRIEF_ROWS_CHARS {
+            break;
+        }
+        if shown > 0 {
+            rows.push_str(" | ");
+        }
+        rows.push_str(&row);
+        shown += 1;
+    }
+    let more = if count > shown { " …" } else { "" };
+    format!("reordered {count} rows, {ROWS_LABEL} {rows}{more}")
 }
 
 fn inline_change(before: &str, after: &str) -> String {
