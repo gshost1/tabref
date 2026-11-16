@@ -199,6 +199,10 @@ class Tokens(Base):
         self.revoke(decoy["id"])
         self.assertFalse(self.verdict())
 
+    def test_a_body_that_is_not_an_object_is_refused(self):
+        self.assertEqual(post_json("/console/tokens/revoke", [1, 2])[0], 400)
+        self.assertEqual(post_json("/console/notifications/save", "x")[0], 400)
+
     def test_a_wrong_confirmation_revokes_nothing(self):
         t = self.w["dw3"]["expected"][0]
         self.assertEqual(post_json("/console/tokens/revoke", {"id": t, "confirm": "nope"})[0], 400)

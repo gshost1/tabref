@@ -158,6 +158,8 @@ class Handler(BaseHTTPRequestHandler):
                 f = json.loads(raw or "{}")
             except ValueError:
                 return self.json_reply(400, {"error": "bad json"})
+            if not isinstance(f, dict):
+                return self.json_reply(400, {"error": "bad json"})
         else:
             f = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(raw, keep_blank_values=True).items()}
         with LOCK:
