@@ -23,6 +23,7 @@ pub(crate) mod user_chrome;
 pub(crate) mod user_chrome_record;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde_json::json;
 use tabref_cdp::{
@@ -145,7 +146,8 @@ impl Session {
     /// tabref worked in before stops being told it holds the window focus.
     pub(crate) fn use_tab(&mut self, target_id: &str) -> Result<(), AppError> {
         self.scope.claim(target_id)?;
-        self.leave_other_tabs(Some(target_id), self.scope.deadline);
+        let leaving = self.scope.deadline.capped(Duration::from_millis(LEAVE_MS));
+        self.leave_other_tabs(Some(target_id), leaving);
         if remembered_is(&self.store, &self.tab_state_name(), target_id) {
             self.scope.tab = Some(target_id.to_owned());
             return Ok(());
@@ -278,8 +280,9 @@ impl Session {
 /// or lose it, until a command next makes it current.
 const OWN_TAB_FOCUS: &str = "Emulation.setFocusEmulationEnabled";
 
-/// How long a command that ends spends telling tabs it left that they no
-/// longer hold the window focus.
+/// How long a command spends telling the tabs it leaves, on a tab change
+/// or when it ends, that they no longer hold the window focus: a page that
+/// stalls in its blur handler must not hold the command up.
 const LEAVE_MS: u64 = 300;
 
 /// An attach the browser refused: the target is gone.
