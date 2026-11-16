@@ -6,7 +6,7 @@ Each solver reads the page the way an agent would (the prompt's values from the 
 the DOM), acts with mouse clicks, keyboard input and value-plus-events on date, time and select inputs, and returns
 an answer. The harness's own Site starts the dev server; verify_web then judges the site's recorded state.
 
-  ~/bin/chrome-slot python3 -I -B bench/dev/tests/solve_cdp.py [--runs 0-4] [--tasks dw1,dp2] [--base URL]
+  python3 -I -B bench/dev/tests/solve_cdp.py [--runs 0-4] [--tasks dw1,dp2] [--base URL]
 
 Public tasks run on run 0 only (their pages do not depend on the seed; --public-every-run to repeat them). Chrome
 runs headless on a fresh profile under <main checkout>/.cache/dev-solver/ (never /tmp), removed at the end.
