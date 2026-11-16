@@ -6,8 +6,9 @@ the user's own Chrome, Chrome-based apps: `tabref skill more`. Options: `tabref 
 
 ## Reading
 One line per block; `#` lines are headings. Controls show their ref: `[e5 button Save]`,
-`[e7 Edit -> /admin/7/edit]` (open the address or click the ref). Lists say `N items:`, tables
-`table N rows:`, repeats `(1/3)`: count with these. A cut ends with the command for the rest
+`[e7 Edit -> /admin/7/edit]` (open the address or click the ref),
+`[e9 select Size = "M" options: S | M | L]`. Lists say `N items:`, tables `table N rows:`,
+repeats `(1/3)`: count with these across the whole page, not the first block. A cut ends with the command for the rest
 (`tabref snap --rows 21-`); run it before answering about it. `tabref find TEXT` searches all text,
 hidden too; `tabref read` prints the main text. A `dialog` line at the top: click one of its buttons (decline cookies).
 
@@ -27,11 +28,12 @@ It stops at the first failing step; the last step prints the full change.
     for name price in Cap 12.00 Mug 9.50
       click "Edit" in "{name}"
       fill "Price" {price}
+      click "Save"
     end
-    click "Save"
     EOF
 
-Steps: any action but `upload`, `open URL`, `expect text|gone|url X`, `expect T is visible|gone|value=X`,
-`read [T]`, `find TEXT`, `js "EXPR"`, `snap`. To load more of a list, repeat `scroll down` in a `for`
-loop, then `find`: each scroll waits for what it loads. `tabref js "EXPR"` returns a page value as JSON.
+Steps: any action but `upload`, `open URL`, `expect text|gone|url X`,
+`expect T is visible|enabled|hidden|gone|value=X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
+To load more of a list, repeat `scroll down` in a `for` loop (`for n in 1 2 3 4 5 6`), then `find`:
+each scroll waits for what it loads. `tabref js "EXPR"` returns a page value as JSON.
 Tabs: `tabref tabs`, `tabref tab N`, `tabref open --new-tab URL`.

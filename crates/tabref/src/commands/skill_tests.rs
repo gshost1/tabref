@@ -3,7 +3,7 @@ use super::run;
 #[test]
 fn the_guide_stays_short_and_points_to_the_rare_commands() {
     let guide = run(None).text;
-    assert!(guide.len() <= 2_200, "{} bytes", guide.len());
+    assert!(guide.len() <= 2_300, "{} bytes", guide.len());
     assert!(guide.contains("tabref skill more"));
     let more = run(Some("more")).text;
     for rare in [
@@ -46,4 +46,20 @@ fn the_guide_says_what_to_do_instead_of_what_not_to() {
     ] {
         assert!(!guide.contains(misleading), "{misleading}");
     }
+}
+
+#[test]
+fn the_guide_keeps_the_forms_a_model_copies() {
+    let guide = run(None).text;
+    for form in [
+        "across the whole page, not the first block",
+        "[e9 select Size = \"M\" options: S | M | L]",
+        "visible|enabled|hidden|gone|value=X",
+        "for n in 1 2 3 4 5 6",
+    ] {
+        assert!(guide.contains(form), "{form}");
+    }
+    let example = guide.split("tabref do <<'EOF'").nth(1).unwrap_or_default();
+    let body = example.split("\n    end").next().unwrap_or_default();
+    assert!(body.contains("click \"Save\""), "{body}");
 }
