@@ -30,7 +30,9 @@ pub(crate) struct Cli {
     /// whole command, a `do` batch included: accept, dismiss, or
     /// accept=TEXT (for the first prompt). Alerts, and every other dialog,
     /// are accepted, as without it; so is a dialog that opens after a
-    /// command ends, which the next command reports
+    /// command ends, which the next command reports. Without the daemon
+    /// (always on Windows) such a dialog blocks the page until it is
+    /// answered in the browser
     #[arg(long, global = true, value_name = "ANSWER", value_parser = dialog_choice)]
     pub(crate) dialog: Option<DialogChoice>,
     #[command(subcommand)]
