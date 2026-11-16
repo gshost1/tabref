@@ -11,8 +11,14 @@ use crate::{CdpConnection, PageSession};
 /// document, open shadow roots included, each with the number of steps up
 /// from the target to the first ancestor that holds it. Shadow roots are
 /// crossed to their host on the way up, so a drop zone inside a component
-/// still finds an input beside the component.
-const SEARCH: &str = r"function(mode, index) {
+/// still finds an input beside the component. An input `crosses` when it
+/// belongs to a form other than the target's, or sits in a shadow root
+/// whose host is not around the target. The list carries a `key` of
+/// everything the choice rests on; "pick" returns the input only while the
+/// page still gives the same key, so an input that a re-render moved into
+/// the listed place is never the one that gets the files. The names keep
+/// only ASCII letters, digits, `_`, `.` and `-` of the page's attributes.
+const SEARCH: &str = r"function(mode, index, expected) {
   const isFile = (el) => !!el && el.localName === 'input' && el.type === 'file';
   const up = (node) => {
     const parent = node.parentNode;
@@ -37,17 +43,26 @@ const SEARCH: &str = r"function(mode, index) {
   for (const extra of [this, labelled]) {
     if (isFile(extra) && !inputs.includes(extra)) inputs.push(extra);
   }
-  if (mode === 'pick') return inputs[index] || null;
+  const ownForm = this.form && this.form.localName === 'form' ? this.form : null;
+  const targetForm = ownForm || chain.find((node) => node.localName === 'form') || null;
+  const crosses = (el) => {
+    if (el.form && el.form !== targetForm) return true;
+    for (let root = el.getRootNode(); root && root.host; root = root.host.getRootNode()) {
+      if (!place.has(root.host)) return true;
+    }
+    return false;
+  };
   const depthOf = (el) => {
     for (let node = el; node; node = up(node)) {
       if (place.has(node)) return place.get(node);
     }
     return null;
   };
+  const tidy = (text) => String(text).slice(0, 100).replace(/[^A-Za-z0-9_.-]/g, '');
   const nameOf = (el) => {
-    if (el.id) return 'input#' + el.id;
-    if (el.name) return 'input[name=' + el.name + ']';
-    const classes = (el.getAttribute('class') || '').trim().split(/\s+/).filter(Boolean).slice(0, 2);
+    if (tidy(el.id)) return 'input#' + tidy(el.id);
+    if (tidy(el.name)) return 'input[name=' + tidy(el.name) + ']';
+    const classes = (el.getAttribute('class') || '').trim().split(/\s+/).map(tidy).filter(Boolean).slice(0, 2);
     if (classes.length) return 'input.' + classes.join('.');
     return 'input[type=file]';
   };
@@ -56,26 +71,29 @@ const SEARCH: &str = r"function(mode, index) {
     if (box.width * box.height === 0) return true;
     return el.checkVisibility ? !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) : false;
   };
-  return {
-    top: place.has(top) ? place.get(top) : null,
-    candidates: inputs.map((el, at) => ({
-      index: at,
-      name: nameOf(el),
-      hidden: hiddenOf(el),
-      multiple: el.multiple,
-      disabled: el.disabled,
-      self: el === this,
-      labelled: el === labelled,
-      depth: depthOf(el),
-    })),
-  };
+  const candidates = inputs.map((el, at) => ({
+    index: at,
+    name: nameOf(el),
+    multiple: el.multiple,
+    disabled: el.disabled,
+    self: el === this,
+    labelled: el === labelled,
+    depth: depthOf(el),
+    crosses: crosses(el),
+  }));
+  const at = place.has(top) ? place.get(top) : null;
+  const key = JSON.stringify([at, candidates]);
+  if (mode === 'pick') return key === expected ? inputs[index] || null : null;
+  candidates.forEach((candidate, at) => { candidate.hidden = hiddenOf(inputs[at]); });
+  return { top: at, key, candidates };
 }";
 
-/// The file inputs the target can reach, and the depth of the page body
-/// above it.
+/// The file inputs the target can reach, the depth of the page body above
+/// it, and the key "pick" checks the page against.
 pub(crate) struct FileInputs {
     pub(crate) candidates: Vec<FileInputCandidate>,
     pub(crate) top: Option<u32>,
+    pub(crate) key: String,
 }
 
 pub(crate) fn list_file_inputs(
@@ -90,7 +108,7 @@ pub(crate) fn list_file_inputs(
         object,
         ElementCall {
             function: SEARCH,
-            arguments: vec![json!("list"), json!(0)],
+            arguments: vec![json!("list"), json!(0), json!("")],
         },
         deadline,
     )?;
@@ -105,24 +123,34 @@ pub(crate) fn list_file_inputs(
         .get("top")
         .and_then(Value::as_u64)
         .and_then(|depth| u32::try_from(depth).ok());
-    Ok(FileInputs { candidates, top })
+    let key = listed
+        .get("key")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Ok(FileInputs {
+        candidates,
+        top,
+        key,
+    })
 }
 
 /// The remote object id of the input the search listed at `index`, or
-/// `None` when it left the page since it was listed.
+/// `None` when the page's file inputs are no longer the ones it listed.
 pub(crate) fn pick_file_input(
     connection: &mut CdpConnection,
     session: &PageSession,
     object: &str,
-    index: usize,
+    listed: (&FileInputs, usize),
     deadline: Deadline,
 ) -> Result<Option<String>, AppError> {
+    let (inputs, index) = listed;
     let reply = connection.call(
         "Runtime.callFunctionOn",
         json!({
             "objectId": object,
             "functionDeclaration": SEARCH,
-            "arguments": [{ "value": "pick" }, { "value": index }],
+            "arguments": [{ "value": "pick" }, { "value": index }, { "value": inputs.key }],
             "returnByValue": false,
             "awaitPromise": false,
         }),
