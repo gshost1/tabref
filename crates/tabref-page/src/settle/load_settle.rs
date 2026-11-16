@@ -15,7 +15,7 @@ use crate::{CdpConnection, CdpEvent};
 use tabref_cdp::is_timeout;
 
 /// How long after `load` the page's own work is waited for.
-pub const LOAD_SETTLE_CAP: Duration = Duration::from_millis(350);
+pub const LOAD_SETTLE_CAP: Duration = Duration::from_millis(300);
 /// How long after `load` a near-empty page is waited for while a fetch of
 /// its own site that was already in flight at `load` has not finished.
 pub const RENDER_CAP: Duration = Duration::from_millis(1_500);
@@ -58,7 +58,7 @@ pub struct SettleScope {
 
 /// Waits, after `load`, until the page's XHR and fetch requests to its own
 /// site have finished and neither they nor the DOM have changed for 50 ms,
-/// for at most 350 ms (a read at the bound may take 30 ms more). A page
+/// for at most 300 ms (a read at the bound may take 30 ms more). A page
 /// that is near-empty then (see [`LoadStatus`]) and still waits on a fetch
 /// that was in flight at `load` gets up to 1.5 s in all, for that fetch
 /// alone: DOM changes and later requests (a clock, a poll) never extend
