@@ -116,3 +116,27 @@ fn new_tabs_open_in_the_background() {
     assert_eq!(target, "T7");
     assert_eq!(sent.lock().unwrap()[0]["params"]["background"], true);
 }
+
+#[test]
+fn a_tab_that_never_answers_its_attach_is_said_to_be_maybe_blocked_by_a_dialog() {
+    let transport = ScriptedTransport::new()
+        .expect("Target.attachToTarget", json!({ "sessionId": "S9" }))
+        .expect_silence("Runtime.runIfWaitingForDebugger")
+        .expect_silence("Page.enable");
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let error = attach_to_target_with(
+        &mut connection,
+        "P1",
+        &[("Page.enable", json!({}))],
+        Deadline::after(50).unwrap(),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, tabref_core::ErrorCode::Timeout);
+    let hint = error.suggestion.unwrap_or_default();
+    assert!(
+        hint.contains("blocked by a dialog that opened after the last command"),
+        "{hint}"
+    );
+}

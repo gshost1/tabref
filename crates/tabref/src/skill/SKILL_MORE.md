@@ -7,7 +7,8 @@ command; a download that starts after the command goes to Chrome's own folder an
 
 JavaScript dialogs are accepted and reported; `--dialog dismiss` (or `accept=TEXT` for a prompt) answers the
 first confirm, prompt or leave-page dialog of the whole command, `do` included; not reliable while another
-tabref command runs at the same time.
+tabref command runs at the same time. Without the daemon (always on Windows), a dialog that opens after a
+command ends blocks the page until it is answered in the browser.
 
 Browsers: `tabref open URL --launch` starts tabref's own Chrome when none is connected; add
 `--profile DIR` to keep logins between runs (a profile of tabref's own, never yours). `tabref close --browser`

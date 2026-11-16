@@ -6,7 +6,9 @@
 //! that `js` raised, and a `beforeunload` on navigation kept (dismissed, by
 //! `open` and by `do`'s open step) and left (accepted). Each result says
 //! which dialog opened and how it was answered. Through the daemon, so the
-//! flag reaches it. Live (`TABREF_LIVE=1`).
+//! flag reaches it; also run with `TABREF_NO_DAEMON=1`, where the dialogs
+//! that open after a command ended are left out, as no connection is
+//! attached to answer them. Live (`TABREF_LIVE=1`).
 
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -69,9 +71,11 @@ fn dialog_answers_are_chosen_for_the_next_dialog_and_reported() {
     let warned = tabref.ok(&["--dialog", "dismiss", "click", "Warn"]);
     let after_warn = title();
     let asked = tabref.ok(&["--dialog", "dismiss", "js", "confirm('Js?') ? 'y' : 'n'"]);
-    let later = tabref.ok(&["--dialog", "dismiss", "click", "Later"]);
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    let after_later = title();
+    let late = with_daemon().then(|| {
+        let later = tabref.ok(&["--dialog", "dismiss", "click", "Later"]);
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        (later, title())
+    });
 
     let do_open = format!("click Arm; open {away}");
     let batch = tabref.run(&["--dialog", "dismiss", "do", &do_open]);
@@ -153,15 +157,17 @@ fn dialog_answers_are_chosen_for_the_next_dialog_and_reported() {
         "a dialog js raised was not reported: {}",
         asked.stdout
     );
-    assert!(
-        later.stdout.contains("one that opens after it is accepted"),
-        "{}",
-        later.stdout
-    );
-    assert_eq!(
-        after_later, "ly\ndialog confirm \"Later?\" accepted (opened after the last command)",
-        "the next command without --dialog accepts the late dialog and reports it"
-    );
+    if let Some((later, after_later)) = &late {
+        assert!(
+            later.stdout.contains("one that opens after it is accepted"),
+            "{}",
+            later.stdout
+        );
+        assert_eq!(
+            after_later, "ly\ndialog confirm \"Later?\" accepted (opened after the last command)",
+            "the next command without --dialog accepts the late dialog and reports it"
+        );
+    }
     assert!(batch.ok, "{}{}", batch.stdout, batch.stderr);
     assert!(
         batch.stdout.contains("stayed on the page"),
@@ -213,6 +219,17 @@ fn a_dialog_that_opens_after_a_command_is_accepted_and_reported_by_the_next() {
     let _ = tabref.run(&["daemon", "stop"]);
     let fresh = tabref.ok(&["--dialog", "dismiss", "click", "Delete"]);
     let fresh_title = title();
+    assert!(
+        fresh
+            .stdout
+            .contains("dialog confirm \"Delete all?\" dismissed"),
+        "the first command of a fresh connection did not get --dialog: {}",
+        fresh.stdout
+    );
+    assert_eq!(fresh_title, "kept");
+    if !with_daemon() {
+        return;
+    }
 
     let first = tabref.ok(&["--dialog", "dismiss", "click", "Later"]);
     std::thread::sleep(std::time::Duration::from_millis(800));
@@ -225,14 +242,6 @@ fn a_dialog_that_opens_after_a_command_is_accepted_and_reported_by_the_next() {
     let delete_title = title();
     let _ = tabref.run(&["daemon", "stop"]);
 
-    assert!(
-        fresh
-            .stdout
-            .contains("dialog confirm \"Delete all?\" dismissed"),
-        "the first command of a fresh daemon did not get --dialog: {}",
-        fresh.stdout
-    );
-    assert_eq!(fresh_title, "kept");
     assert!(first.stdout.contains("was not used"), "{}", first.stdout);
     assert!(
         next.stdout
@@ -257,4 +266,42 @@ fn a_dialog_that_opens_after_a_command_is_accepted_and_reported_by_the_next() {
         delete.stdout
     );
     assert_eq!(delete_title, "kept");
+}
+
+/// Whether the commands run through the daemon (the default), which keeps a
+/// connection attached between commands.
+fn with_daemon() -> bool {
+    std::env::var_os("TABREF_NO_DAEMON").is_none()
+}
+
+/// Without the daemon (always on Windows), no connection is attached when
+/// a dialog opens after a command ended, and Chrome lets no later
+/// connection see or answer it: the page stays blocked. The next command
+/// then fails when its deadline passes, and says a dialog may be the
+/// cause.
+#[test]
+fn without_the_daemon_a_dialog_after_a_command_blocks_the_page_and_the_error_says_so() {
+    if !live() || with_daemon() {
+        return;
+    }
+    let tabref = harness("dialogs-blocked");
+    let port = serve(&[("/", LATER)]);
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+    tabref.ok(&["click", "Later"]);
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    let started = std::time::Instant::now();
+    let blocked = tabref.run(&["--json", "--timeout", "3000", "js", "1"]);
+    let took = started.elapsed();
+
+    assert!(!blocked.ok, "{}", blocked.stdout);
+    let error = &blocked.json()["error"];
+    assert_eq!(error["code"], "TIMEOUT", "{error}");
+    assert!(
+        error["suggestion"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("blocked by a dialog that opened after the last command"),
+        "{error}"
+    );
+    assert!(took.as_secs() < 10, "{took:?}");
 }
