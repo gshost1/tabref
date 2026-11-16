@@ -4,7 +4,7 @@ use super::{lock_pid, profile_lock_pid};
 
 #[test]
 fn the_lock_names_the_browser_pid_after_the_host() {
-    assert_eq!(lock_pid("keysrs-server-123456"), Some(123_456));
+    assert_eq!(lock_pid("host-123456"), Some(123_456));
     assert_eq!(lock_pid("host.local-42"), Some(42));
     assert_eq!(lock_pid("no-pid-here"), None);
     assert_eq!(lock_pid("garbage"), None);
