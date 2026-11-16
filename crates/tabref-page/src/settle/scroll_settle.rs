@@ -23,8 +23,8 @@ const LISTENER_GRACE: Duration = Duration::from_millis(250);
 const LOADER_CAP: Duration = Duration::from_millis(1_500);
 const POLL: Duration = Duration::from_millis(40);
 
-/// Scrolls `site` by `(dx, dy)` CSS pixels and, when that brings the end of
-/// the scrolled content within reach, waits for what the scroll set
+/// Scrolls `site` by `(dx, dy)` CSS pixels and, when that moves it to
+/// within one and a half views of the end of the scrolled content, waits for what the scroll set
 /// loading, under the rules a click settles by: same-site document, XHR and
 /// fetch requests until they finish and 50 ms pass without another (at
 /// most 1.5 s), then until 30 ms pass without a DOM mutation (at most
@@ -32,8 +32,8 @@ const POLL: Duration = Duration::from_millis(40);
 /// `IntersectionObserver` callbacks and scroll events run; a page that
 /// listens for scroll events gets 250 ms more for a debounced loader, and
 /// one whose DOM changed without adding content yet (a spinner) up to
-/// 1.5 s for the content to come. A scroll far from the end returns as
-/// soon as it moved. Network events are on from just before the scroll,
+/// 1.5 s for the content to come. A scroll far from the end, or one that
+/// could not move, returns at once. Network events are on from just before the scroll,
 /// since a sentinel's callback may fire with the next frame.
 pub fn scroll_and_settle(
     connection: &mut CdpConnection,

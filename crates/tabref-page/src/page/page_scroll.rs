@@ -55,7 +55,7 @@ const SCROLL: &str = r"function(dx, dy, nearViews) {
   const view = target === root ? (dy ? win.innerHeight : win.innerWidth)
     : (dy ? target.clientHeight : target.clientWidth);
   const remaining = left(target, dx, dy);
-  const near = !moved || remaining <= view * nearViews;
+  const near = moved && remaining <= view * nearViews;
   if (win[key]) { win[key].observer.disconnect(); delete win[key]; }
   if (near) {
     const state = { added: [], mutations: 0, target, dx, dy };
@@ -78,7 +78,12 @@ const FRAMES: &str = r"function() {
   return new Promise(resolve => {
     let done = false;
     const finish = () => { if (!done) { done = true; resolve(true); } };
-    win.requestAnimationFrame(() => win.requestAnimationFrame(finish));
+    const after = (then) => {
+      const channel = new win.MessageChannel();
+      channel.port1.onmessage = then;
+      channel.port2.postMessage(0);
+    };
+    win.requestAnimationFrame(() => after(() => after(finish)));
     win.setTimeout(finish, 100);
   });
 }";
@@ -126,10 +131,11 @@ const READ: &str = r"function(budget) {
   };
 }";
 
-/// Where a scroll left its target: whether it moved, whether the end of
-/// the content is within one and a half views (or it could not move), so
-/// what the scroll set loading is being watched, and whether it is at the
-/// very end.
+/// Where a scroll left its target: whether it moved, whether it moved to
+/// within one and a half views of the end of the content, so what it set
+/// loading is being watched, and whether it is at the very end. A scroll
+/// that could not move fires no scroll event and changes no intersection,
+/// so it sets nothing loading and is not watched.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ScrollStep {
     pub(crate) moved: bool,
@@ -173,9 +179,10 @@ pub(crate) fn scroll_step(
     })
 }
 
-/// Waits two animation frames, or 100 ms where none are drawn, so that
-/// `IntersectionObserver` callbacks and scroll events the scroll set off
-/// have run.
+/// Waits for the next animation frame and two tasks after it, or 100 ms
+/// where no frame is drawn, so that scroll events (dispatched as the frame
+/// begins) and `IntersectionObserver` callbacks (queued as a task while it
+/// renders, before the second task) the scroll set off have run.
 pub(crate) fn wait_frames(
     connection: &mut CdpConnection,
     session: &PageSession,
