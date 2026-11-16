@@ -180,7 +180,11 @@ fn find_in_a_batch_prints_the_lines_find_prints() {
         );
     }
     assert!(stepped.stdout.contains("-> /entry/"), "{}", stepped.stdout);
-    let printed = stepped.stdout.lines().filter(|line| line.starts_with("  - ")).count();
+    let printed = stepped
+        .stdout
+        .lines()
+        .filter(|line| line.starts_with("  - "))
+        .count();
     assert_eq!(printed, 5, "{}", stepped.stdout);
     assert!(
         stepped.stdout.contains("more: tabref find \"Entry 4\""),
@@ -214,4 +218,3 @@ fn strip_refs(line: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-
