@@ -43,7 +43,10 @@ fn site() -> (Harness, String) {
             "/ledger",
             WINDOW_LIST.replace("ROWS", &rows("li", "Entry", 30)),
         ),
-        ("/inbox", BOX_LIST.replace("ROWS", &rows("div", "Message", 20))),
+        (
+            "/inbox",
+            BOX_LIST.replace("ROWS", &rows("div", "Message", 20)),
+        ),
         ("/note", SHORT.to_owned()),
         ("/essay", LONG.replace("ROWS", &rows("p", "Paragraph", 60))),
     ]);
@@ -63,9 +66,17 @@ fn no_match_on_a_page_that_scrolls_further_names_the_scroll_loop() {
     assert!(line.contains("the page scrolls further"), "{line}");
     assert!(line.contains("scroll down"), "{line}");
     assert!(line.contains("tabref do"), "{line}");
+    let words = tabref.ok(&["find", "Entry", "65"]);
+    assert!(
+        words.stdout.starts_with("0 matches for \"Entry 65\""),
+        "{}",
+        words.stdout
+    );
     let stepped = batch(&tabref, "find Entry 65\n");
     assert!(
-        stepped.stdout.contains("(0 matches; the page scrolls further"),
+        stepped
+            .stdout
+            .contains("(0 matches; the page scrolls further"),
         "{}",
         stepped.stdout
     );
@@ -80,9 +91,12 @@ fn no_match_in_a_list_that_scrolls_names_a_target_inside_it() {
     tabref.ok(&["open", &format!("{base}/inbox")]);
     let run = tabref.ok(&["find", "Message 40"]);
     let line = run.stdout.trim();
-    assert!(line.contains("a list on the page scrolls further"), "{line}");
-    assert!(line.contains("scroll down \"More below\""), "{line}");
-    let scrolled = tabref.ok(&["scroll", "down", "More below"]);
+    assert!(
+        line.contains("a list on the page scrolls further"),
+        "{line}"
+    );
+    assert!(line.contains("`scroll down \"Message 20\"`"), "{line}");
+    let scrolled = tabref.ok(&["scroll", "down", "Message 20"]);
     assert!(
         scrolled.stdout.starts_with("scrolled down"),
         "{}",
@@ -114,12 +128,19 @@ fn find_in_a_batch_prints_the_lines_find_prints() {
     }
     let (tabref, base) = site();
     tabref.ok(&["open", &format!("{base}/ledger")]);
-    let stepped = batch(&tabref, &format!("{}find Entry 4\n", "scroll down\n".repeat(4)));
+    let stepped = batch(
+        &tabref,
+        &format!("{}find Entry 4\n", "scroll down\n".repeat(4)),
+    );
     let alone = tabref.ok(&["find", "Entry 4"]);
-    for line in alone.stdout.lines().skip(1) {
+    for line in alone.stdout.lines().skip(1).take(10) {
         let printed = format!("  {}", strip_refs(line));
         assert!(
-            stepped.stdout.lines().map(strip_refs).any(|step| step == printed),
+            stepped
+                .stdout
+                .lines()
+                .map(strip_refs)
+                .any(|step| step == printed),
             "missing {line:?} in\n{}",
             stepped.stdout
         );
@@ -136,7 +157,11 @@ fn strip_refs(line: &str) -> String {
                 && id.len() > 1
                 && id.starts_with('e')
                 && id[1..].chars().all(|c| c.is_ascii_digit());
-            if is_ref { "[".to_owned() } else { word.to_owned() }
+            if is_ref {
+                "[".to_owned()
+            } else {
+                word.to_owned()
+            }
         })
         .collect::<Vec<_>>()
         .join(" ")

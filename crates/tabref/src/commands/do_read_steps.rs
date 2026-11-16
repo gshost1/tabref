@@ -15,6 +15,7 @@ use super::batch_step::BatchStep;
 use super::dialog_report::{error_with_dialogs, kept_page, navigation_dialogs};
 use super::download_lines::{download_json, download_line};
 use super::downloads;
+use super::find;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open::normalize_url;
 use super::page_url::{resolve_url, short_url};
@@ -24,7 +25,6 @@ use super::target_spec::TargetSpec;
 use super::wait::wait_for;
 use super::wait_condition::Condition;
 use crate::session::Session;
-use crate::view::find_matches::find_matches;
 use crate::view::node_line::quote_text;
 
 const READ_LIMIT: usize = 4_000;
@@ -227,30 +227,30 @@ pub(crate) fn read_step(
     })
 }
 
-/// `find TEXT`: the page's lines that hold it, with the ref to act on.
+/// `find TEXT`: the lines `tabref find` prints for it, with the ref to
+/// act on, and the note on scrolling for more when nothing matched.
 pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone, AppError> {
     let needle = joined(args);
     if needle.is_empty() {
         return Err(AppError::invalid_args("find needs the text to look for"));
     }
-    let captured = session.capture()?;
-    let matches = find_matches(&captured.tree, &needle, None);
+    let found = find::search(session, &needle, None, FOUND_SHOWN)?;
+    let note = found
+        .note
+        .as_ref()
+        .map_or_else(String::new, |note| format!("; {note}"));
     let mut text = format!(
-        "ok find {} ({} matches)",
+        "ok find {} ({} matches{note})",
         quote_text(&needle),
-        matches.len()
+        found.count
     );
-    for line in matches.iter().take(FOUND_SHOWN) {
+    for line in &found.lines {
         text.push_str("\n  ");
         text.push_str(line);
     }
-    if matches.len() > FOUND_SHOWN {
-        text.push_str(&format!("\n  +{} more", matches.len() - FOUND_SHOWN));
-    }
-    Ok(StepDone {
-        text,
-        data: json!({ "action": "find", "matches": matches }),
-    })
+    let mut data = found.data;
+    data["action"] = json!("find");
+    Ok(StepDone { text, data })
 }
 
 /// `js "EXPRESSION"`, or `js` and the expression as written: its value as
