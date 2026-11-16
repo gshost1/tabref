@@ -140,6 +140,7 @@ fn a_stale_launch_record_on_the_same_port_does_not_make_it_tabrefs_browser() {
     record["started"] = serde_json::Value::Null;
     record["profile_dir"] = serde_json::json!(tabref.home.join("gone-profile"));
     std::fs::write(tabref.home.join("launched.json"), record.to_string()).unwrap();
+    common::private_record(&tabref.home.join("launched.json"));
     open_page(&tabref);
     assert_eq!(read(&tabref, "document.hasFocus()"), "false");
     tabref.ok(&["focus", "City"]);
@@ -216,5 +217,25 @@ fn a_host_that_delegates_focus_finds_a_control_it_can_focus_or_is_refused() {
             "String(document.activeElement.shadowRoot.activeElement)"
         ),
         "null"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_launch_record_others_could_write_does_not_make_it_tabrefs_browser() {
+    use std::os::unix::fs::PermissionsExt;
+    if !live() {
+        return;
+    }
+    let tabref = harness("focus-open-record");
+    let record = tabref.home.join("launched.json");
+    std::fs::write(&record, serde_json::to_string(&tabref.browser).unwrap()).unwrap();
+    std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o664)).unwrap();
+    open_page(&tabref);
+    tabref.ok(&["focus", "City"]);
+    assert_eq!(read(&tabref, "document.hasFocus()"), "false");
+    assert_eq!(
+        read(&tabref, "document.getElementById('seen').textContent"),
+        "Unseen"
     );
 }

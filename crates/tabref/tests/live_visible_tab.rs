@@ -1,6 +1,8 @@
 //! With no `--tab` and no remembered tab, a command works in the tab that
 //! is showing, not the first one: in headless Chrome the tab opened last is
-//! `visible` and the others `hidden`. A tab whose page is stuck (it never
+//! `visible` and the others `hidden`. The first page reports its own state
+//! in its title, read from the tab listing, since a tab a command works in
+//! reads as visible in a browser tabref launched. A tab whose page is stuck (it never
 //! answers) does not hold the choice up. Live (`TABREF_LIVE=1`).
 
 #![cfg(target_os = "linux")]
@@ -41,13 +43,13 @@ fn with_no_tab_remembered_the_showing_tab_is_used_rather_than_the_first() {
             "--timeout",
             "30000",
             "open",
-            "data:text/html,<title>First</title>",
+            "data:text/html,<title>First</title><script>document.addEventListener('visibilitychange', () => { document.title = 'First ' + document.visibilityState; })</script>",
             "--launch",
         ]),
         run(&["open", "data:text/html,<title>Second</title>", "--new-tab"]),
         run(&["open", "data:text/html,<title>Shown</title>", "--new-tab"]),
     ];
-    let state = run(&["--tab", "0", "js", "document.visibilityState"]);
+    let state = run(&["tabs"]);
     forget_remembered_tab(&home);
     let title = run(&["js", "document.title"]);
     let tabs = run(&["tabs"]);
@@ -60,7 +62,7 @@ fn with_no_tab_remembered_the_showing_tab_is_used_rather_than_the_first() {
         assert!(step.ok, "{}{}", step.stdout, step.stderr);
     }
     assert!(
-        state.stdout.contains("hidden"),
+        state.stdout.contains("First hidden"),
         "the first tab is not hidden here, so this test cannot tell: {}",
         state.stdout
     );

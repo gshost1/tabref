@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use tabref_cdp::PageTarget;
 use tabref_core::{AppError, DeliverySemantics, ErrorCode};
 
-use super::Session;
 use super::visible_tab::visible_tab;
+use super::{LEAVE_MS, Session};
 
 impl Session {
     /// The address of the tab this command would work in, read from the tab
@@ -32,17 +34,17 @@ impl Session {
 
     /// [`choose_tab`] among `tabs` with this command's `--tab` and the tab
     /// remembered from the last command, asking the tabs which one shows
-    /// only when neither names one.
+    /// only when neither names one. Before it asks, the tabs this
+    /// connection told they hold the window focus are told so no longer,
+    /// so the answer is the browser's own and not tabref's emulation.
     pub(crate) fn chosen_tab(&mut self, tabs: &[PageTarget]) -> Result<Option<String>, AppError> {
         let remembered = self.store.read_state(&self.tab_state_name());
         let deadline = self.scope.deadline;
-        let connection = &mut self.connection;
-        choose_tab(
-            tabs,
-            self.scope.tab_hint.as_deref(),
-            remembered.as_deref(),
-            || visible_tab(connection, tabs, deadline),
-        )
+        let hint = self.scope.tab_hint.clone();
+        choose_tab(tabs, hint.as_deref(), remembered.as_deref(), || {
+            self.leave_other_tabs(None, deadline.capped(Duration::from_millis(LEAVE_MS)));
+            visible_tab(&mut self.connection, tabs, deadline)
+        })
     }
 }
 

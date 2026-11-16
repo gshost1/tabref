@@ -258,3 +258,25 @@ fn leaving_a_tab_whose_page_stalls_does_not_hold_up_the_command() {
     let took = started.elapsed();
     assert!(took < Duration::from_millis(4_000), "{took:?}");
 }
+
+#[test]
+fn with_no_tab_remembered_the_showing_tab_wins_over_one_tabref_told_it_has_the_focus() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-showing");
+    let port = read(&tabref, "location.port");
+    tabref.ok(&[
+        "open",
+        "--new-tab",
+        &format!("http://127.0.0.1:{port}/quiet"),
+    ]);
+    tabref.ok(&["--tab", "0", "js", "1"]);
+    for entry in std::fs::read_dir(&tabref.home).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("tab-") && !name.starts_with("tab-order-") {
+            std::fs::remove_file(entry.path()).unwrap();
+        }
+    }
+    assert_eq!(read(&tabref, "location.pathname"), "/quiet");
+}

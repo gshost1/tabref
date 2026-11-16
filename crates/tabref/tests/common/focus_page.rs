@@ -92,6 +92,7 @@ pub fn own_browser(name: &str) -> Harness {
     let tabref = harness(name);
     let record = serde_json::to_string(&tabref.browser).unwrap();
     std::fs::write(tabref.home.join("launched.json"), record).unwrap();
+    super::private_record(&tabref.home.join("launched.json"));
     tabref
 }
 
