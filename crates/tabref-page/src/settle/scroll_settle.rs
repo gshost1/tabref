@@ -20,7 +20,7 @@ const NETWORK_CAP: Duration = Duration::from_millis(1_500);
 const AFTER_NETWORK: Duration = Duration::from_millis(100);
 const DOM_QUIET: Duration = Duration::from_millis(30);
 const DOM_QUIET_CAP: Duration = Duration::from_millis(300);
-const END_GRACE: Duration = Duration::from_millis(600);
+const END_GRACE: Duration = Duration::from_millis(500);
 const LOADER_CAP: Duration = Duration::from_millis(1_500);
 const POLL: Duration = Duration::from_millis(40);
 const CLEANUP: Duration = Duration::from_millis(500);
@@ -35,7 +35,7 @@ const CLEANUP_MS: u64 = 500;
 /// they finish and 50 ms pass without another (until 1.5 s after the
 /// frame), with 100 ms after each for their rows to land; inserted
 /// elements without text yet (a spinner) up to 1.5 s for content to come;
-/// at the very end 600 ms for a loader that starts late (a debounced
+/// at the very end 500 ms for a loader that starts late (a debounced
 /// scroll handler, a timer); then 30 ms without new elements (at most
 /// 300 ms). All of it stops 2 s after the scroll, so a page that polls or
 /// animates costs at most that, and a DOM that only changes in place (a
@@ -102,7 +102,8 @@ fn watch(
         tracker.next_wait(Instant::now(), QUIET),
         SettleWait::Network
     );
-    outcome.loading = requests || (loaded.mutations > 0 && loaded.items == 0 && !loaded.grew);
+    let changing = loaded.mutations > 0 && loaded.items == 0 && !loaded.grew;
+    outcome.loading = requests || (loaded.at_end && changing);
     outcome.hidden = !framed;
     outcome.at_end = loaded.at_end;
     outcome.items = loaded.items;

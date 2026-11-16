@@ -4,7 +4,7 @@
 /// page added meanwhile (their count, the first line of the first and the
 /// last, their lines as far as 600 characters go and how many more there
 /// were), and what leaves the end unknown: a request still running or a
-/// DOM still changing without new items when the wait ended (`loading`), a
+/// DOM at the end still changing without new items (`loading`), a
 /// tab that draws no frames, so its loaders never ran (`hidden`), or an
 /// error after the scroll moved that stopped the watch (`unwatched`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
