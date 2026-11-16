@@ -9,11 +9,11 @@ use super::do_read_steps::{expect_step, find_step, js_step, open_step, read_step
 use super::page_url::short_url;
 use super::step_done::StepDone;
 use super::target_spec::TargetSpec;
-use super::{check, click, fill, hover, press, scroll, select, type_text};
+use super::{check, click, fill, focus, hover, press, scroll, select, type_text};
 use crate::session::Session;
 use crate::view::node_line::quote_text;
 
-const VERBS: &str = "open, click, double-click, fill, type, select, check, uncheck, press, hover, scroll, wait, expect, read, find, js, snap";
+const VERBS: &str = "open, click, double-click, fill, type, select, check, uncheck, press, focus, hover, scroll, wait, expect, read, find, js, snap";
 const DIRECTIONS: &[&str] = &["down", "up", "left", "right"];
 
 /// Runs one step of a batch within `deadline`. The last step reports what
@@ -37,6 +37,11 @@ pub(crate) fn run_step(
             let count = if step.verb() == "click" { 1 } else { 2 };
             let found = target(session, args, LocateIntent::Click, deadline)?;
             click::act(session, found, count, deadline)?
+        }
+        "focus" => {
+            let found =
+                focus::field_then_control(|intent| target(session, args, intent, deadline))?;
+            focus::act(session, found, deadline)?
         }
         "hover" => {
             let found = target(session, args, LocateIntent::Hover, deadline)?;
