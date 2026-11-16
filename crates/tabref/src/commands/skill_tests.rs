@@ -3,7 +3,7 @@ use super::run;
 #[test]
 fn the_guide_stays_short_and_points_to_the_rare_commands() {
     let guide = run(None).text;
-    assert!(guide.len() <= 2_800, "{} bytes", guide.len());
+    assert!(guide.len() <= 2_200, "{} bytes", guide.len());
     assert!(guide.contains("tabref skill more"));
     let more = run(Some("more")).text;
     for rare in [
@@ -26,4 +26,20 @@ fn the_guide_does_not_offer_upload_as_a_batch_step() {
         .find(|line| line.starts_with("Steps:"))
         .unwrap_or_default();
     assert!(steps.contains("but `upload`"), "{steps}");
+}
+
+#[test]
+fn the_guide_says_what_to_do_instead_of_what_not_to() {
+    let guide = run(None).text;
+    for rule in [
+        "read that instead of taking a snapshot",
+        "in one `tabref do`",
+        "repeat `scroll down` in a `for`",
+        "names survive a reload",
+    ] {
+        assert!(guide.contains(rule), "{rule}");
+    }
+    for misleading in ["not shell loops", "do not\nsnapshot again", "waits for the page itself"] {
+        assert!(!guide.contains(misleading), "{misleading}");
+    }
 }
