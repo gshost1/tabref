@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::{EventClock, LoadSettle, settle_load};
+use super::{EventClock, LoadSettle, SettleScope, settle_load};
 use crate::act::act_fixture::{deadline, session};
 use crate::settle::load_watch::{LoadWatch, parse_status};
 use crate::{CdpConnection, CdpEvent};
@@ -34,9 +34,25 @@ fn watch(script: Option<&str>) -> LoadWatch {
 }
 
 fn settle(transport: ScriptedTransport, script: Option<&str>) -> LoadSettle {
+    settle_as(transport, script, true)
+}
+
+fn settle_as(transport: ScriptedTransport, script: Option<&str>, plain: bool) -> LoadSettle {
     let mut connection = CdpConnection::new(transport.boxed());
     connection.set_answer_dialogs(false);
-    settle_load(&mut connection, watch(script), deadline(), Duration::ZERO)
+    let scope = SettleScope {
+        plain,
+        reserve: Duration::ZERO,
+    };
+    settle_load(&mut connection, watch(script), deadline(), scope)
+}
+
+fn sent(id: &str, kind: &str, frame: &str) -> Value {
+    network(
+        "Network.requestWillBeSent",
+        json!({ "requestId": id, "type": kind, "frameId": frame, "timestamp": 10.0, "wallTime": 999.9,
+                "documentURL": "https://a.example/", "request": { "url": "https://a.example/x" } }),
+    )
 }
 
 fn stops(transport: ScriptedTransport) -> ScriptedTransport {
@@ -120,13 +136,58 @@ fn the_status_reads_the_page_clock_the_last_change_and_emptiness() {
 }
 
 #[test]
-fn only_a_near_empty_page_that_had_not_settled_is_still_rendering() {
-    let settle = |settled, near_empty| LoadSettle {
-        settled,
+fn a_second_document_request_of_the_main_frame_ends_the_wait() {
+    let transport = ScriptedTransport::new().expect_with_events(
+        "Runtime.evaluate",
+        vec![
+            sent("L1", "Document", "T"),
+            sent("f1", "Fetch", "T"),
+            sent("L2", "Document", "T"),
+        ],
+        status(None, false),
+    );
+    let outcome = settle(stops(transport), None);
+    assert!(outcome.navigated, "{outcome:?}");
+    assert!(!outcome.settled);
+}
+
+#[test]
+fn a_frame_document_is_no_navigation() {
+    let transport = ScriptedTransport::new().expect_with_events(
+        "Runtime.evaluate",
+        vec![sent("L1", "Document", "T"), sent("A1", "Document", "ad")],
+        status(None, false),
+    );
+    let outcome = settle(stops(transport), None);
+    assert!(!outcome.navigated, "{outcome:?}");
+    assert!(outcome.settled);
+}
+
+#[test]
+fn without_a_kept_capture_a_full_page_is_not_waited_for() {
+    let started = Instant::now();
+    let transport = ScriptedTransport::new()
+        .expect_with_events(
+            "Runtime.evaluate",
+            vec![sent("f1", "Fetch", "T")],
+            status(None, false),
+        )
+        .expect("Runtime.evaluate", status(None, false)["result"].clone());
+    let outcome = settle_as(stops(transport), None, false);
+    assert!(!outcome.settled);
+    assert!(!outcome.still_rendering());
+    assert!(started.elapsed() < Duration::from_millis(100));
+}
+
+#[test]
+fn only_a_near_empty_page_still_fetching_is_still_rendering() {
+    let settle = |rendering: bool, near_empty: bool| LoadSettle {
+        settled: !rendering,
         near_empty,
+        rendering,
+        navigated: false,
         waited: Duration::ZERO,
     };
-    assert!(settle(false, true).still_rendering());
-    assert!(!settle(true, true).still_rendering());
-    assert!(!settle(false, false).still_rendering());
+    assert!(settle(true, true).still_rendering());
+    assert!(!settle(false, true).still_rendering());
 }
