@@ -2,7 +2,9 @@
 
 Start: `tabref open <url>` loads the page and prints it (first call: `tabref skill && tabref open <url>`).
 Chrome is already connected. Output is plain text sized to read whole: do not pipe it through grep, head
-or sed, and do not sleep; every command waits for the page itself. Rare commands: `tabref skill more`.
+or sed, and do not sleep; every command waits for the page itself.
+Downloads, waits, saved logins, the user's own Chrome, apps built on Chrome: `tabref skill more`.
+Any command's options: `tabref CMD --help`.
 
 ## Reading
 One line per block in reading order; `#` lines are headings. Controls sit in brackets with their ref:
@@ -12,16 +14,17 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
   one row per line. To count, use these numbers across the whole page, not the first block you see.
 - The last line says what was cut and the exact command for it (`tabref snap --rows 21-`,
   `tabref read --section "<heading>"`). Run it before answering about cut content.
-- `tabref read` prints the main text. `tabref find <text>` searches all text, hidden too.
+- `tabref read` prints the main text. `tabref find <text>` searches all text, hidden too
+  (a hidden match names the ref to click that shows it).
 - A `dialog` line at the top is a popup: click one of its buttons first (decline cookie banners).
 
 ## Acting
-`click T`, `fill T VALUE`, `type T TEXT` (adds), `select T OPTION`, `check T`, `uncheck T`,
-`press KEY [T]`, `hover T`, `scroll down|T`, `double-click T`.
+`click T`, `fill T VALUE`, `type T TEXT` (adds), `select T LABEL|VALUE`, `check T`, `uncheck T`,
+`press KEY [T]`, `hover T`, `scroll down|T`, `double-click T`, `upload T FILE`.
 T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
 `"Edit" in "<row text>"`, `"Reply" after "<text>"`. Several or no matches fail with candidates.
 Each action prints what changed (new address, `{3 -> 4}`, `"67.00" -> "62.00"`, new controls), so do not
-snapshot again to check. Dates and numbers take plain values (`fill "Due date" 2027-07-31`).
+snapshot again to check. Dates, times and numbers take plain values (`fill "Due date" 2027-07-31`).
 
 ## Many steps: one call
 Use `tabref do` with a quoted heredoc, not shell loops. It stops at the first failing step.

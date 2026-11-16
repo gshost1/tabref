@@ -9,8 +9,8 @@ const SKILL_MORE: &str = include_str!("../skill/SKILL_MORE.md");
 /// rare commands kept out of it so the guide stays short.
 pub(crate) fn run(topic: Option<&str>) -> Outcome {
     let text = match topic {
-        Some("more") => SKILL_MORE,
-        _ => SKILL,
+        None => SKILL,
+        Some(_) => SKILL_MORE,
     };
     Outcome::new(text.trim_end(), json!({ "skill": text }))
 }
