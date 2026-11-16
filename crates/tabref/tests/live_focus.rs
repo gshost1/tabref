@@ -11,7 +11,9 @@
 
 mod common;
 
-use common::focus_page::{active, in_back, own_site, read, to_back};
+use std::time::{Duration, Instant};
+
+use common::focus_page::{active, in_back, open_page, own_browser, own_site, read, to_back};
 use common::live;
 
 #[test]
@@ -105,4 +107,33 @@ fn a_label_focuses_its_control_and_a_move_away_is_caught() {
         );
         assert_eq!(active(&tabref), "city");
     }
+}
+
+#[test]
+fn a_focus_with_no_focus_listener_ends_with_the_settle() {
+    if !live() {
+        return;
+    }
+    let tabref = own_browser("focus-quiet");
+    let port = open_page(&tabref);
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/quiet")]);
+    tabref.ok(&["focus", "Other"]);
+    let fastest = (0..3)
+        .map(|_| {
+            tabref.ok(&["focus", "Other"]);
+            let started = Instant::now();
+            tabref.ok(&["focus", "Plain"]);
+            started.elapsed()
+        })
+        .min()
+        .unwrap();
+    assert!(fastest < Duration::from_millis(250), "{fastest:?}");
+    assert_eq!(active(&tabref), "plain");
+    let deep = tabref.ok(&["focus", "Deep jump"]);
+    let first = deep.stdout.lines().next().unwrap();
+    assert_eq!(
+        first, "focused \"Deep jump\" (the page moved the focus away)",
+        "{}",
+        deep.stdout
+    );
 }

@@ -18,12 +18,26 @@ pub const PAGE: &str = r#"<!doctype html><title>Focus</title>
   onfocus="document.getElementById('list').hidden = false"
   onblur="document.getElementById('list').hidden = true"></label>
 <ul id=list hidden><li>Suggestion one</li></ul>
+<div id=badindex tabindex="abc" onclick="1">Bad index</div>
+<svg width=120 height=30><a id=svglink xlink:href=#svg><text x=5 y=20>Svg link</text></a></svg>
+<x-field id=xfield role=button aria-label="Delegated"></x-field>
 <p id=out>Nothing</p>
 <p id=seen>Unseen</p>
 <script>
+customElements.define('x-field', class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'open', delegatesFocus: true }).innerHTML = '<input id=inner>'; }
+});
 document.addEventListener('visibilitychange', () => { document.getElementById('seen').textContent = 'vis changed'; });
 window.addEventListener('focus', () => { document.getElementById('seen').textContent = 'window focused'; });
 </script>"#;
+
+/// A page with no focus listener on the window or the document: one field
+/// with none at all, and one whose ancestor moves the focus on `focusin`.
+pub const QUIET: &str = r#"<!doctype html><title>Quiet</title>
+<label>Plain <input id=plain></label>
+<label>Other <input id=other></label>
+<div onfocusin="if (event.target.id === 'deep') setTimeout(() => document.getElementById('other').focus(), 220)">
+<label>Deep jump <input id=deep></label></div>"#;
 
 /// The focus page in a browser tabref did not launch (`--cdp`).
 pub fn foreign_site(name: &str) -> Harness {
@@ -35,16 +49,24 @@ pub fn foreign_site(name: &str) -> Harness {
 /// The focus page in a browser tabref treats as one `open --launch`
 /// started: its launch record names the harness browser.
 pub fn own_site(name: &str) -> Harness {
-    let tabref = harness(name);
-    let record = serde_json::to_string(&tabref.browser).unwrap();
-    std::fs::write(tabref.home.join("launched.json"), record).unwrap();
+    let tabref = own_browser(name);
     open_page(&tabref);
     tabref
 }
 
-fn open_page(tabref: &Harness) {
-    let port = serve(&[("/focus", PAGE)]);
+/// A harness browser tabref treats as one `open --launch` started.
+pub fn own_browser(name: &str) -> Harness {
+    let tabref = harness(name);
+    let record = serde_json::to_string(&tabref.browser).unwrap();
+    std::fs::write(tabref.home.join("launched.json"), record).unwrap();
+    tabref
+}
+
+/// Opens the focus page (`/focus`, with `/quiet` beside it).
+pub fn open_page(tabref: &Harness) -> u16 {
+    let port = serve(&[("/focus", PAGE), ("/quiet", QUIET)]);
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/focus")]);
+    port
 }
 
 /// The page in tab 0, behind a blank tab that has the front, with what the

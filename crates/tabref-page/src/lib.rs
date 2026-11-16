@@ -26,7 +26,9 @@ pub use act::click::{click, click_times};
 pub use act::element_reading::ElementReading;
 pub use act::fill::fill;
 pub use act::fill_outcome::FillOutcome;
-pub use act::focus::{focus, focus_kept, focus_target, page_focused, watch_focus};
+pub use act::focus::{
+    focus, focus_kept, focus_target, page_focused, release_focus_watch, watch_focus,
+};
 pub use act::focus_watch::FocusWatch;
 pub use act::hover::hover;
 pub use act::key_press::{press_key, supported_key_names};

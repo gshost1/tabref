@@ -4,7 +4,7 @@ use serde_json::json;
 use tabref_core::{AppError, Deadline, ErrorCode};
 use tabref_page::{
     ActionNeed, ElementToken, LocateIntent, focus, focus_kept, focus_target, page_focused,
-    wait_actionable, watch_focus,
+    release_focus_watch, wait_actionable, watch_focus,
 };
 
 use super::act_target::{ActTarget, resolve_target};
@@ -26,14 +26,20 @@ const IN_BACKGROUND: &str =
 pub(crate) fn run(session: &mut Session, target: &str) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
     let spec = TargetSpec::from_arg(target)?;
-    let target = match resolve_target(session, &spec, LocateIntent::Fill, deadline) {
-        Err(error) if error.code == ErrorCode::ElementNotFound => {
-            resolve_target(session, &spec, LocateIntent::Click, deadline)?
-        }
-        found => found?,
-    };
+    let target = field_then_control(|intent| resolve_target(session, &spec, intent, deadline))?;
     let acted = act(session, target, deadline)?;
     full_report(session, acted)
+}
+
+/// The target `find` finds for a focus, as a command or a `do` step: a
+/// field first, so a field wins over its own label, then any control.
+pub(crate) fn field_then_control(
+    mut find: impl FnMut(LocateIntent) -> Result<ActTarget, AppError>,
+) -> Result<ActTarget, AppError> {
+    match find(LocateIntent::Fill) {
+        Err(error) if error.code == ErrorCode::ElementNotFound => find(LocateIntent::Click),
+        found => found,
+    }
 }
 
 /// Focuses the element (a label's control for a label) once the gate finds
@@ -44,7 +50,8 @@ pub(crate) fn run(session: &mut Session, target: &str) -> Result<Outcome, AppErr
 /// browser a tab that is in the background or lacks the window focus is
 /// focused all the same and said to be in the background, as its page may
 /// not run its focus handlers. A page that moves the focus away within
-/// 300 ms of the focus is reported.
+/// 300 ms of the focus is reported; with no focus listener on the
+/// element's path, the focus is checked once the action settled.
 pub(crate) fn act(
     session: &mut Session,
     target: ActTarget,
@@ -94,7 +101,7 @@ pub(crate) fn act(
 
 /// Focuses `token`, starts the page's watch on the focus at once, and
 /// reads the watch once the action settled, so the 300 ms window and the
-/// settle run together.
+/// settle run together. A settle that fails releases the watch first.
 fn focus_and_settle(
     session: &mut Session,
     target: &ActTarget,
@@ -110,7 +117,19 @@ fn focus_and_settle(
         MOVE_WINDOW,
         deadline,
     )?;
-    let effects = session.finish_action(&watched, deadline)?;
-    let held = focus_kept(session.connection(), &target.session, watch, deadline)?;
+    let effects = match session.finish_action(&watched, deadline) {
+        Ok(effects) => effects,
+        Err(error) => {
+            release_focus_watch(session.connection(), &target.session, deadline);
+            return Err(error);
+        }
+    };
+    let held = focus_kept(
+        session.connection(),
+        &target.session,
+        token,
+        watch,
+        deadline,
+    )?;
     Ok((effects, held))
 }

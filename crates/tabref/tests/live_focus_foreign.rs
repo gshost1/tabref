@@ -14,7 +14,8 @@ mod common;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use common::focus_page::{active, foreign_site, read};
+use common::focus_page::{active, foreign_site, open_page, read};
+use common::harness;
 use common::live;
 
 const BACKGROUND: &str = "(the tab is in the background: the page may not run its focus handlers)";
@@ -72,10 +73,31 @@ fn a_refusal_comes_before_anything_in_the_page_changes() {
         );
     }
     assert_eq!(read(&tabref, "document.activeElement.localName"), "body");
-    let bare = tabref.run(&["--json", "focus", "Bare link"]).json();
+    for name in ["Bare link", "Bad index"] {
+        let refused = tabref.run(&["--json", "focus", name]).json();
+        assert_eq!(
+            refused["error"]["platform_detail"], "not focusable",
+            "{name} is refused by tabref before DOM.focus: {refused}"
+        );
+    }
+}
+
+#[test]
+fn an_svg_link_and_a_host_that_delegates_focus_take_the_focus() {
+    if !live() {
+        return;
+    }
+    let tabref = foreign_site("focus-svg-shadow");
+    tabref.ok(&["focus", "Svg link"]);
+    assert_eq!(active(&tabref), "svglink");
+    tabref.ok(&["focus", "Delegated"]);
+    assert_eq!(active(&tabref), "xfield");
     assert_eq!(
-        bare["error"]["platform_detail"], "not focusable",
-        "refused by tabref before DOM.focus: {bare}"
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
+        "inner"
     );
 }
 
@@ -100,6 +122,27 @@ fn a_killed_focus_leaves_the_tab_as_it_was() {
         .status();
     let _ = client.wait();
     std::thread::sleep(Duration::from_millis(3000));
+    assert_eq!(read(&tabref, "document.hasFocus()"), "false");
+    assert_eq!(
+        read(&tabref, "document.getElementById('seen').textContent"),
+        "Unseen"
+    );
+}
+
+#[test]
+fn a_stale_launch_record_on_the_same_port_does_not_make_it_tabrefs_browser() {
+    if !live() {
+        return;
+    }
+    let tabref = harness("focus-stale");
+    let mut record = serde_json::to_value(&tabref.browser).unwrap();
+    record["pid"] = serde_json::json!(999_999);
+    record["started"] = serde_json::Value::Null;
+    record["profile_dir"] = serde_json::json!(tabref.home.join("gone-profile"));
+    std::fs::write(tabref.home.join("launched.json"), record.to_string()).unwrap();
+    open_page(&tabref);
+    assert_eq!(read(&tabref, "document.hasFocus()"), "false");
+    tabref.ok(&["focus", "City"]);
     assert_eq!(read(&tabref, "document.hasFocus()"), "false");
     assert_eq!(
         read(&tabref, "document.getElementById('seen').textContent"),
