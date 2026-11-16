@@ -14,5 +14,7 @@ logged-in Chrome and its sessions); `tabref connect --off` stops.
 Apps built on Chrome (Electron, reached with `--cdp PORT`): `open`, `open --new-tab` and `close` are refused,
 as the windows are the app; read and act with snap, click and fill (js to read).
 
-Waits: `tabref wait --text X`, `--gone X`, `--url TEXT` (the address contains it), `--idle`. Every command takes `--timeout MS`
-and `--json` (the `{version, ok, command, data|error}` envelope). Each command's options: `tabref CMD --help`.
+Waits: `tabref wait --text X`, `--gone X`, `--url TEXT` (the address contains it), `--idle`,
+`--ref T --state enabled|visible|hidden|gone|value=X` (as `expect T is S`). Every command takes
+`--timeout MS` and `--json` (the `{version, ok, command, data|error}` envelope). Each command's options:
+`tabref CMD --help`.
