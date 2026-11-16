@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use tabref_cdp::{PageSession, navigate_by};
 use tabref_core::{AppError, Deadline};
-use tabref_page::{DownloadRecord, PageInfo};
+use tabref_page::{DownloadRecord, LoadWatch, PageInfo};
 
 use super::action_report::set;
 use super::app_guard::refuse_in_app;
@@ -12,6 +12,7 @@ use super::download_lines::{download_json, download_line};
 use super::downloads;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open_request::OpenRequest;
+use super::open_settle::{STILL_RENDERING, settle_after};
 use super::page_url::resolve_url;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -84,6 +85,7 @@ fn load(
     let load = remaining * 3 / 4;
     let commit = remaining.saturating_sub(SNAPSHOT_RESERVE_MS).max(load);
     downloads::enable_for_action(session, deadline)?;
+    let watch = LoadWatch::start(session.connection(), page, deadline).ok();
     let navigated = navigate_by(
         session.connection(),
         page,
@@ -93,6 +95,8 @@ fn load(
     );
     let grace = downloads::grace_after(&navigated);
     let started = downloads::after_action(session, page, None, deadline, grace);
+    let loaded = started.is_empty() && navigated.is_ok();
+    let settled = settle_after(session, watch, loaded, deadline);
     if !started.is_empty() {
         return Ok(downloaded(&started));
     }
@@ -101,12 +105,16 @@ fn load(
         Err(error) if error.kind() == Some("cdp_load_timeout") => true,
         Err(error) => return Err(error),
     };
+    let rendering = settled.is_some_and(|settled| settled.still_rendering());
     let captured = session.shared_capture()?;
     let options = ViewRequest::default().snap_options(&captured.info.url)?;
     let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
     if unfinished {
         report
             .push_line("note: the page had not finished loading; snap again if parts are missing");
+    } else if rendering {
+        report.push_line(STILL_RENDERING);
+        set(&mut report.data, "still_rendering", serde_json::json!(true));
     }
     set(
         &mut report.data,

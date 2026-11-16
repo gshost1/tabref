@@ -49,7 +49,8 @@ const POLL: &str = r#"<!doctype html><html><head><title>Poll</title></head><body
 const STATIC: &str = r#"<!doctype html><html><head><title>Still</title></head><body>
 <h1>Guide</h1><p>Alpha needle text.</p></body></html>"#;
 
-const STUB: &str = r#"<!doctype html><html><head><title>404</title></head><body><p>Not found</p></body></html>"#;
+const STUB: &str =
+    r#"<!doctype html><html><head><title>404</title></head><body><p>Not found</p></body></html>"#;
 
 /// Serves each `(path, html)` on a loopback port, plus `/data?ms=N`, which
 /// answers a short text after N milliseconds.
@@ -103,8 +104,13 @@ fn answer(mut stream: TcpStream, pages: &HashMap<String, String>) {
 }
 
 fn run(tabref: &Harness, args: &[&str]) -> Run {
+    run_as(tabref, &["--json"], args)
+}
+
+fn run_as(tabref: &Harness, mode: &[&str], args: &[&str]) -> Run {
     let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
-        .args(["--cdp", &tabref.browser.port.to_string(), "--json"])
+        .args(["--cdp", &tabref.browser.port.to_string()])
+        .args(mode)
         .args(args)
         .env("TABREF_HOME", &tabref.home)
         .env_remove("TABREF_NO_DAEMON")
@@ -173,7 +179,11 @@ fn a_page_that_renders_after_load_prints_its_content_from_open() {
         "{}",
         opened.stdout
     );
-    assert!(!opened.stdout.contains("still rendering"), "{}", opened.stdout);
+    assert!(
+        !opened.stdout.contains("still rendering"),
+        "{}",
+        opened.stdout
+    );
     stop(&tabref);
 }
 
@@ -184,12 +194,24 @@ fn a_page_still_rendering_past_the_bound_says_so() {
     }
     let tabref = common::harness("settle-slow");
     let (opened, took) = open(&tabref, SLOW_SPA);
-    assert!(
-        opened.stdout.contains("still rendering") && opened.stdout.contains("tabref wait"),
+    assert_eq!(
+        opened.json()["data"]["still_rendering"],
+        true,
         "{}",
         opened.stdout
     );
     assert!(took < Duration::from_millis(3_000), "open took {took:?}");
+    let port = serve(&[("/", SLOW_SPA)]);
+    let text = run_as(
+        &tabref,
+        &[],
+        &["open", &format!("http://127.0.0.1:{port}/")],
+    );
+    assert!(
+        text.stdout.contains("page was still rendering") && text.stdout.contains("tabref wait"),
+        "{}",
+        text.stdout
+    );
     stop(&tabref);
 }
 
@@ -203,7 +225,11 @@ fn a_ticker_or_a_poll_costs_no_more_than_the_bound() {
     for html in [TICKER, POLL] {
         let (opened, took) = open(&tabref, html);
         assert!(opened.stdout.contains("Alpha needle"), "{}", opened.stdout);
-        assert!(!opened.stdout.contains("still rendering"), "{}", opened.stdout);
+        assert!(
+            !opened.stdout.contains("still rendering"),
+            "{}",
+            opened.stdout
+        );
         assert!(
             took < base + Duration::from_millis(900),
             "open took {took:?}, a static page {base:?}"
@@ -220,7 +246,11 @@ fn a_static_page_empty_or_not_waits_for_nothing() {
     let tabref = common::harness("settle-static");
     for html in [STATIC, STUB, "<!doctype html><title>blank</title>"] {
         let (opened, took) = open(&tabref, html);
-        assert!(!opened.stdout.contains("still rendering"), "{}", opened.stdout);
+        assert!(
+            !opened.stdout.contains("still rendering"),
+            "{}",
+            opened.stdout
+        );
         assert!(took < Duration::from_millis(1_200), "open took {took:?}");
     }
     stop(&tabref);
