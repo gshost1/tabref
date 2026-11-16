@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::cut_marker::cut_marker;
 use super::cut_outline::cut_outline;
 use super::cut_report::CutReport;
 use super::view_line::ViewLine;
@@ -25,7 +26,10 @@ const OUTLINE_SHARE: usize = 5;
 /// where the cut starts and which command prints on from there, and a
 /// compact outline of the headings after it (see [`cut_outline`]) keeps the
 /// rest of the page countable and reachable. Content, marker, outline and
-/// room for the header and footer together stay within the budget.
+/// room for the header and footer together stay within the budget. A view
+/// over the budget by less than what its cut would spend on the marker, the
+/// outline and the frame room, and by at most a tenth of the budget, prints
+/// whole: hiding so small a tail would cost a call to read it.
 pub(crate) fn fit(
     lines: Vec<ViewLine>,
     options: &ViewOptions,
@@ -58,19 +62,18 @@ pub(crate) fn fit(
     let mut kept: Vec<ViewLine> = lines[..cut].to_vec();
     let spent: usize = kept.iter().map(ViewLine::cost).sum();
     if let Some(first) = lines.get(cut) {
-        report.budget_from = Some(first.number);
         let last = lines.last().map_or(first.number, |last| last.number);
-        let marker = ViewLine::new(
-            0,
-            format!(
-                "… lines {}-{last} cut here to fit: {}",
-                first.number,
-                route.starting_at(first.number, full)
-            ),
-        );
+        let marker = cut_marker(&lines[cut..], last, route, full);
         let outline_room = room.saturating_sub(spent + marker.cost());
-        kept.push(marker);
         let outline = cut_outline(&lines, cut, outline_room, route, full);
+        let slack = tenth.min(marker.cost() + outline.cost() + FRAME_ROOM.min(tenth));
+        if total <= options.budget + slack {
+            report.lines_shown = report.lines_total - report.chrome_cut;
+            report.chars_shown = total;
+            return (lines, report);
+        }
+        report.budget_from = Some(first.number);
+        kept.push(marker);
         report.sections = outline.sections;
         kept.extend(outline.lines);
     }
