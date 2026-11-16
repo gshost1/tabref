@@ -37,7 +37,7 @@ pub(crate) fn pick_option(options: &[OptionEntry], choice: &str) -> OptionPick {
     let low = wanted.to_lowercase();
     let pair = split_printed(&low);
     let tiers: [&dyn Fn(&OptionEntry) -> bool; 6] = [
-        &|option| names(option).iter().any(|name| *name == wanted),
+        &|option| names(option).contains(&wanted),
         &|option| option.value == wanted || normal(&option.value) == wanted,
         &|option| names(option).iter().any(|name| name.to_lowercase() == low),
         &|option| normal(&option.value).to_lowercase() == low,
