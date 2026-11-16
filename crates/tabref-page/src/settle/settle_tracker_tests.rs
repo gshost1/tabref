@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::SettleTracker;
+use super::{BODY_GRACE, SettleTracker};
 use crate::CdpEvent;
 use crate::settle::settle_wait::SettleWait;
 
@@ -211,9 +211,50 @@ fn a_response_whose_every_byte_arrived_stops_holding_the_settle_without_loading_
     data(&mut tracker, now, 7);
     assert_eq!(
         tracker.next_wait(now, QUIET),
-        SettleWait::QuietUntil(now + QUIET)
+        SettleWait::QuietUntil(now + BODY_GRACE)
     );
-    assert_eq!(tracker.next_wait(now + QUIET, QUIET), SettleWait::Done);
+    assert_eq!(
+        tracker.next_wait(now + QUIET, QUIET),
+        SettleWait::QuietUntil(now + BODY_GRACE)
+    );
+    assert_eq!(tracker.next_wait(now + BODY_GRACE, QUIET), SettleWait::Done);
+}
+
+#[test]
+fn loading_finished_inside_the_grace_ends_the_request_at_once() {
+    let now = Instant::now();
+    let mut tracker = SettleTracker::new("F");
+    fetch_answered(&mut tracker, now, 200, json!({ "Content-Length": "12" }));
+    data(&mut tracker, now, 12);
+    let read = now + Duration::from_millis(150);
+    tracker.absorb(
+        &event("Network.loadingFinished", json!({ "requestId": "r" })),
+        read,
+    );
+    assert_eq!(
+        tracker.next_wait(read, QUIET),
+        SettleWait::QuietUntil(read + QUIET)
+    );
+    assert_eq!(tracker.next_wait(read + QUIET, QUIET), SettleWait::Done);
+}
+
+#[test]
+fn a_request_still_in_flight_holds_the_settle_past_another_ones_grace() {
+    let now = Instant::now();
+    let mut tracker = SettleTracker::new("F");
+    fetch_answered(&mut tracker, now, 200, json!({ "Content-Length": "12" }));
+    data(&mut tracker, now, 12);
+    tracker.absorb(
+        &event(
+            "Network.requestWillBeSent",
+            json!({ "requestId": "s", "type": "Fetch" }),
+        ),
+        now,
+    );
+    assert_eq!(
+        tracker.next_wait(now + BODY_GRACE, QUIET),
+        SettleWait::Network
+    );
 }
 
 #[test]
@@ -270,6 +311,6 @@ fn a_response_of_unknown_or_encoded_length_waits_for_loading_finished() {
     );
     assert_eq!(
         tracker.next_wait(now, QUIET),
-        SettleWait::QuietUntil(now + QUIET)
+        SettleWait::QuietUntil(now + BODY_GRACE)
     );
 }
