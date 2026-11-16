@@ -40,7 +40,7 @@ Use `tabref do` with a quoted heredoc, not shell loops. It stops at the first fa
     EOF
 
 Steps: any action, `open URL`, `expect text|gone|url X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
-`expect T is enabled|visible|hidden|gone|value=X` waits for one element's state.
+`expect T is enabled|visible|hidden|gone|value=X` waits for an element's state.
 `tabref js "EXPR"` returns a page value as JSON (e.g. every link or row at once).
 
 ## Errors (one line, code first)
