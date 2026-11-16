@@ -134,19 +134,31 @@ fn effect_block(
         let captured = session.capture()?;
         let mut appeared = Vec::new();
         new_controls(&captured.tree, known, &mut appeared);
-        let shown = appeared.len().min(NEW_SHOWN);
+        let shown = if reordered(&page.changes) {
+            0
+        } else {
+            appeared.len().min(NEW_SHOWN)
+        };
         lines.extend(
             appeared
                 .iter()
                 .take(shown)
                 .map(|line| format!("new {line}")),
         );
-        if appeared.len() > shown {
+        if appeared.len() > shown && shown > 0 {
             lines.push(format!("+{} more new: tabref snap", appeared.len() - shown));
         }
         merge(&mut data, json!({ "new": appeared }));
     }
     Ok((lines, data))
+}
+
+/// Whether the page drew a list again in a new order: its cells and links
+/// are new elements then, and listing them would only repeat the rows.
+fn reordered(changes: &[tabref_page::TextChange]) -> bool {
+    changes
+        .iter()
+        .any(|change| matches!(change, tabref_page::TextChange::Reordered { .. }))
 }
 
 /// Whether a click, double-click, key press, hover or focus showed no

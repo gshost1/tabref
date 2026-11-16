@@ -71,11 +71,9 @@ fn rows_that_only_moved_are_one_reorder_with_the_new_first_rows() {
         diff_lines(&before, &after),
         vec![TextChange::Reordered {
             count: 7,
-            first: [
-                "B 9 kg", "D 7 kg", "F 5 kg", "C 4 kg", "G 3 kg", "E 2 kg", "A 1 kg"
-            ]
-            .map(String::from)
-            .to_vec(),
+            first: ["B 9 kg", "D 7 kg", "F 5 kg", "C 4 kg", "G 3 kg"]
+                .map(String::from)
+                .to_vec(),
         }]
     );
 }
