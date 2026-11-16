@@ -22,7 +22,7 @@ use tabref_core::{
     AppError, Deadline, DeliverySemantics, ErrorCode, create_private_dir, resolve_state_root,
 };
 
-use super::endpoint_choice::launched_from;
+use super::launch_check::launched_from;
 use super::session_options::SessionOptions;
 
 pub(crate) const PROFILE_MARKER: &str = ".tabref-profile";
