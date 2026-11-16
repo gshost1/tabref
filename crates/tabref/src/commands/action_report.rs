@@ -79,12 +79,8 @@ pub(crate) fn step_report(
             line.push_str(&format!(" {}", quote_text(&page.title)));
         }
         let leaves = effects.settled.navigated && effects.url_before != page.url;
-        let changes = distinct_changes(&page.changes);
-        if !leaves && let Some(first) = changes.first() {
-            line.push_str(&format!("; {first}"));
-            if changes.len() > 1 {
-                line.push_str(&format!(" (+{} more)", changes.len() - 1));
-            }
+        if !leaves && let Some(change) = step_change(&page.changes) {
+            line.push_str(&format!("; {change}"));
         }
     }
     merge(&mut data, json!({ "navigated": effects.settled.navigated }));
@@ -259,6 +255,17 @@ pub(crate) fn distinct_changes(changes: &[tabref_page::TextChange]) -> Vec<Strin
         .map(ToString::to_string)
         .filter(|line| seen.insert(line.clone()))
         .collect()
+}
+
+/// The first change as a `do` step's line carries it, with how many more
+/// there were: `+ Saved (+2 more)`.
+fn step_change(changes: &[tabref_page::TextChange]) -> Option<String> {
+    let changes = distinct_changes(changes);
+    let first = changes.first()?;
+    if changes.len() > 1 {
+        return Some(format!("{first} (+{} more)", changes.len() - 1));
+    }
+    Some(first.clone())
 }
 
 #[cfg(test)]
