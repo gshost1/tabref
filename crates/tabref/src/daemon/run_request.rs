@@ -28,7 +28,7 @@ pub(crate) fn run_request(
     })?;
     cli.cdp = request.cdp;
     apply_paths(&mut cli.command, request.paths);
-    if matches!(cli.command, Command::Skill) {
+    if matches!(cli.command, Command::Skill { .. }) {
         return commands::run(&cli);
     }
     let mut options = commands::session_options(&cli);

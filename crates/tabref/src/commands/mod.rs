@@ -58,8 +58,8 @@ use crate::view::view_request::ViewRequest;
 /// Runs the parsed command. Every command but `skill` runs against one
 /// [`Session`], built here and nowhere else.
 pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
-    if let Command::Skill = cli.command {
-        return Ok(skill::run());
+    if let Command::Skill { topic } = &cli.command {
+        return Ok(skill::run(topic.as_deref()));
     }
     let mut session = Session::open(&session_options(cli))?;
     let outcome = dispatch(&mut session, &cli.command);
@@ -186,7 +186,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
         Command::Tabs => tabs::run(session),
         Command::Tab { tab } => tab::run(session, tab),
         Command::Close { tab } => close::run(session, tab.as_deref()),
-        Command::Skill => Ok(skill::run()),
+        Command::Skill { topic } => Ok(skill::run(topic.as_deref())),
         Command::Daemon { action } => crate::daemon::control::run_in_session(session, action),
         Command::Connect { .. } => Err(AppError::invalid_args(
             "'connect' is handled by the client, not inside a session",
