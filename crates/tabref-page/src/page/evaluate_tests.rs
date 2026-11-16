@@ -62,3 +62,61 @@ fn a_thrown_exception_is_action_failed() {
         Some("ReferenceError: x is not defined")
     );
 }
+
+#[test]
+fn a_returned_promise_is_awaited_for_its_value() {
+    let transport = ScriptedTransport::new()
+        .expect(
+            "Runtime.evaluate",
+            json!({ "result": { "type": "object", "subtype": "promise", "objectId": "p1" } }),
+        )
+        .expect(
+            "Runtime.awaitPromise",
+            json!({ "result": { "type": "number", "value": 42 } }),
+        )
+        .expect("Runtime.releaseObjectGroup", json!({}));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+    let value = evaluate(&mut connection, &session(), "p()", deadline()).unwrap();
+    assert_eq!(value, json!(42));
+    let sent = sent.lock().unwrap();
+    assert_eq!(sent[1]["params"]["promiseObjectId"], "p1");
+    assert_eq!(sent[1]["params"]["returnByValue"], true);
+}
+
+#[test]
+fn a_rejected_promise_is_action_failed_with_its_reason() {
+    let transport = ScriptedTransport::new()
+        .expect(
+            "Runtime.evaluate",
+            json!({ "result": { "type": "object", "subtype": "promise", "objectId": "p1" } }),
+        )
+        .expect(
+            "Runtime.awaitPromise",
+            json!({ "result": { "type": "object" },
+                "exceptionDetails": { "text": "Uncaught (in promise)", "exception": { "description": "Error: quota gone" } } }),
+        )
+        .expect("Runtime.releaseObjectGroup", json!({}));
+    let mut connection = CdpConnection::new(transport.boxed());
+    let error = evaluate(&mut connection, &session(), "p()", deadline()).unwrap_err();
+    assert_eq!(error.code, ErrorCode::ActionFailed);
+    assert!(error.message.contains("rejected"), "{}", error.message);
+    assert_eq!(error.platform_detail.as_deref(), Some("Error: quota gone"));
+}
+
+#[test]
+fn an_object_comes_back_by_value() {
+    let transport = ScriptedTransport::new()
+        .expect(
+            "Runtime.evaluate",
+            json!({ "result": { "type": "object", "objectId": "o1" } }),
+        )
+        .expect(
+            "Runtime.callFunctionOn",
+            json!({ "result": { "type": "object", "value": { "rows": 3 } } }),
+        )
+        .expect("Runtime.releaseObjectGroup", json!({}));
+    let mut connection = CdpConnection::new(transport.boxed());
+    let value = evaluate(&mut connection, &session(), "o", deadline()).unwrap();
+    assert_eq!(value, json!({ "rows": 3 }));
+}

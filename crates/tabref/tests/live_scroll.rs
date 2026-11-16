@@ -46,7 +46,7 @@ function load() {
   if (busy || done) return;
   busy = true;
   fetch('/entries?name=Message&total=50&from=' + next).then(r => r.json()).then(page => {
-    for (const text of page.items) { const div = document.createElement('div'); div.className = 'card'; div.textContent = text; cards.appendChild(div); }
+    for (const text of page.items) { const div = document.createElement('div'); div.className = 'card'; div.innerHTML = '<a href=#more></a>'; div.firstChild.textContent = text; cards.appendChild(div); }
     next += page.items.length; done = page.last; busy = false;
     if (done) document.getElementById('spin').textContent = 'That is everything';
   });
@@ -62,7 +62,7 @@ const STATIC: &str = r#"<!doctype html><title>Essay</title><style>p{height:60px}
 
 fn rows(tag: &str, name: &str, count: usize) -> String {
     (1..=count)
-        .map(|n| format!("<{tag} class=card>{name} {n}</{tag}>"))
+        .map(|n| format!("<{tag} class=card><a href=\"#{n}\">{name} {n}</a></{tag}>"))
         .collect()
 }
 
@@ -167,9 +167,9 @@ fn a_scroll_that_reaches_a_sentinel_waits_for_the_rows_it_fetched() {
     }
     let (tabref, base) = site();
     tabref.ok(&["open", &format!("{base}/ledger")]);
-    let run = tabref.ok(&["scroll", "down", "--px", "500"]);
+    let run = tabref.ok(&["scroll", "down"]);
     let first = run.stdout.lines().next().unwrap_or_default();
-    assert!(first.starts_with("scrolled down 500px"), "{}", run.stdout);
+    assert!(first.starts_with("scrolled down 600px"), "{}", run.stdout);
     assert!(first.contains("20 new items"), "{}", run.stdout);
     assert!(run.stdout.contains("+ Entry 31"), "{}", run.stdout);
     let count = tabref.ok(&["js", "document.querySelectorAll('li').length"]);
@@ -188,7 +188,7 @@ fn a_batch_of_scrolls_reaches_the_end_of_a_lazy_list() {
     assert!(run.stdout.contains("Entry 70"), "{}", run.stdout);
     let last = run.stdout.lines().last().unwrap_or_default();
     assert!(
-        last.contains("end of list: nothing more loaded"),
+        last.contains("end of list, nothing more loaded"),
         "{}",
         run.stdout
     );
@@ -206,9 +206,16 @@ fn a_scroll_container_with_a_debounced_loader_loads_through_its_end() {
     let run = tabref.ok(&["scroll", "down", "--px", "2000"]);
     assert!(run.stdout.contains("20 new items"), "{}", run.stdout);
     assert!(run.stdout.contains("+ Message 21"), "{}", run.stdout);
-    let held = tabref.ok(&["scroll", "down", "Message 3", "--px", "2000"]);
+    let held = tabref.run(&["scroll", "down", "Message 3", "--px", "2000"]);
+    assert!(held.ok, "{}\n{}", held.stdout, held.stderr);
     assert!(held.stdout.contains("10 new items"), "{}", held.stdout);
     assert!(held.stdout.contains("+ Message 50"), "{}", held.stdout);
+    let last = tabref.ok(&["scroll", "down", "--px", "2000"]);
+    assert!(
+        last.stdout.contains("end of list: nothing more loaded"),
+        "{}",
+        last.stdout
+    );
     let end = tabref.ok(&["scroll", "down", "--px", "2000"]);
     let first = end.stdout.lines().next().unwrap_or_default();
     assert!(first.starts_with("did not move"), "{}", end.stdout);

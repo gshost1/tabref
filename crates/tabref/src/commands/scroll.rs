@@ -1,13 +1,18 @@
 use serde_json::json;
 use tabref_core::{AppError, Deadline};
-use tabref_page::{LocateIntent, scroll_by, scroll_into_view, scroll_page};
+use tabref_page::{
+    LocateIntent, ScrollOutcome, ScrollSite, cut_chars, scroll_and_settle, scroll_into_view,
+};
 
 use super::act_target::resolve_target;
 use super::target_spec::TargetSpec;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
+use crate::view::node_line::quote_text;
 
 const PAGE_STEP: u32 = 600;
+const LINE_CHARS: usize = 100;
+const ITEM_CHARS: usize = 40;
 
 /// Scrolls the page, or the container that holds `target`, in `direction`;
 /// with a target in place of the direction, scrolls that element into view.
@@ -54,29 +59,95 @@ pub(crate) fn scroll(
             ));
         }
     };
-    let moved = match container {
+    let outcome = match container {
         Some(spec) => {
             let target = resolve_target(session, spec, LocateIntent::Click, deadline)?;
-            scroll_by(
+            scroll_and_settle(
                 session.connection(),
                 &target.session,
-                &target.token,
+                ScrollSite::Element(&target.token),
                 delta,
                 deadline,
             )?
         }
         None => {
             let page = session.page()?;
-            scroll_page(session.connection(), &page, delta, deadline)?
+            scroll_and_settle(
+                session.connection(),
+                &page,
+                ScrollSite::Page,
+                delta,
+                deadline,
+            )?
         }
     };
-    let text = if moved {
-        format!("scrolled {direction} {step}px")
+    let mut report = Outcome::new(
+        first_line(direction, step, &outcome),
+        json!({
+            "action": "scroll",
+            "direction": direction,
+            "px": step,
+            "moved": outcome.moved,
+            "at_end": outcome.at_end,
+            "new_items": outcome.items,
+            "new_lines": outcome.lines,
+            "loading": outcome.loading,
+        }),
+    );
+    for line in &outcome.lines {
+        report.push_line(&format!("+ {}", cut_chars(line, LINE_CHARS)));
+    }
+    if outcome.more_lines > 0 {
+        report.push_line(&format!(
+            "+{} more new lines: tabref find TEXT",
+            outcome.more_lines
+        ));
+    }
+    Ok(report)
+}
+
+/// `scrolled down 600px`, with what the scroll loaded or that the list
+/// ended: `: 20 new items loaded ("Entry 31" to "Entry 50")`, `; end of
+/// list: nothing more loaded`, `; more is still loading`.
+fn first_line(direction: &str, step: f64, outcome: &ScrollOutcome) -> String {
+    let end = if matches!(direction, "up" | "left") {
+        "top of list"
     } else {
-        format!("did not move: nothing left to scroll {direction}")
+        "end of list"
     };
-    Ok(Outcome::new(
-        text,
-        json!({ "action": "scroll", "direction": direction, "px": step, "moved": moved }),
-    ))
+    let moved = format!("scrolled {direction} {step}px");
+    if outcome.items > 0 {
+        let span = match (&outcome.first, &outcome.last) {
+            (Some(first), Some(last)) if outcome.items > 1 => format!(
+                " ({} to {})",
+                quote_text(&cut_chars(first, ITEM_CHARS)),
+                quote_text(&cut_chars(last, ITEM_CHARS))
+            ),
+            (Some(first), _) => format!(" ({})", quote_text(&cut_chars(first, ITEM_CHARS))),
+            _ => String::new(),
+        };
+        let items = match outcome.items {
+            1 => "1 new item".to_owned(),
+            count => format!("{count} new items"),
+        };
+        let lead = if outcome.moved {
+            format!("{moved}: ")
+        } else {
+            "did not move, then ".to_owned()
+        };
+        let still = if outcome.loading {
+            "; more is still loading"
+        } else {
+            ""
+        };
+        return format!("{lead}{items} loaded{span}{still}");
+    }
+    match (outcome.moved, outcome.loading, outcome.at_end) {
+        (true, true, _) => format!("{moved}; more is still loading"),
+        (false, true, _) => "did not move: more is still loading".to_owned(),
+        (true, false, true) => format!("{moved}; {end}: nothing more loaded"),
+        (false, false, true) => format!("did not move: {end}, nothing more loaded"),
+        (true, false, false) => moved,
+        (false, false, false) => format!("did not move: nothing left to scroll {direction}"),
+    }
 }
