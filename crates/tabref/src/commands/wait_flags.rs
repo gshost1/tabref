@@ -7,4 +7,6 @@ pub(crate) struct WaitFlags<'a> {
     pub(crate) url: Option<&'a str>,
     pub(crate) idle: bool,
     pub(crate) download: bool,
+    pub(crate) target: Option<&'a str>,
+    pub(crate) state: Option<&'a str>,
 }

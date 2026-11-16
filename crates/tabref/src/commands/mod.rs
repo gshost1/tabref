@@ -169,6 +169,8 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             url,
             idle,
             download,
+            target,
+            state,
         } => wait::run(
             session,
             wait_condition::Condition::from_flags(&wait_flags::WaitFlags {
@@ -177,6 +179,8 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
                 url: url.as_deref(),
                 idle: *idle,
                 download: *download,
+                target: target.as_deref(),
+                state: state.as_deref(),
             })?,
         ),
         Command::Js { expression } => js::run(session, expression),

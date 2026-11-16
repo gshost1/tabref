@@ -156,6 +156,12 @@ pub(crate) enum Command {
         /// Until a download finishes; prints its path, name, address, size and time
         #[arg(long)]
         download: bool,
+        /// Until this element (a ref or a name) reaches --state
+        #[arg(long = "ref", value_name = "TARGET", requires = "state")]
+        target: Option<String>,
+        /// The state --ref waits for: enabled, visible, hidden, gone or value=X
+        #[arg(long, value_name = "STATE", requires = "target")]
+        state: Option<String>,
     },
     /// Run several steps in one call, one per line, from STEPS or stdin
     Do {
