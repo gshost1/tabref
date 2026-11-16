@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Enforces the two source-shape rules no compiler checks: at most 400 lines
-# per .rs file, and no non-doc comments. Ported from agent-desktop.
+# per .rs file, and no non-doc comments.
 #
 # The comment half needs Python 3, found by probing python3, python and py,
 # because Windows has no python3. A missing interpreter fails the gate rather

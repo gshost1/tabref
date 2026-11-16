@@ -58,7 +58,7 @@ fn cut(text: &str, limit: usize) -> String {
 
 /// Quotes `text` on one line: `"` and `\` are escaped, line breaks and tabs
 /// become `\n`, `\r` and `\t`, other control characters `\uXXXX`, and
-/// bidirectional marks are dropped, as agent-desktop's `--lines` does.
+/// bidirectional marks are dropped.
 pub(crate) fn quote_text(text: &str) -> String {
     let mut quoted = String::with_capacity(text.len() + 2);
     quoted.push('"');
