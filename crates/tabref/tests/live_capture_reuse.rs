@@ -55,7 +55,11 @@ fn run(tabref: &Harness, args: &[&str], env: &[(&str, &str)]) -> Run {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     };
-    assert!(run.ok, "tabref {args:?} failed:\n{}{}", run.stdout, run.stderr);
+    assert!(
+        run.ok,
+        "tabref {args:?} failed:\n{}{}",
+        run.stdout, run.stderr
+    );
     run
 }
 
@@ -68,7 +72,11 @@ fn snapshot_id(run: &Run) -> String {
 
 fn opened(tabref: &Harness, html: &'static str) -> String {
     let port = serve(&[("/", html)]);
-    snapshot_id(&run(tabref, &["open", &format!("http://127.0.0.1:{port}/")], &[]))
+    snapshot_id(&run(
+        tabref,
+        &["open", &format!("http://127.0.0.1:{port}/")],
+        &[],
+    ))
 }
 
 fn stop(tabref: &Harness) {
@@ -84,7 +92,11 @@ fn find_snap_and_read_reuse_the_capture_of_an_unchanged_page() {
     let opened = opened(&tabref, STILL);
     let found = run(&tabref, &["find", "needle"], &[]);
     assert_eq!(snapshot_id(&found), opened, "find captured again");
-    assert!(found.stdout.contains("Alpha needle text"), "{}", found.stdout);
+    assert!(
+        found.stdout.contains("Alpha needle text"),
+        "{}",
+        found.stdout
+    );
     let snapped = run(&tabref, &["snap", "--from", "2"], &[]);
     assert_eq!(snapshot_id(&snapped), opened, "snap captured again");
     let read = run(&tabref, &["read", "--section", "More"], &[]);
@@ -108,7 +120,11 @@ fn a_page_that_changed_since_is_captured_again() {
         let opened = opened(&tabref, html);
         std::thread::sleep(Duration::from_millis(900));
         let found = run(&tabref, &["find", needle], &[]);
-        assert_ne!(snapshot_id(&found), opened, "{needle}: reused a stale capture");
+        assert_ne!(
+            snapshot_id(&found),
+            opened,
+            "{needle}: reused a stale capture"
+        );
         assert!(found.stdout.contains(needle), "{needle}: {}", found.stdout);
     }
     let opened = opened(&tabref, VALUE);
@@ -131,7 +147,11 @@ fn any_other_command_or_an_unwatchable_page_captures_again() {
     assert_ne!(snapshot_id(&found), opened_still, "kept across a hover");
     let opened_closed = opened(&tabref, CLOSED);
     let found = run(&tabref, &["find", "needle"], &[]);
-    assert_ne!(snapshot_id(&found), opened_closed, "kept a closed shadow root");
+    assert_ne!(
+        snapshot_id(&found),
+        opened_closed,
+        "kept a closed shadow root"
+    );
     stop(&tabref);
 }
 
