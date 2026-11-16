@@ -15,13 +15,13 @@ use crate::{CdpConnection, CdpEvent};
 use tabref_cdp::is_timeout;
 
 /// How long after `load` the page's own work is waited for.
-pub const LOAD_SETTLE_CAP: Duration = Duration::from_millis(400);
+pub const LOAD_SETTLE_CAP: Duration = Duration::from_millis(350);
 /// How long after `load` a near-empty page that is still fetching or
 /// changing is waited for.
 pub const RENDER_CAP: Duration = Duration::from_millis(1_500);
 const NETWORK_QUIET: Duration = Duration::from_millis(50);
 const DOM_QUIET: Duration = Duration::from_millis(50);
-const STATUS_SLACK: Duration = Duration::from_millis(100);
+const LAST_READ: Duration = Duration::from_millis(30);
 const LONGEST_AGE: Duration = Duration::from_secs(10);
 const TRACKED: &[&str] = &["XHR", "Fetch"];
 
@@ -44,7 +44,7 @@ impl LoadSettle {
 
 /// Waits, after `load`, until the page's XHR and fetch requests to its own
 /// site have finished and neither they nor the DOM have changed for 50 ms,
-/// for at most 400 ms; a page that is near-empty then (see
+/// for at most 350 ms (a read at the bound may take 30 ms more); a page that is near-empty then (see
 /// [`LoadStatus`]) gets up to 1.5 s in all, and none of it eats into the
 /// last `reserve` of `deadline`. Ends the watch either way. A page that
 /// cannot be read, such as one being replaced, ends the wait.
@@ -76,7 +76,8 @@ fn follow(
     let mut tracker = SettleTracker::new(&watch.session.target_id);
     let mut cap = LOAD_SETTLE_CAP;
     let read_by = |cap: Duration| {
-        deadline.capped((started + cap + STATUS_SLACK).saturating_duration_since(Instant::now()))
+        let left = (started + cap).saturating_duration_since(Instant::now());
+        deadline.capped(left.max(LAST_READ))
     };
     let mut status = watch.status(connection, read_by(cap))?;
     let mut clock = EventClock::new(status.wall_ms, Instant::now());

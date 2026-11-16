@@ -15,6 +15,7 @@ use crate::{CdpConnection, PageSession};
 const WATCH_KEY: &str = "tabref.load-watch";
 const NEAR_EMPTY_ELEMENTS: usize = 300;
 const NEAR_EMPTY_CHARS: usize = 200;
+const CLEANUP_WAIT: Duration = Duration::from_millis(20);
 
 const LOAD_OBSERVER: &str = r"(() => {
   if (window !== window.top) return;
@@ -119,7 +120,7 @@ impl LoadWatch {
                 "Page.removeScriptToEvaluateOnNewDocument",
                 json!({ "identifier": identifier }),
                 Some(&self.session.session_id),
-                deadline,
+                deadline.capped(CLEANUP_WAIT),
             );
         }
     }
@@ -144,18 +145,27 @@ impl LoadWatch {
 
     /// Ends the watch: the script is taken off, the page's observer is
     /// stopped, network events are turned off and their backlog dropped.
-    /// Failures are ignored, as the page may be gone.
+    /// The page stops its observer whenever it is free, unawaited, and each
+    /// call to the browser is waited for at most 20 ms, so a busy page adds
+    /// next to nothing. Failures are ignored, as the page may be gone.
     pub fn stop(mut self, connection: &mut CdpConnection, deadline: Deadline) {
         self.forget_script(connection, deadline);
         let id = Some(self.session.session_id.as_str());
         let expression = LOAD_STOP.replace("KEY", WATCH_KEY);
-        let _ = connection.call(
+        if let Ok(sent) = connection.send(
             "Runtime.evaluate",
             json!({ "expression": expression, "returnByValue": true }),
             id,
             deadline,
+        ) {
+            connection.abandon(sent);
+        }
+        let _ = connection.call(
+            "Network.disable",
+            json!({}),
+            id,
+            deadline.capped(CLEANUP_WAIT),
         );
-        let _ = connection.call("Network.disable", json!({}), id, deadline);
         let session_id = self.session.session_id.clone();
         connection.discard_events(|event| is_network_event(event, &session_id));
     }
