@@ -8,16 +8,10 @@
 
 mod common;
 
-use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::{Harness, Run, harness, live};
-
-const FETCH_DELAY: Duration = Duration::from_millis(350);
+use common::lazy_site::{batch, lazy_site, rows};
+use common::{Harness, harness, live};
 
 const SENTINEL: &str = r#"<!doctype html><title>Ledger</title><style>li{height:40px}</style>
 <h1>Ledger</h1><ol id=rows>ROWS</ol><p id=tail>Fetching entries</p>
@@ -81,108 +75,14 @@ new IntersectionObserver(seen => {
 const STATIC: &str = r#"<!doctype html><title>Essay</title><style>p{height:60px}</style>
 <h1>Essay</h1>ROWS<footer>The end of the essay</footer>"#;
 
-fn rows(tag: &str, name: &str, count: usize) -> String {
-    (1..=count)
-        .map(|n| format!("<{tag} class=card><a href=\"#{n}\">{name} {n}</a></{tag}>"))
-        .collect()
-}
-
 fn site() -> (Harness, String) {
-    let pages = HashMap::from([
-        (
-            "/ledger".to_owned(),
-            SENTINEL.replace("ROWS", &rows("li", "Entry", 30)),
-        ),
-        (
-            "/inbox".to_owned(),
-            CONTAINER.replace("ROWS", &rows("div", "Message", 20)),
-        ),
-        (
-            "/feed".to_owned(),
-            FEED.replace("ROWS", &rows("article", "Story", 10)),
-        ),
-        (
-            "/essay".to_owned(),
-            STATIC.replace("ROWS", &rows("p", "Paragraph", 60)),
-        ),
+    let base = lazy_site(vec![
+        ("/ledger", SENTINEL.replace("ROWS", &rows("li", "Entry", 30))),
+        ("/inbox", CONTAINER.replace("ROWS", &rows("div", "Message", 20))),
+        ("/feed", FEED.replace("ROWS", &rows("article", "Story", 10))),
+        ("/essay", STATIC.replace("ROWS", &rows("p", "Paragraph", 60))),
     ]);
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let pages = Arc::new(pages);
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
-            let pages = Arc::clone(&pages);
-            std::thread::spawn(move || answer(stream, &pages));
-        }
-    });
-    (harness("scroll"), format!("http://127.0.0.1:{port}"))
-}
-
-fn answer(mut stream: TcpStream, pages: &HashMap<String, String>) {
-    let mut request = Vec::new();
-    let mut chunk = [0_u8; 1024];
-    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return,
-            Ok(read) => request.extend_from_slice(&chunk[..read]),
-        }
-    }
-    let head = String::from_utf8_lossy(&request);
-    let target = head.split_whitespace().nth(1).unwrap_or("/").to_owned();
-    let (path, query) = target.split_once('?').unwrap_or((&target, ""));
-    let (kind, body) = if path == "/entries" {
-        std::thread::sleep(FETCH_DELAY);
-        ("application/json", entries(query))
-    } else {
-        let page = pages.get(path).cloned().unwrap_or_default();
-        ("text/html; charset=utf-8", page)
-    };
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    let _ = stream.write_all(response.as_bytes());
-}
-
-fn entries(query: &str) -> String {
-    let field = |key: &str| {
-        query
-            .split('&')
-            .find_map(|pair| pair.strip_prefix(&format!("{key}=")))
-            .unwrap_or_default()
-            .to_owned()
-    };
-    let from: usize = field("from").parse().unwrap_or(0);
-    let total: usize = field("total").parse().unwrap_or(0);
-    let name = field("name");
-    let to = (from + 20).min(total);
-    let items: Vec<String> = (from + 1..=to).map(|n| format!("{name} {n}")).collect();
-    serde_json::json!({ "items": items, "last": to >= total }).to_string()
-}
-
-fn batch(tabref: &Harness, steps: &str) -> Run {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_tabref"))
-        .args(["--cdp", &tabref.browser.port.to_string(), "do"])
-        .env("TABREF_HOME", &tabref.home)
-        .env("TABREF_REFS", "long")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(steps.as_bytes())
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    Run {
-        ok: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
+    (harness("scroll"), base)
 }
 
 #[test]
@@ -213,7 +113,7 @@ fn a_batch_of_scrolls_reaches_the_end_of_a_lazy_list() {
     assert!(run.stdout.contains("Entry 70"), "{}", run.stdout);
     let last = run.stdout.lines().last().unwrap_or_default();
     assert!(
-        last.contains("end of list, nothing more loaded"),
+        last.contains("at the bottom, nothing new loaded"),
         "{}",
         run.stdout
     );
@@ -237,7 +137,7 @@ fn a_scroll_container_with_a_debounced_loader_loads_through_its_end() {
     assert!(held.stdout.contains("+ Message 50"), "{}", held.stdout);
     let last = tabref.ok(&["scroll", "down", "--px", "2000"]);
     assert!(
-        last.stdout.contains("end of list: nothing more loaded"),
+        last.stdout.contains("at the bottom: nothing new loaded"),
         "{}",
         last.stdout
     );
@@ -276,14 +176,14 @@ fn a_static_page_scrolls_at_once_and_says_where_it_ends() {
     let end = tabref.ok(&["scroll", "down", "--px", "20000"]);
     assert!(started.elapsed() < Duration::from_millis(3_000));
     assert!(
-        end.stdout.contains("end of list: nothing more loaded"),
+        end.stdout.contains("at the bottom: nothing new loaded"),
         "{}",
         end.stdout
     );
     let stuck = tabref.ok(&["scroll", "down"]);
     assert_eq!(
         stuck.stdout.trim(),
-        "did not move: end of list, nothing more loaded"
+        "did not move: at the bottom, nothing new loaded"
     );
     let back = tabref.ok(&["scroll", "up"]);
     assert_eq!(back.stdout.trim(), "scrolled up 600px");
