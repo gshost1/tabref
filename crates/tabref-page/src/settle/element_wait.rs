@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tabref_cdp::{is_protocol_error, is_timeout};
-use tabref_core::{AppError, Deadline, ErrorCode};
+use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::element_state::ElementState;
 use super::state_wait::StateWait;
@@ -120,7 +120,7 @@ pub fn wait_for_state(
                 Ok(reply) => match reply.get("exceptionDetails") {
                     Some(exception) => {
                         prove_document(connection, session, token, deadline)?;
-                        Err(script_failed(exception))
+                        Err(read_script_failed(exception))
                     }
                     None => read_outcome(&reply, token),
                 },
@@ -145,6 +145,12 @@ pub fn wait_for_state(
     }
 }
 
+/// A script exception in a wait: the wait only reads the page, so nothing
+/// was delivered and it is safe to run again.
+fn read_script_failed(exception: &Value) -> AppError {
+    script_failed(exception).with_disposition(DeliverySemantics::not_delivered())
+}
+
 fn read_outcome(reply: &Value, token: &ElementToken) -> Result<StateWait, AppError> {
     let value = reply.pointer("/result/value");
     let outcome = StateWait {
@@ -163,3 +169,7 @@ fn read_outcome(reply: &Value, token: &ElementToken) -> Result<StateWait, AppErr
     }
     Ok(outcome)
 }
+
+#[cfg(test)]
+#[path = "element_wait_tests.rs"]
+mod tests;

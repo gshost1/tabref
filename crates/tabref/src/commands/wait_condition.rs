@@ -55,8 +55,9 @@ impl Condition {
     }
 
     /// `text "Saved"`, `gone "Loading"`, `url ~saved=1`, `idle`, `download`,
-    /// `T is S` with T one unquoted ref or one quoted name (`"Save" is
-    /// enabled`, `e4 is "value=62 00"` quoted whole when it has spaces), or
+    /// `T is S` with T one unquoted ref or words that hold a quoted name
+    /// (`"Save" is enabled`, `button "Save" is enabled`, `e4 is "value=62
+    /// 00"` quoted whole when it has spaces), or
     /// bare text, which waits for that text to show. A keyword comes first,
     /// so `text Notifications is enabled` waits for that text.
     pub(crate) fn from_words(words: &[Word]) -> Result<Self, AppError> {
@@ -72,16 +73,10 @@ impl Condition {
             [first, rest @ ..] if first.is_keyword("url") => Self::Url(url_part(&joined(rest))),
             [first] if first.is_keyword("idle") => Self::Idle,
             [first] if first.is_keyword("download") => Self::Download,
-            [target, is, state] if is.is_keyword("is") && names_element(target) => {
-                return Self::element(
-                    TargetSpec::from_words(std::slice::from_ref(target))?,
-                    label(target),
-                    &state.text,
-                );
+            [target @ .., is, state] if is.is_keyword("is") && names_element(target) => {
+                return Self::element(TargetSpec::from_words(target)?, label(target), &state.text);
             }
-            [target, is, state, _, ..]
-                if is.is_keyword("is") && names_element(target) && is_value(&state.text) =>
-            {
+            rest if unquoted_value(rest) => {
                 return Err(AppError::invalid_args(
                     "quote a value with spaces, as in: expect \"Total\" is \"value=62 00\"",
                 ));
@@ -125,16 +120,36 @@ impl Condition {
     }
 }
 
-fn names_element(word: &Word) -> bool {
-    word.quoted || looks_like_ref(&word.text)
+/// Whether `target` names an element: one unquoted ref, or words that hold
+/// a quoted name (`"Save"`, `button "Save"`).
+fn names_element(target: &[Word]) -> bool {
+    match target {
+        [] => false,
+        [only] if !only.quoted => looks_like_ref(&only.text),
+        words => words.iter().any(|word| word.quoted),
+    }
 }
 
-fn label(word: &Word) -> String {
-    if word.quoted {
-        format!("{:?}", word.text)
-    } else {
-        word.text.clone()
-    }
+/// Whether `words` are an element condition whose `value=` was split at a
+/// space: `T is value=a b`.
+fn unquoted_value(words: &[Word]) -> bool {
+    (1..words.len().saturating_sub(2)).any(|at| {
+        words[at].is_keyword("is") && names_element(&words[..at]) && is_value(&words[at + 1].text)
+    })
+}
+
+fn label(target: &[Word]) -> String {
+    target
+        .iter()
+        .map(|word| {
+            if word.quoted {
+                format!("{:?}", word.text)
+            } else {
+                word.text.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn is_value(state: &str) -> bool {

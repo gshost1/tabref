@@ -156,15 +156,23 @@ fn only_a_ref_or_one_quoted_name_is_an_element() {
         .unwrap(),
         Condition::Text("Autosave is enabled".into())
     );
+    let located = Condition::from_words(&mixed(&[
+        ("button", false),
+        ("Save", true),
+        ("is", false),
+        ("enabled", false),
+    ]))
+    .unwrap();
+    assert_eq!(located.describe(), "button \"Save\" to be enabled");
     assert_eq!(
         Condition::from_words(&mixed(&[
-            ("the", false),
-            ("Save", true),
+            ("Save", false),
+            ("button", false),
             ("is", false),
             ("enabled", false)
         ]))
         .unwrap(),
-        Condition::Text("the Save is enabled".into())
+        Condition::Text("Save button is enabled".into())
     );
     let by_ref =
         Condition::from_words(&mixed(&[("e4", false), ("is", false), ("hidden", false)])).unwrap();
@@ -192,5 +200,18 @@ fn a_value_with_spaces_must_be_quoted() {
         error.message.contains("quote a value with spaces"),
         "{}",
         error.message
+    );
+    let located = Condition::from_words(&mixed(&[
+        ("textbox", false),
+        ("Total", true),
+        ("is", false),
+        ("value=a", false),
+        ("b", false),
+    ]))
+    .unwrap_err();
+    assert!(
+        located.message.contains("quote a value with spaces"),
+        "{}",
+        located.message
     );
 }
