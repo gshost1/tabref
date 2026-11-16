@@ -99,3 +99,17 @@ fn several_options_at_the_best_rank_are_ambiguous() {
         "'Ada' matches 2 options: Ada A (1) | Ada B (2); name one as listed"
     );
 }
+
+#[test]
+fn a_long_select_lists_thirty_options_in_details_and_says_how_many() {
+    let many: Vec<Value> = (0..10_000)
+        .map(|n| json!({ "label": format!("Item {n}"), "text": format!("Item {n}"), "value": format!("i{n}"), "disabled": false }))
+        .collect();
+    let mut connection = CdpConnection::new(reading(json!(many)).boxed());
+    let error =
+        select_option(&mut connection, &session(), &token(4), "Blue", deadline()).unwrap_err();
+    let details = error.details.as_ref().unwrap();
+    assert_eq!(details["options"].as_array().unwrap().len(), 30);
+    assert_eq!(details["options_total"], json!(10_000));
+    assert!(error.message.len() < 1_000, "{}", error.message.len());
+}
