@@ -1,0 +1,34 @@
+<!doctype html><html><head><title>Ignored</title><style>[role=listbox]{border:1px solid #999;margin:0;padding:0;list-style:none;width:240px}[role=option]{padding:3px 6px}
+.box{border:1px solid #888;width:200px;padding:4px;cursor:pointer}</style></head><body><h1>Ignored</h1>
+<label for="town">Town</label>
+<input id="town" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="towns" autocomplete="off" value="Oslo">
+<ul id="towns" role="listbox" aria-label="Towns"></ul>
+<span id="size-label">Size</span>
+<div id="size" class="box" role="combobox" tabindex="0" aria-expanded="false" aria-labelledby="size-label">Small<div role="listbox" id="sizes" hidden><div role="option">Small</div><div role="option">Medium</div><div role="option">Large</div></div></div>
+<label for="kind">Kind</label>
+<input id="kind" role="combobox" readonly aria-expanded="false" aria-controls="kinds" value="Tea">
+<ul id="kinds" role="listbox" aria-label="Kinds" hidden><li role="option">Tea</li><li role="option">Coffee</li></ul>
+<script>
+const all = ['Oslo', 'Bergen', 'Bern', 'Lima'];
+const box = document.getElementById('town'), list = document.getElementById('towns');
+box.addEventListener('input', () => {
+  const typed = box.value.trim().toLowerCase();
+  list.replaceChildren();
+  all.filter(t => typed && t.toLowerCase().includes(typed)).forEach(t => {
+    const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = t; list.append(li);
+  });
+  box.setAttribute('aria-expanded', String(list.children.length > 0));
+});
+const size = document.getElementById('size'), sizes = document.getElementById('sizes');
+size.addEventListener('click', event => {
+  if (event.target.closest('[role=option]')) return;
+  sizes.hidden = !sizes.hidden; size.setAttribute('aria-expanded', String(!sizes.hidden));
+});
+const kind = document.getElementById('kind'), kinds = document.getElementById('kinds');
+kind.addEventListener('click', () => { kinds.hidden = !kinds.hidden; kind.setAttribute('aria-expanded', String(!kinds.hidden)); });
+kind.addEventListener('keydown', event => { if (event.key === 'Escape') { kinds.hidden = true; kind.setAttribute('aria-expanded', 'false'); } });
+kinds.addEventListener('click', event => {
+  const option = event.target.closest('[role=option]');
+  if (option) { kind.value = option.textContent; kinds.hidden = true; kind.setAttribute('aria-expanded', 'false'); }
+});
+</script></body></html>

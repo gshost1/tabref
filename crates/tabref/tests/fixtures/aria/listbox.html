@@ -1,0 +1,15 @@
+<!doctype html><html><head><title>Pets</title><style>[role=option]{padding:2px 6px;cursor:pointer}[aria-selected=true]{background:#cfe3ff}</style></head><body><h1>Pets</h1>
+<div role="listbox" id="pets" aria-label="Pet" tabindex="0">
+<div role="option" id="p-cat" aria-selected="true">Cat</div><div role="option" id="p-dog" aria-selected="false">Dog</div><div role="option" id="p-fish" aria-selected="false">Fish</div></div>
+<div role="listbox" id="toys" aria-label="Toys" aria-multiselectable="true" tabindex="0">
+<div role="option" id="t-ball" aria-selected="true">Ball</div><div role="option" id="t-rope" aria-selected="false">Rope</div></div>
+<script>
+document.getElementById('pets').addEventListener('click', event => {
+  const option = event.target.closest('[role=option]');
+  if (option) document.querySelectorAll('#pets [role=option]').forEach(o => o.setAttribute('aria-selected', String(o === option)));
+});
+document.getElementById('toys').addEventListener('click', event => {
+  const option = event.target.closest('[role=option]');
+  if (option) option.setAttribute('aria-selected', String(option.getAttribute('aria-selected') !== 'true'));
+});
+</script></body></html>
