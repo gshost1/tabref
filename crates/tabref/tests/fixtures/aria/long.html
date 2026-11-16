@@ -1,0 +1,23 @@
+<!doctype html><html><head><title>Pick</title><style>
+[role=listbox]{border:1px solid #999;max-height:160px;overflow:auto;width:220px;background:#fff}
+[role=option]{padding:3px 6px}
+</style></head><body><h1>Pick</h1>
+<span id="item-label">Item</span>
+<div id="item" role="combobox" tabindex="0" aria-controls="items" aria-expanded="false" aria-labelledby="item-label" style="border:1px solid #888;width:200px">Item 1</div>
+<div id="items" role="listbox" aria-labelledby="item-label" hidden></div>
+<script>
+const box = document.getElementById('item'), list = document.getElementById('items');
+for (let n = 1; n <= 200; n++) {
+  const option = document.createElement('div');
+  option.setAttribute('role', 'option'); option.id = 'item-' + n; option.textContent = 'Item ' + n;
+  list.append(option);
+}
+const open = show => { list.hidden = !show; box.setAttribute('aria-expanded', String(show)); };
+box.addEventListener('click', () => open(list.hidden));
+list.addEventListener('click', event => {
+  const option = event.target.closest('[role=option]');
+  if (!option) return;
+  box.textContent = option.textContent;
+  open(false);
+});
+</script></body></html>
