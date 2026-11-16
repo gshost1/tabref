@@ -82,7 +82,7 @@ const SCAN: &str = r"const scan = () => {
 /// How long the arm script waits for an idle main thread before it arms
 /// anyway. Waiting never makes a capture staler: the watch is still armed
 /// before the capture starts, and only later changes are what it watches.
-pub const IDLE_WAIT_MS: u64 = 200;
+pub const IDLE_WAIT_MS: u64 = 50;
 
 const ARM: &str = r"await new Promise(resolve => (window.requestIdleCallback || (run => setTimeout(run, 0)))(() => resolve((() => {
   KEY_AND_SCAN

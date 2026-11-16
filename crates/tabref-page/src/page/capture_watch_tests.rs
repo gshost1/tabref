@@ -44,5 +44,5 @@ fn the_watch_is_armed_once_the_page_is_idle_or_the_wait_ran_out() {
     let filled = script(ARM, "s1");
     assert!(filled.starts_with("await new Promise"), "{filled}");
     assert!(filled.contains("requestIdleCallback"), "{filled}");
-    assert!(filled.contains("{ timeout: 200 }"), "{filled}");
+    assert!(filled.contains("{ timeout: 50 }"), "{filled}");
 }
