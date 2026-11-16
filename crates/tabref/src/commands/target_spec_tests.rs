@@ -1,6 +1,6 @@
 use tabref_page::Word;
 
-use super::TargetSpec;
+use super::{TargetSpec, looks_like_css};
 
 #[test]
 fn refs_stay_refs_and_other_text_is_a_name() {
@@ -35,4 +35,22 @@ fn a_quoted_ref_lookalike_is_a_name() {
         TargetSpec::from_words(&[Word::quoted("e4")]).unwrap(),
         TargetSpec::Find(_)
     ));
+}
+
+#[test]
+fn css_selectors_are_told_apart_from_names() {
+    for css in [
+        "input[type=file]",
+        "input[type=\"file\"]",
+        "#file",
+        ".dz-hidden-input",
+        "form > input",
+        "a.button",
+        "li:nth-child(2)",
+    ] {
+        assert!(looks_like_css(css), "{css}");
+    }
+    for name in ["Add to cart", "Save", "select more files…", "e4", "# of items", "Q3 report"] {
+        assert!(!looks_like_css(name), "{name}");
+    }
 }

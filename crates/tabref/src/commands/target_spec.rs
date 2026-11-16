@@ -40,6 +40,35 @@ impl TargetSpec {
     }
 }
 
+/// Whether a target reads as a CSS selector (`input[type=file]`, `#id`,
+/// `.class`, `form > input`, `a.button`), which no target accepts: targets
+/// are refs or visible names. Used only to explain a target that matched
+/// nothing, since a visible name may look like this too.
+pub(crate) fn looks_like_css(text: &str) -> bool {
+    let text = text.trim();
+    let one_word = !text.contains(char::is_whitespace);
+    let ident = |c: char| c.is_ascii_alphabetic() || c == '-' || c == '_';
+    let mut chars = text.chars();
+    let lead = chars.next();
+    let second = chars.next();
+    if one_word && matches!(lead, Some('#' | '.')) && second.is_some_and(ident) {
+        return true;
+    }
+    if text.contains('[') && text.ends_with(']') {
+        return true;
+    }
+    if text.contains(" > ") || text.contains("::") || text.contains(":nth-") {
+        return true;
+    }
+    let tag_len = text
+        .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit()))
+        .unwrap_or(text.len());
+    one_word
+        && tag_len > 0
+        && text[tag_len..].starts_with(['.', '#'])
+        && text[tag_len + 1..].starts_with(ident)
+}
+
 fn looks_like_ref(text: &str) -> bool {
     RefId::looks_like_ref(text) || is_short_ref(text)
 }
