@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::cut_outline::cut_outline;
 use super::cut_report::CutReport;
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
@@ -7,15 +8,24 @@ use super::view_options::ViewOptions;
 /// Lines of one navigation, header, footer or sidebar a view keeps when
 /// the page has a main landmark.
 const CHROME_LINES: usize = 6;
-const MAX_CUT_HEADINGS: usize = 80;
+/// Characters a cut view keeps for its header, frames and footer lines, at
+/// most a tenth of the budget.
+const FRAME_ROOM: usize = 400;
+/// Characters the cut marker line is allowed before it is written, at most
+/// a tenth of the budget.
+const MARKER_ROOM: usize = 100;
+/// The most of a cut view's budget the outline of its later headings may
+/// take from the content: one part in this many.
+const OUTLINE_SHARE: usize = 5;
 
 /// Fits `lines` into the budget of `options`. Each chrome landmark keeps
 /// its first lines and a note of how many it drops, unless chrome prints
-/// whole. Then lines print in order until the budget is spent; a marker
-/// line says where the cut starts and which command prints on from there.
-/// After it only headings print, each with the number of lines its section
-/// held and the line it starts at, so the rest of the page stays countable
-/// and reachable.
+/// whole. A view that fits prints whole. Otherwise lines print in order
+/// until the content's part of the budget is spent; a marker line says
+/// where the cut starts and which command prints on from there, and a
+/// compact outline of the headings after it (see [`cut_outline`]) keeps the
+/// rest of the page countable and reachable. Content, marker, outline and
+/// room for the header and footer together stay within the budget.
 pub(crate) fn fit(
     lines: Vec<ViewLine>,
     options: &ViewOptions,
@@ -33,67 +43,53 @@ pub(crate) fn fit(
     };
     let route = &options.route;
     let full = options.asks_full();
-    let mut kept = Vec::with_capacity(lines.len());
-    let mut spent = 0usize;
-    let mut shown = 0usize;
-    for (position, line) in lines.iter().enumerate() {
-        if report.budget_from.is_none() && spent + line.cost() > options.budget {
-            report.budget_from = Some(line.number);
-            let last = lines.last().map_or(line.number, |last| last.number);
-            kept.push(ViewLine::new(
-                0,
-                format!(
-                    "… lines {}-{last} cut here to fit: {}",
-                    line.number,
-                    route.starting_at(line.number, full)
-                ),
-            ));
-        }
-        if report.budget_from.is_none() {
-            spent += line.cost();
-            shown += 1;
-            kept.push(line.clone());
-            continue;
-        }
-        if line.heading.is_none() {
-            continue;
-        }
-        report.sections.count += 1;
-        if report.sections.first_heading.is_none() {
-            report.sections.first_heading = Some(line.heading_text());
-        }
-        if report.sections.count > MAX_CUT_HEADINGS {
-            if report.sections.count == MAX_CUT_HEADINGS + 1 {
-                kept.push(ViewLine::new(
-                    0,
-                    format!(
-                        "… more sections from line {}: {}",
-                        line.number,
-                        route.starting_at(line.number, full)
-                    ),
-                ));
-            }
-            continue;
-        }
-        let held = lines[position + 1..]
-            .iter()
-            .take_while(|next| next.heading.is_none_or(|level| Some(level) > line.heading))
-            .count();
-        let mut marked = line.clone();
-        marked.cut = None;
-        marked.text.push_str(&format!(
-            " [not shown: {held} lines, --from {}]",
-            line.number
-        ));
-        kept.push(marked);
+    let total: usize = lines.iter().map(ViewLine::cost).sum();
+    if total <= options.budget {
+        report.lines_shown = report.lines_total - report.chrome_cut;
+        report.chars_shown = total;
+        return (lines, report);
     }
-    report.lines_shown = if report.budget_from.is_some() {
-        shown
-    } else {
-        report.lines_total - report.chrome_cut
-    };
+    let tenth = options.budget / 10;
+    let room = options.budget.saturating_sub(FRAME_ROOM.min(tenth));
+    let share = room / OUTLINE_SHARE;
+    let wanted = cut_outline(&lines, cut_index(&lines, room), share, route, full).cost();
+    let content_room = room.saturating_sub(wanted.min(share) + MARKER_ROOM.min(tenth));
+    let cut = cut_index(&lines, content_room);
+    let mut kept: Vec<ViewLine> = lines[..cut].to_vec();
+    let spent: usize = kept.iter().map(ViewLine::cost).sum();
+    if let Some(first) = lines.get(cut) {
+        report.budget_from = Some(first.number);
+        let last = lines.last().map_or(first.number, |last| last.number);
+        let marker = ViewLine::new(
+            0,
+            format!(
+                "… lines {}-{last} cut here to fit: {}",
+                first.number,
+                route.starting_at(first.number, full)
+            ),
+        );
+        let outline_room = room.saturating_sub(spent + marker.cost());
+        kept.push(marker);
+        let outline = cut_outline(&lines, cut, outline_room, route, full);
+        report.sections = outline.sections;
+        kept.extend(outline.lines);
+    }
+    report.lines_shown = cut;
     report.chars_shown = kept.iter().map(ViewLine::cost).sum();
     (kept, report)
+}
+
+/// The index of the first line that does not fit in `room` characters,
+/// taking lines in order.
+fn cut_index(lines: &[ViewLine], room: usize) -> usize {
+    let mut spent = 0usize;
+    for (position, line) in lines.iter().enumerate() {
+        spent += line.cost();
+        if spent > room {
+            return position;
+        }
+    }
+    lines.len()
 }
 
 fn cap_chrome(
