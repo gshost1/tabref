@@ -84,7 +84,7 @@ fn a_line_the_page_shows_twice_is_reported_once() {
         distinct_changes(&changes),
         vec![
             "+ Please fix the following:",
-            "+ Phone must be 555-123-4567.",
+            "+ Phone must be 555-123-4567. ×2",
             "- Draft",
             "+ Draft",
         ]
@@ -127,7 +127,7 @@ fn a_step_line_cuts_its_change_at_100_characters() {
 #[test]
 fn a_change_that_does_not_fit_is_cut_to_the_room_left() {
     let lines: Vec<String> = (0..50)
-        .map(|n| format!("+ {n} {}", "y".repeat(296)))
+        .map(|n| format!("+ {n} {}", "y".repeat(297)))
         .collect();
     let shown = within_budget(&lines);
     assert_eq!(shown.len(), 3, "{shown:?}");
