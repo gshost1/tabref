@@ -3,8 +3,10 @@
 /// watched, whether the target sits at its very end now, the items the
 /// page added meanwhile (their count, the first line of the first and the
 /// last, their lines as far as 600 characters go and how many more there
-/// were), and whether a request it started was still running when the
-/// wait ended.
+/// were), and what leaves the end unknown: a request still running or a
+/// DOM still changing without new items when the wait ended (`loading`), a
+/// tab that draws no frames, so its loaders never ran (`hidden`), or an
+/// error after the scroll moved that stopped the watch (`unwatched`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScrollOutcome {
     pub moved: bool,
@@ -16,4 +18,6 @@ pub struct ScrollOutcome {
     pub lines: Vec<String>,
     pub more_lines: u64,
     pub loading: bool,
+    pub hidden: bool,
+    pub unwatched: bool,
 }

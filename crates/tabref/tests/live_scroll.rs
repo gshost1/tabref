@@ -77,10 +77,19 @@ const STATIC: &str = r#"<!doctype html><title>Essay</title><style>p{height:60px}
 
 fn site() -> (Harness, String) {
     let base = lazy_site(vec![
-        ("/ledger", SENTINEL.replace("ROWS", &rows("li", "Entry", 30))),
-        ("/inbox", CONTAINER.replace("ROWS", &rows("div", "Message", 20))),
+        (
+            "/ledger",
+            SENTINEL.replace("ROWS", &rows("li", "Entry", 30)),
+        ),
+        (
+            "/inbox",
+            CONTAINER.replace("ROWS", &rows("div", "Message", 20)),
+        ),
         ("/feed", FEED.replace("ROWS", &rows("article", "Story", 10))),
-        ("/essay", STATIC.replace("ROWS", &rows("p", "Paragraph", 60))),
+        (
+            "/essay",
+            STATIC.replace("ROWS", &rows("p", "Paragraph", 60)),
+        ),
     ]);
     (harness("scroll"), base)
 }
@@ -144,7 +153,7 @@ fn a_scroll_container_with_a_debounced_loader_loads_through_its_end() {
     let end = tabref.ok(&["scroll", "down", "--px", "2000"]);
     let first = end.stdout.lines().next().unwrap_or_default();
     assert!(first.starts_with("did not move"), "{}", end.stdout);
-    assert!(first.contains("nothing more loaded"), "{}", end.stdout);
+    assert!(first.contains("nothing new loaded"), "{}", end.stdout);
 }
 
 #[test]

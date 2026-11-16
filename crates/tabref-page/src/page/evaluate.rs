@@ -6,6 +6,7 @@ use crate::{CdpConnection, PageSession};
 
 const SCRIPT_GROUP: &str = "tabref-js";
 const AS_VALUE: &str = "function() { return this; }";
+const RELEASE_MS: u64 = 500;
 
 /// Evaluates `expression` in the page's main frame and returns its value as
 /// JSON. A promise is awaited, whether the expression awaits it or returns
@@ -58,11 +59,12 @@ fn evaluate_settled(
         return Ok(plain(result));
     };
     let outcome = object_value(connection, session, &result, object_id, deadline);
+    let release = Deadline::after(RELEASE_MS).unwrap_or(deadline);
     let _ = connection.call(
         "Runtime.releaseObjectGroup",
         json!({ "objectGroup": SCRIPT_GROUP }),
         session_id,
-        deadline,
+        release,
     );
     outcome
 }

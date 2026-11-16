@@ -1,150 +1,44 @@
-//! The page side of a scroll. One script moves the page or a container and,
-//! when that leaves the end of the scrolled content within reach, starts a
-//! `MutationObserver` on the document, kept under a registered symbol of
-//! the window so page scripts that list the window's keys never see it.
-//! Later scripts count what it saw and, at the end, read the elements the
-//! scroll's loading added.
+//! The page side of a scroll. A scroll far from the end of the content is
+//! one script. One that would end within reach of the end is planned
+//! first, then made by a second script that starts a `MutationObserver`
+//! on the document, kept under a registered symbol of the window so page
+//! scripts that list the window's keys never see it. Later scripts count
+//! what it saw and read the elements the scroll's loading added.
 
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
+use super::scroll_scripts::{COUNT, FRAMES, PRELUDE, READ, SCROLL, WATCH};
 use super::scroll_site::{ScrollSite, SiteScript};
 use crate::{CdpConnection, PageSession};
 
 const NEAR_VIEWS: f64 = 1.5;
 const LINE_BUDGET: u64 = 600;
+const LINE_CHARS: u64 = 100;
 
-const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? this : null;
-  const doc = anchor ? anchor.ownerDocument : document;
-  const win = doc.defaultView;
-  const root = doc.scrollingElement || doc.documentElement;
-  const key = Symbol.for('tabref.scroll');
-  const left = (el, dx, dy) => dy > 0 ? el.scrollHeight - el.clientHeight - el.scrollTop
-    : dy < 0 ? el.scrollTop
-    : dx > 0 ? el.scrollWidth - el.clientWidth - el.scrollLeft : el.scrollLeft;";
-
-const SCROLL: &str = r"function(dx, dy, nearViews) {
-  PRELUDE
-  const scrolls = (el) => {
-    if (!el || el.nodeType !== 1) return false;
-    const style = win.getComputedStyle(el);
-    const overflow = style.overflowY + ' ' + style.overflowX;
-    return /(auto|scroll|overlay)/.test(overflow)
-      && (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth);
-  };
-  const shift = (el) => {
-    const before = [el.scrollLeft, el.scrollTop];
-    if (el === root) win.scrollBy(dx, dy); else el.scrollBy(dx, dy);
-    return el.scrollLeft !== before[0] || el.scrollTop !== before[1];
-  };
-  let target = anchor, moved = false;
-  if (target) {
-    while (target && !scrolls(target)) target = target.parentElement;
-    target = target || root;
-    moved = shift(target);
-  } else if (shift(root)) {
-    target = root;
-    moved = true;
-  } else {
-    target = doc.elementFromPoint(win.innerWidth / 2, win.innerHeight / 2);
-    while (target && !scrolls(target)) target = target.parentElement;
-    target = target || Array.from(doc.querySelectorAll('body *')).filter(scrolls)
-      .sort((a, b) => b.clientHeight * b.clientWidth - a.clientHeight * a.clientWidth)[0] || root;
-    if (target !== root) moved = shift(target);
-  }
-  const view = target === root ? (dy ? win.innerHeight : win.innerWidth)
-    : (dy ? target.clientHeight : target.clientWidth);
-  const remaining = left(target, dx, dy);
-  const near = moved && remaining <= view * nearViews;
-  if (win[key]) { win[key].observer.disconnect(); delete win[key]; }
-  if (near) {
-    const state = { added: [], mutations: 0, target, dx, dy };
-    const note = (records) => {
-      for (const record of records) {
-        state.mutations += 1;
-        for (const node of record.addedNodes) if (node.nodeType === 1) state.added.push(node);
-      }
-    };
-    state.note = note;
-    state.observer = new win.MutationObserver(note);
-    state.observer.observe(doc, { subtree: true, childList: true, characterData: true });
-    win[key] = state;
-  }
-  return { moved, near, atEnd: remaining < 2 };
-}";
-
-const FRAMES: &str = r"function() {
-  PRELUDE
-  return new Promise(resolve => {
-    let done = false;
-    const finish = () => { if (!done) { done = true; resolve(true); } };
-    const after = (then) => {
-      const channel = new win.MessageChannel();
-      channel.port1.onmessage = then;
-      channel.port2.postMessage(0);
-    };
-    win.requestAnimationFrame(() => after(() => after(finish)));
-    win.setTimeout(finish, 100);
-  });
-}";
-
-const COUNT: &str = r"function() {
-  PRELUDE
-  const state = win[key];
-  if (!state) return null;
-  state.note(state.observer.takeRecords());
-  const items = state.added.filter(node => node.isConnected && (node.innerText || '').trim()).length;
-  return { mutations: state.mutations, items };
-}";
-
-const READ: &str = r"function(budget) {
-  PRELUDE
-  const state = win[key];
-  if (!state) return null;
-  state.note(state.observer.takeRecords());
-  state.observer.disconnect();
-  delete win[key];
-  const added = new Set(state.added.filter(node => node.isConnected));
-  const outermost = (node) => {
-    for (let up = node.parentElement; up; up = up.parentElement) if (added.has(up)) return false;
-    return true;
-  };
-  let items = Array.from(added).filter(outermost);
-  const repeats = (node) => {
-    const kids = Array.from(node.children);
-    return kids.length >= 3 && kids.filter(kid => kid.tagName === kids[0].tagName).length >= kids.length * 0.8;
-  };
-  while (items.length === 1 && repeats(items[0])) items = Array.from(items[0].children);
-  const texts = items.map(node => (node.innerText || node.textContent || '').trim()).filter(Boolean);
-  const lines = [];
-  let used = 0, more = 0;
-  for (const text of texts) {
-    for (const line of text.split('\n').map(part => part.trim()).filter(Boolean)) {
-      if (used + line.length > budget && lines.length) { more += 1; continue; }
-      used += line.length;
-      lines.push(line);
-    }
-  }
-  const head = (text) => text.split('\n')[0].trim();
-  return {
-    items: texts.length,
-    first: texts.length ? head(texts[0]) : null,
-    last: texts.length ? head(texts[texts.length - 1]) : null,
-    lines, more,
-    atEnd: left(state.target, state.dx, state.dy) < 2,
-  };
-}";
-
-/// Where a scroll left its target: whether it moved, whether it moved to
-/// within one and a half views of the end of the content, so what it set
-/// loading is being watched, and whether it is at the very end. A scroll
-/// that could not move fires no scroll event and changes no intersection,
-/// so it sets nothing loading and is not watched.
+/// Where a scroll left its target: whether it moved, whether it would end
+/// within one and a half views of the end of the content, so it was only
+/// planned and [`watch_scroll`] makes it, whether it is at the very end,
+/// and whether the page says it is hidden. A scroll that could not move
+/// fires no scroll event and changes no intersection, so it sets nothing
+/// loading and is not watched.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ScrollStep {
     pub(crate) moved: bool,
     pub(crate) near: bool,
     pub(crate) at_end: bool,
+    pub(crate) hidden: bool,
+}
+
+/// What the watch saw so far: DOM mutations inside the scrolled target,
+/// elements inserted without replacing anything, those of them that show
+/// text, and whether the scrolled content grew.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ScrollCount {
+    pub(crate) mutations: u64,
+    pub(crate) inserted: u64,
+    pub(crate) items: u64,
+    pub(crate) grew: bool,
 }
 
 /// What the scroll's loading added, read when it settled.
@@ -155,11 +49,9 @@ pub(crate) struct ScrollLoaded {
     pub(crate) last: Option<String>,
     pub(crate) lines: Vec<String>,
     pub(crate) more_lines: u64,
+    pub(crate) mutations: u64,
+    pub(crate) grew: bool,
     pub(crate) at_end: bool,
-}
-
-fn script(source: &str) -> String {
-    source.replace("PRELUDE", PRELUDE)
 }
 
 fn run(
@@ -169,7 +61,7 @@ fn run(
     (source, arguments): (&str, &[Value]),
     deadline: Deadline,
 ) -> Result<Value, AppError> {
-    let function = script(source);
+    let function = source.replace("PRELUDE", PRELUDE);
     let script = SiteScript {
         function: &function,
         arguments,
@@ -177,10 +69,19 @@ fn run(
     site.call(connection, session, script, deadline)
 }
 
+fn flag(reply: &Value, key: &str) -> bool {
+    reply.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn number(reply: &Value, key: &str) -> u64 {
+    reply.get(key).and_then(Value::as_u64).unwrap_or(0)
+}
+
 /// Scrolls `site` by `(dx, dy)` CSS pixels: the given element's nearest
 /// scrollable container, or the document when it scrolls, otherwise the
 /// scrollable container under the viewport's centre, or the largest one,
-/// as an app whose body never scrolls lays out.
+/// as an app whose body never scrolls lays out. A scroll that would end
+/// near the end of the content is only planned.
 pub(crate) fn scroll_step(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -190,60 +91,82 @@ pub(crate) fn scroll_step(
 ) -> Result<ScrollStep, AppError> {
     let arguments = [json!(delta.0), json!(delta.1), json!(NEAR_VIEWS)];
     let reply = run(connection, session, site, (SCROLL, &arguments), deadline)?;
-    let flag = |key: &str| reply.get(key).and_then(Value::as_bool).unwrap_or(false);
     Ok(ScrollStep {
-        moved: flag("moved"),
-        near: flag("near"),
-        at_end: flag("atEnd"),
+        moved: flag(&reply, "moved"),
+        near: flag(&reply, "near"),
+        at_end: flag(&reply, "atEnd"),
+        hidden: flag(&reply, "hidden"),
     })
 }
 
-/// Waits for the next animation frame and two tasks after it, or 100 ms
-/// where no frame is drawn, so that scroll events (dispatched as the frame
-/// begins) and `IntersectionObserver` callbacks (queued as a task while it
-/// renders, before the second task) the scroll set off have run.
+/// Starts the watch and makes the scroll [`scroll_step`] planned. `None`
+/// when the plan is gone, as after a navigation.
+pub(crate) fn watch_scroll(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    site: ScrollSite<'_>,
+    deadline: Deadline,
+) -> Result<Option<(bool, bool)>, AppError> {
+    let reply = run(connection, session, site, (WATCH, &[]), deadline)?;
+    if reply.is_null() {
+        return Ok(None);
+    }
+    Ok(Some((flag(&reply, "moved"), flag(&reply, "atEnd"))))
+}
+
+/// Waits for the next animation frame and two tasks after it, so that
+/// scroll events (dispatched as the frame begins) and
+/// `IntersectionObserver` callbacks (queued as a task while it renders)
+/// the scroll set off have run. `false` when no frame came within 100 ms
+/// or the page is hidden: then neither ran.
 pub(crate) fn wait_frames(
     connection: &mut CdpConnection,
     session: &PageSession,
     site: ScrollSite<'_>,
     deadline: Deadline,
-) -> Result<(), AppError> {
-    run(connection, session, site, (FRAMES, &[]), deadline).map(|_| ())
+) -> Result<bool, AppError> {
+    Ok(run(connection, session, site, (FRAMES, &[]), deadline)?.as_bool() == Some(true))
 }
 
-/// The DOM mutations seen since the scroll, and how many added elements
-/// with text are still in the document. `None` once the watch is gone.
+/// What the watch saw so far. `None` once the watch is gone.
 pub(crate) fn count_added(
     connection: &mut CdpConnection,
     session: &PageSession,
     site: ScrollSite<'_>,
     deadline: Deadline,
-) -> Result<Option<(u64, u64)>, AppError> {
+) -> Result<Option<ScrollCount>, AppError> {
     let reply = run(connection, session, site, (COUNT, &[]), deadline)?;
-    let number = |key: &str| reply.get(key).and_then(Value::as_u64);
-    Ok(number("mutations").zip(number("items")))
+    if reply.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(ScrollCount {
+        mutations: number(&reply, "mutations"),
+        inserted: number(&reply, "inserted"),
+        items: number(&reply, "items"),
+        grew: flag(&reply, "grew"),
+    }))
 }
 
 /// Stops the watch and reads what it added: the outermost added elements
-/// with text are the items (a single added wrapper of three or more alike
-/// children stands for them), their lines as far as 600 characters go, and whether the
-/// target is still at its end.
+/// that show text are the items (a single added wrapper of three or more
+/// alike children stands for them), their lines cut to 100 characters as
+/// far as 600 characters go, the rest only counted, and whether the target
+/// is still at its end. Elements that replaced others count only when the
+/// content grew, so a ticking clock is no item.
 pub(crate) fn read_loaded(
     connection: &mut CdpConnection,
     session: &PageSession,
     site: ScrollSite<'_>,
     deadline: Deadline,
-) -> Result<ScrollLoaded, AppError> {
-    let reply = run(
-        connection,
-        session,
-        site,
-        (READ, &[json!(LINE_BUDGET)]),
-        deadline,
-    )?;
+) -> Result<Option<ScrollLoaded>, AppError> {
+    let arguments = [json!(LINE_BUDGET), json!(LINE_CHARS)];
+    let reply = run(connection, session, site, (READ, &arguments), deadline)?;
+    if reply.is_null() {
+        return Ok(None);
+    }
     let text = |key: &str| reply.get(key).and_then(Value::as_str).map(str::to_owned);
-    Ok(ScrollLoaded {
-        items: reply.get("items").and_then(Value::as_u64).unwrap_or(0),
+    Ok(Some(ScrollLoaded {
+        items: number(&reply, "items"),
         first: text("first"),
         last: text("last"),
         lines: reply
@@ -257,55 +180,9 @@ pub(crate) fn read_loaded(
                     .collect()
             })
             .unwrap_or_default(),
-        more_lines: reply.get("more").and_then(Value::as_u64).unwrap_or(0),
-        at_end: reply.get("atEnd").and_then(Value::as_bool).unwrap_or(false),
-    })
-}
-
-/// Whether the page listens for scroll events where this scroll fires
-/// them: on its window, its document, or the scrolled container. Such a
-/// listener may load more after a debounce, so the settle gives it time.
-pub(crate) fn listens_for_scroll(
-    connection: &mut CdpConnection,
-    session: &PageSession,
-    site: ScrollSite<'_>,
-    deadline: Deadline,
-) -> Result<bool, AppError> {
-    const PICK: &str = r"function(which) {
-  PRELUDE
-  const state = win[key];
-  return which === 0 ? win : which === 1 ? doc : (state ? state.target : null);
-}";
-    let mut found = false;
-    for which in 0..3 {
-        let function = script(PICK);
-        let arguments = [json!(which)];
-        let pick = SiteScript {
-            function: &function,
-            arguments: &arguments,
-        };
-        let picked = site.object(connection, session, pick, deadline);
-        let Ok(Some(object)) = picked else { continue };
-        let reply = connection.call(
-            "DOMDebugger.getEventListeners",
-            json!({ "objectId": object, "depth": 0 }),
-            Some(&session.session_id),
-            deadline,
-        );
-        let Ok(reply) = reply else { continue };
-        let listeners = reply.get("listeners").and_then(Value::as_array);
-        if listeners.is_some_and(|listeners| {
-            listeners.iter().any(|listener| {
-                matches!(
-                    listener.get("type").and_then(Value::as_str),
-                    Some("scroll" | "scrollend")
-                )
-            })
-        }) {
-            found = true;
-            break;
-        }
-    }
-    ScrollSite::release(connection, session, deadline);
-    Ok(found)
+        more_lines: number(&reply, "more"),
+        mutations: number(&reply, "mutations"),
+        grew: flag(&reply, "grew"),
+        at_end: flag(&reply, "atEnd"),
+    }))
 }

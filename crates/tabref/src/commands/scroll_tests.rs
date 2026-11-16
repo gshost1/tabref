@@ -23,18 +23,18 @@ fn a_plain_scroll_reads_as_before() {
 }
 
 #[test]
-fn the_end_of_a_list_says_nothing_more_loaded() {
+fn the_bottom_says_only_that_nothing_new_loaded() {
     assert_eq!(
         first_line("down", 600.0, &outcome(true, true)),
-        "scrolled down 600px; end of list: nothing more loaded"
+        "scrolled down 600px; at the bottom: nothing new loaded"
     );
     assert_eq!(
         first_line("down", 600.0, &outcome(false, true)),
-        "did not move: end of list, nothing more loaded"
+        "did not move: at the bottom, nothing new loaded"
     );
     assert_eq!(
         first_line("up", 600.0, &outcome(false, true)),
-        "did not move: top of list, nothing more loaded"
+        "did not move: at the top, nothing new loaded"
     );
 }
 
@@ -61,7 +61,7 @@ fn loaded_items_name_the_first_and_the_last() {
     };
     assert_eq!(
         first_line("down", 600.0, &one),
-        r#"scrolled down 600px: 1 new item loaded ("Entry 51"); more is still loading"#
+        r#"scrolled down 600px: 1 new item loaded ("Entry 51"); more may still be loading"#
     );
 }
 
@@ -73,6 +73,51 @@ fn a_request_still_running_is_said() {
     };
     assert_eq!(
         first_line("down", 600.0, &pending),
-        "scrolled down 600px; more is still loading"
+        "scrolled down 600px; more may still be loading"
+    );
+}
+
+#[test]
+fn what_leaves_the_end_unknown_replaces_the_claim() {
+    let hidden = ScrollOutcome {
+        hidden: true,
+        watched: true,
+        ..outcome(true, true)
+    };
+    assert_eq!(
+        first_line("down", 600.0, &hidden),
+        "scrolled down 600px; more may still be loading (tab not showing)"
+    );
+    let stuck = ScrollOutcome {
+        hidden: true,
+        ..outcome(false, true)
+    };
+    assert_eq!(
+        first_line("down", 600.0, &stuck),
+        "did not move: at the bottom; more may still be loading (tab not showing)"
+    );
+    let changing = ScrollOutcome {
+        loading: true,
+        ..outcome(true, true)
+    };
+    assert_eq!(
+        first_line("down", 600.0, &changing),
+        "scrolled down 600px; more may still be loading"
+    );
+    let failed = ScrollOutcome {
+        unwatched: true,
+        ..outcome(true, true)
+    };
+    assert_eq!(
+        first_line("down", 600.0, &failed),
+        "scrolled down 600px; could not check what loaded"
+    );
+}
+
+#[test]
+fn loaded_lines_keep_no_control_characters() {
+    assert_eq!(
+        crate::view::node_line::escape_line("Esc\u{1b}[31mred\rback \"q\"", false),
+        "Esc\\u001b[31mred\\rback \"q\""
     );
 }
