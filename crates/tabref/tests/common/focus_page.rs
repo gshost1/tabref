@@ -27,6 +27,8 @@ pub const PAGE: &str = r#"<!doctype html><title>Focus</title>
 <x-badtab id=badtab role=button aria-label="Bad tab host"></x-badtab>
 <x-veiled id=veiled role=button aria-label="Veiled host"></x-veiled>
 <x-closed id=closed role=button aria-label="Closed host"></x-closed>
+<x-blurry id=blurry role=button aria-label="Blurry host"></x-blurry>
+<x-tabbed id=tabbed tabindex=0 role=button aria-label="Tabbed host"></x-tabbed>
 <p id=out>Nothing</p>
 <p id=seen>Unseen</p>
 <script>
@@ -39,6 +41,8 @@ customElements.define('x-skip', host('<input type=hidden id=secret><input id=uns
 customElements.define('x-empty', host('<span>Nothing to focus</span>'));
 customElements.define('x-badtab', host('<span id=junk tabindex=abc>Junk</span><input id=good>'));
 customElements.define('x-veiled', host('<input id=ghost style="visibility:hidden"><input id=plain>'));
+customElements.define('x-blurry', host('<input id=slippery onfocus="this.blur()">'));
+customElements.define('x-tabbed', host('<input id=tabbed-inner>'));
 customElements.define('x-closed', class extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: 'closed', delegatesFocus: true }).innerHTML = '<input id=hidden-inside>'; }
 });

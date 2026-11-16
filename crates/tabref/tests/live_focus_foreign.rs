@@ -195,4 +195,12 @@ fn a_host_that_delegates_focus_finds_a_control_it_can_focus_or_is_refused() {
     );
     tabref.ok(&["focus", "Closed host"]);
     assert_eq!(active(&tabref), "closed");
+    tabref.ok(&["focus", "Tabbed host"]);
+    assert_eq!(
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
+        "tabbed-inner"
+    );
 }

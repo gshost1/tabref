@@ -218,23 +218,29 @@ impl Session {
 
     /// Stops telling each tab but `keep` that it holds the window focus,
     /// so a tab tabref no longer works in goes back to the background:
-    /// hidden, with throttled timers. Only a tab this command can claim at
-    /// once is told: a tab another daemon command works in now keeps its
-    /// state, and its flag. A tab is marked as told no more only when the
+    /// hidden, with throttled timers. Only a tab no other daemon command
+    /// holds is told, held for that one call and released at once; a tab
+    /// another command works in now keeps its state, and its flag. A tab is marked as told no more only when the
     /// browser took it or the tab is gone; a call that failed otherwise (a
     /// cancel, the deadline) leaves the mark, so a later command tries
     /// again.
     fn leave_other_tabs(&mut self, keep: Option<&str>, deadline: Deadline) {
         for (id, tab) in &mut self.attached {
-            if !tab.focused || keep == Some(id.as_str()) || !self.scope.try_claim(id) {
+            if !tab.focused || keep == Some(id.as_str()) {
                 continue;
             }
+            let Some(taken) = self.scope.try_hold(id) else {
+                continue;
+            };
             let left = self.connection.call(
                 OWN_TAB_FOCUS,
                 json!({ "enabled": false }),
                 Some(&tab.session.session_id),
                 deadline,
             );
+            if taken {
+                self.scope.release_tab(id);
+            }
             if left.as_ref().map_or_else(is_target_gone, |_| true) {
                 tab.focused = false;
             }
@@ -247,6 +253,9 @@ impl Session {
     /// connection that waits in the pool leaves no background tab visible.
     #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn leave_background_tabs(&mut self) {
+        if !self.browser.launched || !self.attached.values().any(|tab| tab.focused) {
+            return;
+        }
         let current = self.store.read_state(&self.tab_state_name());
         if let Ok(deadline) = Deadline::after(LEAVE_MS) {
             self.leave_other_tabs(current.as_deref().map(str::trim), deadline);
@@ -263,7 +272,10 @@ impl Session {
 /// current tab, so its focus handlers run and every action sees the same
 /// focus state, and is told otherwise when tabref moves to another tab
 /// (`leave_other_tabs`). Other tabs keep their own state, and a browser
-/// tabref did not launch is never told this.
+/// tabref did not launch is never told this. The daemon's pooled
+/// connections each keep their own record: a tab skipped because another
+/// command held it, or one another connection turned off, may stay told,
+/// or lose it, until a command next makes it current.
 const OWN_TAB_FOCUS: &str = "Emulation.setFocusEmulationEnabled";
 
 /// How long a command that ends spends telling tabs it left that they no
