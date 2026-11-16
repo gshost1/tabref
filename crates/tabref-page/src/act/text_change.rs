@@ -14,6 +14,17 @@ pub enum TextChange {
     Removed(String),
 }
 
+impl TextChange {
+    /// The change as a `do` step's line carries it: as printed, with an
+    /// added line cut to 100 characters like a removed one.
+    pub fn brief(&self) -> String {
+        match self {
+            Self::Added(line) => format!("+ {}", cut(line, LINE_CHARS)),
+            other => other.to_string(),
+        }
+    }
+}
+
 impl fmt::Display for TextChange {
     /// `▲ {3 -> 4} ▼ Books set in winter` for a rewritten line, keeping the
     /// words around the change; `+ line` otherwise, whole up to 400

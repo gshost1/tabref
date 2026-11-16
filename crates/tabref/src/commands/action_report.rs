@@ -17,6 +17,8 @@ const CHANGE_BUDGET: usize = 600;
 const NOTHING_SEEN: &str = " (no visible change)";
 const NEW_SHOWN: usize = 8;
 const NEW_LINE_CHARS: usize = 80;
+const MIN_ROOM: usize = 60;
+const ELLIPSIS: &str = " …";
 
 /// An action as a single command prints it: `clicked "Save"`, then what it
 /// set off, capped near 150 tokens: dialogs, the new address, the page's
@@ -166,15 +168,23 @@ fn nothing_seen(acted: &Acted) -> bool {
             .is_some_and(|page| page.mutations == Some(0) && page.changes.is_empty())
 }
 
+/// The changed lines that fit 600 bytes, in order: one that does not fit
+/// whole is cut to the room left when that is 60 bytes or more, the first
+/// line too, and the rest are counted.
 fn within_budget(changes: &[String]) -> Vec<String> {
     let mut used = 0;
     let mut shown = Vec::new();
     for change in changes {
-        if used + change.len() > CHANGE_BUDGET && !shown.is_empty() {
-            break;
+        let room = CHANGE_BUDGET - used;
+        if change.len() <= room {
+            used += change.len();
+            shown.push(change.clone());
+            continue;
         }
-        used += change.len();
-        shown.push(change.clone());
+        if room >= MIN_ROOM {
+            shown.push(cut_to_bytes(change, room));
+        }
+        break;
     }
     if shown.len() < changes.len() {
         shown.push(format!(
@@ -183,6 +193,24 @@ fn within_budget(changes: &[String]) -> Vec<String> {
         ));
     }
     shown
+}
+
+/// `text` within `room` bytes, ending in `…`: after its last whole word
+/// when one ends in the second half of the room, else mid-word.
+fn cut_to_bytes(text: &str, room: usize) -> String {
+    let limit = room.saturating_sub(ELLIPSIS.len());
+    let mut end = 0;
+    for (at, character) in text.char_indices() {
+        if at + character.len_utf8() > limit {
+            break;
+        }
+        end = at + character.len_utf8();
+    }
+    let kept = &text[..end];
+    match kept.rfind(' ') {
+        Some(space) if space >= limit / 2 => format!("{}{ELLIPSIS}", kept[..space].trim_end()),
+        _ => format!("{kept}{ELLIPSIS}"),
+    }
 }
 
 fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut Vec<String>) {
@@ -245,27 +273,46 @@ pub(crate) fn styled(line: &str) -> String {
     }
 }
 
-/// The changed lines as printed, each once: a page often shows the same
-/// message twice (a summary list and inline under the field), and the
-/// second copy says nothing new.
+/// The changed lines as printed, each once with how many times it showed
+/// (`+ Required ×2`): a page often shows the same message twice (a summary
+/// list and inline under the field). Lines are compared whole, before any
+/// cut.
 pub(crate) fn distinct_changes(changes: &[tabref_page::TextChange]) -> Vec<String> {
-    let mut seen = HashSet::new();
-    changes
-        .iter()
-        .map(ToString::to_string)
-        .filter(|line| seen.insert(line.clone()))
+    counted(changes)
+        .into_iter()
+        .map(|(change, count)| with_count(change.to_string(), count))
         .collect()
 }
 
-/// The first change as a `do` step's line carries it, with how many more
-/// there were: `+ Saved (+2 more)`.
-fn step_change(changes: &[tabref_page::TextChange]) -> Option<String> {
-    let changes = distinct_changes(changes);
-    let first = changes.first()?;
-    if changes.len() > 1 {
-        return Some(format!("{first} (+{} more)", changes.len() - 1));
+fn counted(changes: &[tabref_page::TextChange]) -> Vec<(&tabref_page::TextChange, usize)> {
+    let mut counts: Vec<(&tabref_page::TextChange, usize)> = Vec::new();
+    for change in changes {
+        match counts.iter_mut().find(|(seen, _)| *seen == change) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((change, 1)),
+        }
     }
-    Some(first.clone())
+    counts
+}
+
+fn with_count(line: String, count: usize) -> String {
+    if count > 1 {
+        format!("{line} ×{count}")
+    } else {
+        line
+    }
+}
+
+/// The first change as a `do` step's line carries it, cut to 100
+/// characters, with how many more there were: `+ Saved (+2 more)`.
+fn step_change(changes: &[tabref_page::TextChange]) -> Option<String> {
+    let counts = counted(changes);
+    let (first, count) = counts.first()?;
+    let line = with_count(first.brief(), *count);
+    if counts.len() > 1 {
+        return Some(format!("{line} (+{} more)", counts.len() - 1));
+    }
+    Some(line)
 }
 
 #[cfg(test)]

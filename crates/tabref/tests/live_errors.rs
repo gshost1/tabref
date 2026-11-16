@@ -130,7 +130,7 @@ fn a_message_the_page_shows_twice_is_printed_once_and_whole() {
         .collect();
     assert_eq!(lines.len(), 1, "{}", clicked.stdout);
     assert!(
-        lines[0].ends_with("16:15, 16:45."),
+        lines[0].ends_with("16:15, 16:45. ×2"),
         "cut: {}\n{}",
         lines[0],
         clicked.stdout
