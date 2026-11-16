@@ -314,6 +314,10 @@ pub(crate) fn styled(line: &str) -> String {
     }
 }
 
+pub(crate) fn distinct_changes(changes: &[tabref_page::TextChange]) -> Vec<String> {
+    changes.iter().map(ToString::to_string).collect()
+}
+
 #[cfg(test)]
 #[path = "action_report_tests.rs"]
 mod tests;

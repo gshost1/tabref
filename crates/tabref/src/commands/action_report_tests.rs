@@ -1,6 +1,7 @@
 use serde_json::json;
+use tabref_page::TextChange;
 
-use super::{dialog_line, dialog_lines};
+use super::{dialog_line, dialog_lines, distinct_changes};
 
 #[test]
 fn a_dialog_line_says_which_dialog_opened_and_how_it_was_answered() {
@@ -68,4 +69,24 @@ fn only_repeats_next_to_each_other_collapse_and_one_more_is_singular() {
     );
     let many: Vec<_> = (0..11).map(|index| alert(&format!("N{index}"))).collect();
     assert_eq!(dialog_lines(&many).last().unwrap(), "1 more dialog");
+}
+
+#[test]
+fn a_line_the_page_shows_twice_is_reported_once() {
+    let changes = vec![
+        TextChange::Added("Please fix the following:".into()),
+        TextChange::Added("Phone must be 555-123-4567.".into()),
+        TextChange::Added("Phone must be 555-123-4567.".into()),
+        TextChange::Removed("Draft".into()),
+        TextChange::Added("Draft".into()),
+    ];
+    assert_eq!(
+        distinct_changes(&changes),
+        vec![
+            "+ Please fix the following:",
+            "+ Phone must be 555-123-4567.",
+            "- Draft",
+            "+ Draft",
+        ]
+    );
 }
