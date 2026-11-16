@@ -166,7 +166,10 @@ fn a_host_that_delegates_focus_finds_a_control_it_can_focus_or_is_refused() {
     );
     tabref.ok(&["focus", "Skips hidden"]);
     assert_eq!(
-        read(&tabref, "document.activeElement.shadowRoot.activeElement.id"),
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
         "real"
     );
     let empty = tabref.run(&["--json", "focus", "Empty host"]).json();
