@@ -16,7 +16,10 @@ fn outcome(via: FileInputVia, hidden: bool) -> UploadOutcome {
 #[test]
 fn the_line_names_a_hidden_input_found_behind_the_target() {
     assert_eq!(
-        summary(&outcome(FileInputVia::Nearest, true), "\"select more files…\""),
+        summary(
+            &outcome(FileInputVia::Nearest, true),
+            "\"select more files…\""
+        ),
         "uploaded a.txt, b.txt to \"select more files…\" via hidden input.dz-hidden-input (the nearest file input)"
     );
 }

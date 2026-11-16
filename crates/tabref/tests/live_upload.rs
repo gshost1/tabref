@@ -56,7 +56,10 @@ fn a_drop_zone_link_uploads_to_its_hidden_input_and_css_is_explained() {
         "Array.from(document.querySelector('.dz-hidden-input').files).map((f) => f.name).join(',')",
     ]);
     assert_eq!(held.stdout.trim(), "a.txt,b.txt");
-    let avatar = tabref.ok(&["js", "String(document.getElementById('avatar').files.length)"]);
+    let avatar = tabref.ok(&[
+        "js",
+        "String(document.getElementById('avatar').files.length)",
+    ]);
     assert_eq!(avatar.stdout.trim(), "0");
 
     let single = tabref.run(&["upload", "Avatar", &first, &second]);

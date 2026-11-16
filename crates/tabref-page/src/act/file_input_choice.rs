@@ -64,7 +64,11 @@ pub(crate) fn choose(
     if let Some(found) = candidates.iter().find(|candidate| candidate.labelled) {
         return FileInputChoice::Chosen(found, FileInputVia::Label);
     }
-    let Some(nearest) = candidates.iter().filter_map(|candidate| candidate.depth).min() else {
+    let Some(nearest) = candidates
+        .iter()
+        .filter_map(|candidate| candidate.depth)
+        .min()
+    else {
         return FileInputChoice::None;
     };
     let at: Vec<&FileInputCandidate> = candidates

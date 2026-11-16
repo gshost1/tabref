@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::element_call::ElementCall;
-use super::element_errors::node_error;
+use super::element_errors::{node_error, stale};
 use super::file_input_choice::{FileInputCandidate, FileInputChoice, choose};
 use super::file_input_search::{list_file_inputs, pick_file_input};
 use super::remote_element::{call_function, with_element};
@@ -57,9 +57,10 @@ pub fn upload_files(
                 ))
                 .with_disposition(DeliverySemantics::not_delivered()));
             }
-            let picked =
-                pick_file_input(connection, session, object, input.index, token, deadline)?;
-            let names = set_and_read(connection, session, &picked, &paths, token, deadline);
+            let picked = pick_file_input(connection, session, object, input.index, deadline)?
+                .ok_or_else(|| stale(token, "the file input left the page during the upload"))?;
+            let names = set_and_read(connection, session, &picked, &paths, deadline)
+                .map_err(|error| node_error(error, token));
             let _ = connection.call(
                 "Runtime.releaseObject",
                 json!({ "objectId": picked }),
@@ -89,17 +90,14 @@ fn set_and_read(
     session: &PageSession,
     input: &str,
     paths: &[String],
-    token: &ElementToken,
     deadline: Deadline,
 ) -> Result<Vec<String>, AppError> {
-    connection
-        .call(
-            "DOM.setFileInputFiles",
-            json!({ "files": paths, "objectId": input }),
-            Some(&session.session_id),
-            deadline,
-        )
-        .map_err(|error| node_error(error, token))?;
+    connection.call(
+        "DOM.setFileInputFiles",
+        json!({ "files": paths, "objectId": input }),
+        Some(&session.session_id),
+        deadline,
+    )?;
     let read = call_function(connection, session, input, script(READ_FILES), deadline)?;
     Ok(read
         .as_array()
@@ -163,7 +161,9 @@ fn ambiguous_file_input(backend_node_id: i64, found: &[&FileInputCandidate]) -> 
             names.join(", ")
         ),
     )
-    .with_suggestion("Upload to a control inside the form or drop zone that holds the input you mean")
+    .with_suggestion(
+        "Upload to a control inside the form or drop zone that holds the input you mean",
+    )
     .with_details(json!({ "kind": "ambiguous_file_input", "inputs": names }))
     .with_disposition(DeliverySemantics::not_delivered())
 }
