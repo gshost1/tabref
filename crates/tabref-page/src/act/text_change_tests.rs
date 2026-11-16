@@ -81,3 +81,21 @@ fn a_cut_line_ends_after_a_whole_word() {
     let removed = TextChange::Removed(line.trim().to_owned()).to_string();
     assert!(removed.ends_with(" …"), "{removed}");
 }
+
+#[test]
+fn a_reorder_prints_its_first_rows_and_how_to_see_the_rest() {
+    let first: Vec<String> = (1..=12)
+        .map(|n| format!("Row {n} with some text"))
+        .collect();
+    let change = TextChange::Reordered { count: 12, first };
+    let shown = change.to_string();
+    let mut lines = shown.lines();
+    assert_eq!(lines.next(), Some("reordered 12 rows, now starting:"));
+    assert_eq!(lines.next(), Some("  Row 1 with some text"));
+    assert!(shown.ends_with("more: tabref snap)"), "{shown}");
+    assert!(shown.len() <= 450, "{}", shown.len());
+    assert_eq!(
+        change.brief(),
+        "reordered 12 rows, now starting: Row 1 with some text | Row 2 with some text | Row 3 with some text …"
+    );
+}
