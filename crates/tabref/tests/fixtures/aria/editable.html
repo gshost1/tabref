@@ -1,0 +1,32 @@
+<!doctype html><html><head><title>Ship</title><style>
+[role=listbox]{border:1px solid #999;margin:0;padding:0;list-style:none;width:240px;background:#fff}
+[role=option]{padding:3px 6px;cursor:pointer}
+</style></head><body><h1>Ship</h1>
+<label for="city">City</label>
+<input id="city" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cities" autocomplete="off" value="Oslo">
+<ul id="cities" role="listbox" aria-label="Cities"></ul>
+<p><button type="button">Ship it</button></p>
+<script>
+const all = ['Oslo', 'Bergen', 'Berlin', 'Bern', 'Lisbon', 'Lima', 'Lyon'];
+const box = document.getElementById('city'), list = document.getElementById('cities');
+const close = () => { list.replaceChildren(); box.setAttribute('aria-expanded', 'false'); };
+box.addEventListener('input', () => {
+  const typed = box.value.trim().toLowerCase();
+  list.replaceChildren();
+  if (!typed) { close(); return; }
+  all.filter(city => city.toLowerCase().includes(typed)).forEach((city, n) => {
+    const li = document.createElement('li');
+    li.setAttribute('role', 'option'); li.id = 'city-' + n; li.textContent = city;
+    list.append(li);
+  });
+  box.setAttribute('aria-expanded', String(list.children.length > 0));
+});
+list.addEventListener('mousedown', event => {
+  const option = event.target.closest('[role=option]');
+  if (!option) return;
+  event.preventDefault();
+  box.value = option.textContent;
+  close();
+});
+box.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+</script></body></html>

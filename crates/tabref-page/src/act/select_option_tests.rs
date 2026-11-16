@@ -76,12 +76,19 @@ fn a_disabled_option_is_refused_by_name() {
 }
 
 #[test]
-fn a_non_select_is_not_supported() {
+fn an_element_with_no_select_or_aria_pattern_is_not_supported() {
     let transport = call(ScriptedTransport::new(), json!({ "error": "not_select" }));
+    let transport = call(transport, json!({ "kind": "none", "describe": "<div>" }));
     let mut connection = CdpConnection::new(transport.boxed());
     let error =
         select_option(&mut connection, &session(), &token(4), "Green", deadline()).unwrap_err();
     assert_eq!(error.code, ErrorCode::ActionNotSupported);
+    assert_eq!(error.kind(), Some("select_unsupported"));
+    assert!(
+        error.message.contains("is a <div>, not a <select>"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]

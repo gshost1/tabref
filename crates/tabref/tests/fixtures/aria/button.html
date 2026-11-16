@@ -1,0 +1,20 @@
+<!doctype html><html><head><title>Paint</title><style>
+ul[role=listbox]{border:1px solid #999;margin:0;padding:0;list-style:none;width:200px;background:#fff}
+ul[role=listbox].hidden{display:none}[role=option]{padding:3px 6px;cursor:pointer}
+</style></head><body><h1>Paint</h1>
+<span id="colour-label">Colour</span>
+<button type="button" id="colour" aria-haspopup="listbox" aria-labelledby="colour-label colour">Red</button>
+<ul id="colours" role="listbox" aria-labelledby="colour-label" tabindex="-1" class="hidden">
+<li role="option" id="c-red" aria-selected="true">Red</li><li role="option" id="c-green">Green</li><li role="option" id="c-blue">Blue</li></ul>
+<script>
+const button = document.getElementById('colour'), list = document.getElementById('colours');
+const open = show => { list.classList.toggle('hidden', !show); if (show) button.setAttribute('aria-expanded', 'true'); else button.removeAttribute('aria-expanded'); };
+button.addEventListener('click', () => open(list.classList.contains('hidden')));
+list.addEventListener('click', event => {
+  const option = event.target.closest('[role=option]');
+  if (!option) return;
+  list.querySelectorAll('[role=option]').forEach(o => o.setAttribute('aria-selected', String(o === option)));
+  button.textContent = option.textContent;
+  open(false);
+});
+</script></body></html>

@@ -1,0 +1,41 @@
+<!doctype html><html><head><title>Order</title><style>
+.box{border:1px solid #888;width:200px;padding:4px;cursor:pointer}
+[role=listbox]{border:1px solid #999;max-height:150px;overflow:auto;width:220px;background:#fff}
+[role=option]{padding:3px 6px}[role=option][aria-disabled=true]{color:#999}
+</style></head><body><h1>Order</h1>
+<span id="fruit-label">Fruit</span>
+<div id="fruit" class="box" role="combobox" tabindex="0" aria-controls="fruits" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="fruit-label">Apple</div>
+<div id="fruits" role="listbox" aria-labelledby="fruit-label" tabindex="-1" hidden>
+<div role="option" id="o-apple" aria-selected="true">Apple</div>
+<div role="option" id="o-banana">Banana</div>
+<div role="option" id="o-blueberry">Blueberry</div>
+<div role="option" id="o-cherry">Cherry</div>
+<div role="option" id="o-durian" aria-disabled="true">Durian</div>
+</div>
+<p>Size <span id="size-label">Size</span></p>
+<div id="size" class="box" role="combobox" tabindex="0" aria-controls="sizes" aria-expanded="false" aria-labelledby="size-label">Small</div>
+<div id="sizes" role="listbox" aria-labelledby="size-label" hidden>
+<div role="option" id="s-small">Small</div><div role="option" id="s-large">Large</div></div>
+<p><button type="button">Save</button></p>
+<script>
+function wire(boxId, listId, keep) {
+  const box = document.getElementById(boxId), list = document.getElementById(listId);
+  const open = show => { list.hidden = !show; box.setAttribute('aria-expanded', String(show)); };
+  box.addEventListener('click', () => open(list.hidden));
+  box.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown') { open(true); event.preventDefault(); }
+    if (event.key === 'Escape') open(false);
+  });
+  list.addEventListener('click', event => {
+    const option = event.target.closest('[role=option]');
+    if (!option || option.getAttribute('aria-disabled') === 'true') return;
+    if (keep) {
+      list.querySelectorAll('[role=option]').forEach(o => o.setAttribute('aria-selected', String(o === option)));
+      box.textContent = option.textContent;
+    }
+    open(false);
+  });
+}
+wire('fruit', 'fruits', true);
+wire('size', 'sizes', false);
+</script></body></html>

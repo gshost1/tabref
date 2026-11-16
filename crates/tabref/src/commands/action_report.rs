@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
-use super::change_lines::{distinct_changes, step_change};
+use super::change_lines::{distinct_changes, printed_names, step_change, without_added};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
@@ -128,25 +128,31 @@ fn effect_block(
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
-    let changes = distinct_changes(&page.changes);
-    lines.extend(within_budget(&changes));
-    merge(&mut data, json!({ "changes": changes }));
+    let mut new_lines = Vec::new();
+    let mut named = Vec::new();
     if effects.settled.navigated {
-        lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
+        new_lines
+            .push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
     } else if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
         let mut found = Vec::new();
         new_controls(&captured.tree, known, &mut found);
         let (in_rows, outside) = redrawn(&page.changes, &found);
         let shown = outside.len().min(NEW_SHOWN);
-        lines.extend(outside.iter().take(shown).map(|line| format!("new {line}")));
+        named = printed_names(&found, &outside[..shown]);
+        new_lines.extend(outside.iter().take(shown).map(|line| format!("new {line}")));
         if outside.len() > shown {
-            lines.push(format!("+{} more new: tabref snap", outside.len() - shown));
+            new_lines.push(format!("+{} more new: tabref snap", outside.len() - shown));
         }
-        lines.extend(in_rows);
+        new_lines.extend(in_rows);
         let appeared: Vec<&String> = found.iter().map(|(line, _)| line).collect();
         merge(&mut data, json!({ "new": appeared }));
     }
+    let changes = distinct_changes(&page.changes);
+    merge(&mut data, json!({ "changes": changes }));
+    let printed = distinct_changes(&without_added(&page.changes, &named));
+    lines.extend(within_budget(&printed));
+    lines.extend(new_lines);
     Ok((lines, data))
 }
 

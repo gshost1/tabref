@@ -22,7 +22,8 @@ pub(crate) fn run(session: &mut Session, target: &str, option: &str) -> Result<O
 /// Picks the `<select>` option `option` names in any form the view prints
 /// it (label, `label (value)` or value; then ignoring case, then by a
 /// unique start), reads the select's value back and reports the option
-/// before and after.
+/// before and after. An ARIA combobox, listbox button or listbox is opened
+/// and its option clicked, and what it then shows is the value.
 pub(crate) fn act(
     session: &mut Session,
     target: ActTarget,
@@ -37,7 +38,8 @@ pub(crate) fn act(
         &target.token,
         option,
         deadline,
-    )?;
+    )
+    .map_err(|error| named(error, &target.subject))?;
     let effects = session.finish_action(&watched, deadline)?;
     let reading = read_element(
         session.connection(),
@@ -45,9 +47,10 @@ pub(crate) fn act(
         &target.token,
         deadline,
     );
-    let verified = reading
-        .as_ref()
-        .is_ok_and(|reading| reading.value.as_deref() == Some(chosen.value.as_str()));
+    let verified = chosen.read_back
+        || reading
+            .as_ref()
+            .is_ok_and(|reading| reading.value.as_deref() == Some(chosen.value.as_str()));
     let mut summary = match &chosen.previous {
         Some(previous) => format!(
             "{} {} -> {}",
@@ -57,7 +60,7 @@ pub(crate) fn act(
         ),
         None => format!("{} = {}", target.label, quote_text(&chosen.label)),
     };
-    if chosen.value != chosen.label {
+    if chosen.value != chosen.label && !chosen.read_back {
         summary.push_str(&format!(" (value {})", quote_text(&chosen.value)));
     }
     if !verified {
@@ -77,4 +80,23 @@ pub(crate) fn act(
         effects: Some(effects),
         known: target.known,
     })
+}
+
+/// The refusal of an element that is no select of any kind, naming it as
+/// the command names it.
+fn named(mut error: AppError, subject: &str) -> AppError {
+    if error.kind() != Some("select_unsupported") {
+        return error;
+    }
+    let element = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("element"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("element")
+        .to_owned();
+    error.message = format!(
+        "{subject} is a {element}, not a <select> or an ARIA combobox or listbox; click it, then click the option"
+    );
+    error
 }
