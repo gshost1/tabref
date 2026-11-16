@@ -79,7 +79,10 @@ fn upload_to(page_path: &str, html: &'static str, css: &str) -> Result<String, A
     let port = serve(&[(page_path, html)]);
     let chrome = launch();
     let mut connection = connect_to(&chrome);
-    let page = open_tab(&mut connection, &format!("http://127.0.0.1:{port}{page_path}"));
+    let page = open_tab(
+        &mut connection,
+        &format!("http://127.0.0.1:{port}{page_path}"),
+    );
     let file = fixture(&format!("bounds{}.txt", page_path.replace('/', "-")));
     let target = token_of(&mut connection, &page, css);
     let result = upload_files(
@@ -97,7 +100,10 @@ fn upload_to(page_path: &str, html: &'static str, css: &str) -> Result<String, A
         uploaded.input
     });
     if outcome.is_err() {
-        assert!(held.is_empty(), "files were set although the upload was refused: {held:?}");
+        assert!(
+            held.is_empty(),
+            "files were set although the upload was refused: {held:?}"
+        );
     } else {
         assert_eq!(held, vec![name]);
     }
@@ -142,7 +148,11 @@ fn a_chat_widgets_input_inside_its_own_shadow_root_is_refused() {
     let outcome = upload_to("/widget", CHAT_WIDGET, "#plain");
     let error = outcome.unwrap_err();
     assert_eq!(error.code, ErrorCode::AmbiguousTarget, "{error:?}");
-    assert!(error.message.contains("input#chat-file"), "{}", error.message);
+    assert!(
+        error.message.contains("input#chat-file"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]

@@ -157,3 +157,60 @@ fn a_missing_file_is_invalid_args_before_the_page_is_touched() {
 
     assert_eq!(error.code, ErrorCode::InvalidArgs);
 }
+
+fn failed_set(message: &str) -> tabref_core::AppError {
+    let file = fixture_file(&format!("setfail-{}.txt", message.len()));
+    let transport = resolved(ScriptedTransport::new())
+        .expect(
+            "Runtime.callFunctionOn",
+            listed(json!([{ "index": 0, "name": "input.dz-hidden-input", "depth": 2 }])),
+        )
+        .expect(
+            "Runtime.callFunctionOn",
+            json!({ "result": { "type": "object", "objectId": "I" } }),
+        )
+        .expect_error("DOM.setFileInputFiles", -32000, message)
+        .expect("Runtime.releaseObject", json!({}))
+        .expect("Runtime.releaseObject", json!({}));
+    let mut connection = CdpConnection::new(transport.boxed());
+    let error = upload_files(
+        &mut connection,
+        &session(),
+        &token(5),
+        std::slice::from_ref(&file),
+        deadline(),
+    )
+    .unwrap_err();
+    std::fs::remove_file(&file).unwrap();
+    error
+}
+
+#[test]
+fn a_failed_set_names_the_input_not_the_target() {
+    let gone = failed_set("Node is detached from document");
+    assert_eq!(gone.code, ErrorCode::StaleRef, "{gone:?}");
+    assert!(
+        gone.message.contains("input.dz-hidden-input"),
+        "{}",
+        gone.message
+    );
+    assert!(!gone.message.contains("DOM node 5"), "{}", gone.message);
+    let other = failed_set("Not allowed");
+    assert!(
+        other.message.contains("input.dz-hidden-input"),
+        "{}",
+        other.message
+    );
+}
+
+#[test]
+fn an_input_across_a_form_boundary_is_refused_and_named() {
+    let error = refused(
+        "fenced",
+        json!([{ "index": 0, "name": "input#photo", "depth": 2, "crosses": true }]),
+        1,
+    );
+    assert_eq!(error.code, ErrorCode::AmbiguousTarget);
+    assert_eq!(error.kind(), Some("ambiguous_file_input"));
+    assert!(error.message.contains("input#photo"), "{}", error.message);
+}

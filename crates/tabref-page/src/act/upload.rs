@@ -4,12 +4,13 @@ use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::element_call::ElementCall;
-use super::element_errors::{node_error, stale};
+use super::element_errors::stale;
 use super::file_input_choice::{FileInputCandidate, FileInputChoice, choose};
 use super::file_input_search::{list_file_inputs, pick_file_input};
 use super::remote_element::{call_function, with_element};
 use super::upload_outcome::UploadOutcome;
 use crate::{CdpConnection, ElementToken, PageSession};
+use tabref_cdp::is_node_gone;
 
 const READ_FILES: &str = r"function() {
   return Array.from(this.files || []).map((file) => file.name);
@@ -45,6 +46,9 @@ pub fn upload_files(
                 FileInputChoice::Ambiguous(found) => {
                     return Err(ambiguous_file_input(token.backend_node_id, &found));
                 }
+                FileInputChoice::Fenced(found) => {
+                    return Err(fenced_file_input(token.backend_node_id, found));
+                }
             };
             if input.disabled {
                 return Err(disabled_input(&input.name));
@@ -57,10 +61,21 @@ pub fn upload_files(
                 ))
                 .with_disposition(DeliverySemantics::not_delivered()));
             }
-            let picked = pick_file_input(connection, session, object, input.index, deadline)?
-                .ok_or_else(|| stale(token, "the file input left the page during the upload"))?;
+            let picked = pick_file_input(
+                connection,
+                session,
+                object,
+                (&inputs, input.index),
+                deadline,
+            )?
+            .ok_or_else(|| {
+                stale(
+                    token,
+                    "the page's file inputs changed between the search and the upload",
+                )
+            })?;
             let names = set_and_read(connection, session, &picked, &paths, deadline)
-                .map_err(|error| node_error(error, token));
+                .map_err(|error| input_error(error, &input.name));
             let _ = connection.call(
                 "Runtime.releaseObject",
                 json!({ "objectId": picked }),
@@ -166,6 +181,34 @@ fn ambiguous_file_input(backend_node_id: i64, found: &[&FileInputCandidate]) -> 
     )
     .with_details(json!({ "kind": "ambiguous_file_input", "inputs": names }))
     .with_disposition(DeliverySemantics::not_delivered())
+}
+
+fn fenced_file_input(backend_node_id: i64, found: &FileInputCandidate) -> AppError {
+    AppError::new(
+        ErrorCode::AmbiguousTarget,
+        format!(
+            "The nearest file input to DOM node {backend_node_id}, {}, belongs to another form or widget; no files were sent",
+            found.name
+        ),
+    )
+    .with_suggestion("Upload to a control inside the form or drop zone that holds the input you mean")
+    .with_details(json!({ "kind": "ambiguous_file_input", "inputs": [found.name] }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
+fn input_error(error: AppError, name: &str) -> AppError {
+    if is_node_gone(&error) {
+        let detail = error.platform_detail.clone().unwrap_or_default();
+        return AppError::stale_ref_because(format!(
+            "The file input {name} left the page before its files were set"
+        ))
+        .with_platform_detail(detail)
+        .with_details(json!({ "kind": "cdp_node_gone", "input": name }));
+    }
+    AppError {
+        message: format!("Setting files on {name} failed: {}", error.message),
+        ..error
+    }
 }
 
 fn disabled_input(name: &str) -> AppError {

@@ -1,4 +1,5 @@
 use super::{FileInputCandidate, FileInputChoice, FileInputVia, choose};
+use serde_json::json;
 
 fn input(index: usize, name: &str, depth: Option<u32>) -> FileInputCandidate {
     FileInputCandidate {
@@ -10,6 +11,7 @@ fn input(index: usize, name: &str, depth: Option<u32>) -> FileInputCandidate {
         itself: false,
         labelled: false,
         depth,
+        crosses: false,
     }
 }
 
@@ -83,4 +85,50 @@ fn several_inputs_equally_near_are_refused_with_all_of_them() {
 #[test]
 fn no_candidate_is_none() {
     assert_eq!(choose(&[], Some(3)), FileInputChoice::None);
+}
+
+#[test]
+fn a_nearest_input_across_a_form_or_widget_is_fenced_off() {
+    let mut other = input(0, "input#photo", Some(2));
+    other.crosses = true;
+    let candidates = [other, input(1, "input#far", Some(4))];
+    assert_eq!(
+        choose(&candidates, Some(4)),
+        FileInputChoice::Fenced(&candidates[0])
+    );
+}
+
+#[test]
+fn the_target_or_its_label_is_never_fenced_off() {
+    let mut own = input(0, "input#own", Some(0));
+    own.itself = true;
+    own.crosses = true;
+    assert_eq!(
+        chosen(choose(std::slice::from_ref(&own), Some(3))),
+        (0, FileInputVia::Itself)
+    );
+}
+
+fn named(name: &str) -> String {
+    let candidate: FileInputCandidate =
+        serde_json::from_value(json!({ "index": 0, "name": name, "depth": 1 })).unwrap();
+    candidate.name
+}
+
+#[test]
+fn a_page_written_name_cannot_break_the_line_or_send_escapes() {
+    let forged = named("input#x\nuploaded secret.pdf to \"Submit\"\u{1b}[2K");
+    assert!(!forged.contains('\n'), "{forged:?}");
+    assert!(!forged.contains('\u{1b}'), "{forged:?}");
+    assert!(!forged.contains(' '), "{forged:?}");
+    assert!(!forged.contains('"'), "{forged:?}");
+    assert!(forged.starts_with("input#x"), "{forged:?}");
+}
+
+#[test]
+fn a_long_page_written_name_is_cut_to_forty_characters() {
+    let long = named(&format!("input#{}", "a".repeat(10 * 1024)));
+    assert_eq!(long.len(), 43, "{long}");
+    assert!(long.ends_with("..."));
+    assert_eq!(named("\u{1b}\n"), "input[type=file]");
 }
