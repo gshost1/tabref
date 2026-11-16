@@ -9,7 +9,6 @@ use tabref_cdp::default_user_data_dirs;
 use tabref_core::{AppError, create_private_dir};
 
 use crate::session::Session;
-use crate::session::launch_record::load_launched;
 
 const DEFAULT_CAP_MB: u64 = 500;
 const MB: u64 = 1024 * 1024;
@@ -62,10 +61,11 @@ pub(crate) fn download_cap(session: &mut Session) -> u64 {
 }
 
 /// Whether `open --launch` started this browser, so tabref may keep its
-/// downloads pointed at a folder between commands.
+/// downloads pointed at a folder between commands: the session's own
+/// decision, made once when it opened, never the launch record's port
+/// alone.
 pub(crate) fn launched_here(session: &mut Session) -> bool {
-    let port = session.endpoint().port();
-    load_launched(session.store()).is_some_and(|browser| browser.port == port)
+    session.launched_by_tabref()
 }
 
 /// The folder this browser's downloads land in, or `None` when the

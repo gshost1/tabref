@@ -79,6 +79,30 @@ fn the_users_own_download_is_never_capped_canceled_or_reported() {
 }
 
 #[test]
+fn a_stale_launch_record_on_its_port_does_not_make_the_users_chrome_tabrefs() {
+    if !live() {
+        return;
+    }
+    let site = site("own-stale-record");
+    let tabref = &site.tabref;
+    let mut record = serde_json::to_value(&tabref.browser).unwrap();
+    record["pid"] = serde_json::json!(999_999);
+    record["started"] = serde_json::Value::Null;
+    record["profile_dir"] = serde_json::json!(site._outside.0.join("gone-profile"));
+    std::fs::write(tabref.home.join("launched.json"), record.to_string()).unwrap();
+    tabref.ok(&["open", "--download-max-mb", "1", &format!("{}/", site.base)]);
+    tabref.ok(&["js", "location.href = '/bigslow.bin'; 1"]);
+    std::thread::sleep(Duration::from_millis(3_500));
+    let saved = site.own.join("bigslow.bin");
+    assert_eq!(
+        std::fs::metadata(&saved).map(|meta| meta.len()).ok(),
+        Some(BIG_BYTES as u64),
+        "{:?}",
+        names(&site.own)
+    );
+}
+
+#[test]
 fn a_command_that_ends_does_not_take_a_running_waits_folder_away() {
     if !live() {
         return;
