@@ -151,3 +151,7 @@ fn first_line(direction: &str, step: f64, outcome: &ScrollOutcome) -> String {
         (false, false, false) => format!("did not move: nothing left to scroll {direction}"),
     }
 }
+
+#[cfg(test)]
+#[path = "scroll_tests.rs"]
+mod tests;
