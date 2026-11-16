@@ -6,8 +6,8 @@ use super::error_payload::ErrorPayload;
 /// The version of the `--json` envelope contract.
 pub const ENVELOPE_VERSION: &str = "1.0";
 
-/// The `--json` envelope: `{"version","ok","command","data"|"error"}`, the
-/// shape agent-desktop prints.
+/// The `--json` envelope: `{"version","ok","command","data"|"error"}`, printed
+/// by every command.
 #[derive(Debug, Serialize)]
 pub struct Response {
     pub version: &'static str,
