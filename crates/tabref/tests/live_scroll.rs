@@ -57,6 +57,27 @@ box.addEventListener('scroll', () => {
 });
 </script>"#;
 
+const FEED: &str = r#"<!doctype html><title>Feed</title><style>article{height:130px}</style>
+<h1>Feed</h1><div id=feed>ROWS</div><div id=end></div>
+<script>
+let next = 10;
+new IntersectionObserver(seen => {
+  if (!seen[0].isIntersecting || next >= 20) return;
+  fetch('/entries?name=Story&total=20&from=' + next).then(r => r.json()).then(page => {
+    const section = document.createElement('section');
+    for (const text of page.items) {
+      const article = document.createElement('article');
+      article.innerHTML = '<h3></h3><p></p>';
+      article.querySelector('h3').textContent = text;
+      article.querySelector('p').textContent = 'by ' + text.replace('Story', 'Author');
+      section.appendChild(article);
+    }
+    next += page.items.length;
+    document.getElementById('feed').appendChild(section);
+  });
+}, { rootMargin: '300px' }).observe(document.getElementById('end'));
+</script>"#;
+
 const STATIC: &str = r#"<!doctype html><title>Essay</title><style>p{height:60px}</style>
 <h1>Essay</h1>ROWS<footer>The end of the essay</footer>"#;
 
@@ -75,6 +96,10 @@ fn site() -> (Harness, String) {
         (
             "/inbox".to_owned(),
             CONTAINER.replace("ROWS", &rows("div", "Message", 20)),
+        ),
+        (
+            "/feed".to_owned(),
+            FEED.replace("ROWS", &rows("article", "Story", 10)),
         ),
         (
             "/essay".to_owned(),
@@ -220,6 +245,22 @@ fn a_scroll_container_with_a_debounced_loader_loads_through_its_end() {
     let first = end.stdout.lines().next().unwrap_or_default();
     assert!(first.starts_with("did not move"), "{}", end.stdout);
     assert!(first.contains("nothing more loaded"), "{}", end.stdout);
+}
+
+#[test]
+fn cards_added_in_one_wrapper_count_as_items_with_all_their_lines() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/feed")]);
+    let run = tabref.ok(&["scroll", "down"]);
+    let first = run.stdout.lines().next().unwrap_or_default();
+    assert_eq!(
+        first,
+        r#"scrolled down 600px: 10 new items loaded ("Story 11" to "Story 20")"#
+    );
+    assert!(run.stdout.contains("+ by Author 11"), "{}", run.stdout);
 }
 
 #[test]

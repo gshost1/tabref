@@ -116,7 +116,7 @@ fn plain(result: Value) -> Value {
 }
 
 fn unsettled() -> AppError {
-    AppError::timeout("The expression's promise did not settle before the command's timeout")
+    AppError::timeout("The expression or its promise did not settle before the command's timeout")
         .with_details(json!({ "kind": "js_pending" }))
         .with_disposition(DeliverySemantics::delivered_unverified())
 }

@@ -16,6 +16,14 @@ pub enum ScrollSite<'a> {
     Element(&'a ElementToken),
 }
 
+/// A script for a [`ScrollSite`]: the function's source and the JSON
+/// arguments to pass it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SiteScript<'s> {
+    pub(crate) function: &'s str,
+    pub(crate) arguments: &'s [Value],
+}
+
 impl ScrollSite<'_> {
     /// Runs `function` with the site as `this` and returns its JSON value,
     /// awaiting a promise it returns. The script is tabref's own, never a
@@ -24,11 +32,10 @@ impl ScrollSite<'_> {
         self,
         connection: &mut CdpConnection,
         session: &PageSession,
-        function: &str,
-        arguments: &[Value],
+        script: SiteScript<'_>,
         deadline: Deadline,
     ) -> Result<Value, AppError> {
-        let mut reply = self.run(connection, session, function, arguments, true, deadline)?;
+        let mut reply = self.run(connection, session, (script, true), deadline)?;
         Ok(reply
             .pointer_mut("/result/value")
             .map_or(Value::Null, Value::take))
@@ -41,11 +48,10 @@ impl ScrollSite<'_> {
         self,
         connection: &mut CdpConnection,
         session: &PageSession,
-        function: &str,
-        arguments: &[Value],
+        script: SiteScript<'_>,
         deadline: Deadline,
     ) -> Result<Option<String>, AppError> {
-        let reply = self.run(connection, session, function, arguments, false, deadline)?;
+        let reply = self.run(connection, session, (script, false), deadline)?;
         Ok(reply
             .pointer("/result/objectId")
             .and_then(Value::as_str)
@@ -70,11 +76,13 @@ impl ScrollSite<'_> {
         self,
         connection: &mut CdpConnection,
         session: &PageSession,
-        function: &str,
-        arguments: &[Value],
-        by_value: bool,
+        (script, by_value): (SiteScript<'_>, bool),
         deadline: Deadline,
     ) -> Result<Value, AppError> {
+        let SiteScript {
+            function,
+            arguments,
+        } = script;
         let reply = match self {
             Self::Page => {
                 let listed: Vec<String> = arguments.iter().map(Value::to_string).collect();
