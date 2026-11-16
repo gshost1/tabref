@@ -5,6 +5,8 @@ The folder (--fresh-dir or BENCH_FRESH_DIR) holds tasks_fresh.py (the tasks_held
 web_seed, reset_payload, web_expectations, verify_web), web/server.py and a SHA256SUMS file. The seal is the
 sha256 of SHA256SUMS; `verify` checks it, every listed file's hash, and that nothing else is in the folder (a
 __pycache__ or an edited file breaks it). The seal is checked before every use and again after a pass.
+SEAL is set 0.2's, written for the v0.2.0 judgement; SPENT_SEALS keeps the seals of sets already used up (v0.1), which
+verify refuses even if SEAL were set back to one.
 Nothing here prints task content: callers report counts and file names only.
 
   python3 -I -B bench/harness/fresh.py verify <dir>     exit 0 when the seal holds, else 1 with the reason
@@ -20,7 +22,8 @@ import sys
 import threading
 from pathlib import Path
 
-SEAL = "1067387e3e7631ff2a1d28675cb2a2391c99324a57f2fc7f5e45dbdd2fd5468a"
+SEAL = "4603086733af2ee8a2a04c26ff3495b63a348b4c896b5689434bb523104733b3"
+SPENT_SEALS = {"v0.1": "1067387e3e7631ff2a1d28675cb2a2391c99324a57f2fc7f5e45dbdd2fd5468a"}
 PORT = 8793
 BASE = f"http://127.0.0.1:{PORT}"
 
@@ -58,7 +61,10 @@ def verify(root):
     root = Path(root)
     if not (root / "SHA256SUMS").is_file() or (root / "SHA256SUMS").is_symlink():
         raise SealBroken(f"no SHA256SUMS in {root}")
-    if sha256(root / "SHA256SUMS") != SEAL:
+    digest = sha256(root / "SHA256SUMS")
+    if digest in SPENT_SEALS.values():
+        raise SealBroken("this set is spent: its seal was already used for a judged pass")
+    if digest != SEAL:
         raise SealBroken("SHA256SUMS does not match the seal")
     want = listed(root)
     present, dirs = set(), set()
