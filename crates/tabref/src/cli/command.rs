@@ -239,7 +239,6 @@ impl Command {
             Self::Uncheck { .. } => "uncheck",
             Self::Press { .. } => "press",
             Self::Focus { .. } => "focus",
-    },
             Self::Screenshot { .. } => "screenshot",
             Self::Hover { .. } => "hover",
             Self::Scroll { .. } => "scroll",
