@@ -80,7 +80,10 @@ fn site() -> (Harness, String) {
             DEBOUNCED.replace("ROWS", &rows("div", "Message", 20)),
         ),
         ("/timed", TIMED.replace("ROWS", &rows("li", "Entry", 30))),
-        ("/ticker", TICKER.replace("ROWS", &rows("p", "Paragraph", 60))),
+        (
+            "/ticker",
+            TICKER.replace("ROWS", &rows("p", "Paragraph", 60)),
+        ),
         ("/mixed", MIXED.replace("ROWS", &rows("li", "Entry", 30))),
     ]);
     (harness("scroll-shapes"), base)
@@ -146,7 +149,11 @@ fn loaded_nodes_without_shown_text_are_not_items_and_lines_are_cut_and_escaped()
     tabref.ok(&["open", &format!("{base}/mixed")]);
     let run = tabref.ok(&["--json", "scroll", "down", "--px", "20000"]);
     let json = run.json();
-    assert_eq!(find_key(&json, "new_items"), Some(&Value::from(5)), "{json}");
+    assert_eq!(
+        find_key(&json, "new_items"),
+        Some(&Value::from(5)),
+        "{json}"
+    );
     let lines: Vec<&str> = find_key(&json, "new_lines")
         .and_then(Value::as_array)
         .unwrap()
@@ -154,10 +161,19 @@ fn loaded_nodes_without_shown_text_are_not_items_and_lines_are_cut_and_escaped()
         .filter_map(Value::as_str)
         .collect();
     assert_eq!(lines.len(), 5, "{lines:?}");
-    assert!(lines.iter().all(|line| line.chars().count() <= 100), "{lines:?}");
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 100),
+        "{lines:?}"
+    );
     assert!(lines[1].starts_with("Long xxx"), "{lines:?}");
     assert_eq!(lines[4], "Short 3");
-    for hidden in ["hiddenCode", "secret", "Template row", "No script row", "Hidden row"] {
+    for hidden in [
+        "hiddenCode",
+        "secret",
+        "Template row",
+        "No script row",
+        "Hidden row",
+    ] {
         assert!(!run.stdout.contains(hidden), "{hidden}: {}", run.stdout);
     }
     tabref.ok(&["open", &format!("{base}/mixed")]);
@@ -165,5 +181,10 @@ fn loaded_nodes_without_shown_text_are_not_items_and_lines_are_cut_and_escaped()
     assert!(!printed.stdout.contains('\u{1b}'), "{:?}", printed.stdout);
     assert!(!printed.stdout.contains('\r'), "{:?}", printed.stdout);
     assert!(printed.stdout.contains("+ Short 3"), "{}", printed.stdout);
-    assert!(printed.stdout.lines().all(|line| line.chars().count() <= 110));
+    assert!(
+        printed
+            .stdout
+            .lines()
+            .all(|line| line.chars().count() <= 110)
+    );
 }

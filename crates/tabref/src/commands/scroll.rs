@@ -8,7 +8,7 @@ use super::act_target::resolve_target;
 use super::target_spec::TargetSpec;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
-use crate::view::node_line::quote_text;
+use crate::view::node_line::{escape_line, quote_text};
 
 const PAGE_STEP: u32 = 600;
 const LINE_CHARS: usize = 100;
@@ -92,10 +92,15 @@ pub(crate) fn scroll(
             "new_items": outcome.items,
             "new_lines": outcome.lines,
             "loading": outcome.loading,
+            "hidden": outcome.hidden,
+            "unwatched": outcome.unwatched,
         }),
     );
     for line in &outcome.lines {
-        report.push_line(&format!("+ {}", cut_chars(line, LINE_CHARS)));
+        report.push_line(&format!(
+            "+ {}",
+            escape_line(&cut_chars(line, LINE_CHARS), false)
+        ));
     }
     if outcome.more_lines > 0 {
         report.push_line(&format!(
@@ -106,16 +111,29 @@ pub(crate) fn scroll(
     Ok(report)
 }
 
-/// `scrolled down 600px`, with what the scroll loaded or that the list
-/// ended: `: 20 new items loaded ("Entry 31" to "Entry 50")`, `; end of
-/// list: nothing more loaded`, `; more is still loading`.
+/// `scrolled down 600px`, with what the scroll loaded or why it stopped:
+/// `: 20 new items loaded ("Entry 31" to "Entry 50")`, `; at the bottom:
+/// nothing new loaded`, `; more may still be loading`. tabref claims no
+/// more than it saw: at the bottom with a request still running, a DOM
+/// still changing, a tab that draws no frames or a watch an error stopped,
+/// it says so instead.
 fn first_line(direction: &str, step: f64, outcome: &ScrollOutcome) -> String {
-    let end = if matches!(direction, "up" | "left") {
-        "top of list"
-    } else {
-        "end of list"
+    let edge = match direction {
+        "up" => "at the top",
+        "left" => "at the left end",
+        "right" => "at the right end",
+        _ => "at the bottom",
     };
     let moved = format!("scrolled {direction} {step}px");
+    let doubt = if outcome.unwatched {
+        "; could not check what loaded"
+    } else if outcome.hidden {
+        "; more may still be loading (tab not showing)"
+    } else if outcome.loading {
+        "; more may still be loading"
+    } else {
+        ""
+    };
     if outcome.items > 0 {
         let span = match (&outcome.first, &outcome.last) {
             (Some(first), Some(last)) if outcome.items > 1 => format!(
@@ -130,25 +148,15 @@ fn first_line(direction: &str, step: f64, outcome: &ScrollOutcome) -> String {
             1 => "1 new item".to_owned(),
             count => format!("{count} new items"),
         };
-        let lead = if outcome.moved {
-            format!("{moved}: ")
-        } else {
-            "did not move, then ".to_owned()
-        };
-        let still = if outcome.loading {
-            "; more is still loading"
-        } else {
-            ""
-        };
-        return format!("{lead}{items} loaded{span}{still}");
+        return format!("{moved}: {items} loaded{span}{doubt}");
     }
-    match (outcome.moved, outcome.loading, outcome.at_end) {
-        (true, true, _) => format!("{moved}; more is still loading"),
-        (false, true, _) => "did not move: more is still loading".to_owned(),
-        (true, false, true) => format!("{moved}; {end}: nothing more loaded"),
-        (false, false, true) => format!("did not move: {end}, nothing more loaded"),
-        (true, false, false) => moved,
-        (false, false, false) => format!("did not move: nothing left to scroll {direction}"),
+    match (outcome.moved, outcome.at_end) {
+        (true, _) if !doubt.is_empty() => format!("{moved}{doubt}"),
+        (true, true) => format!("{moved}; {edge}: nothing new loaded"),
+        (true, false) => moved,
+        (false, true) if outcome.hidden => format!("did not move: {edge}{doubt}"),
+        (false, true) => format!("did not move: {edge}, nothing new loaded"),
+        (false, false) => format!("did not move: nothing left to scroll {direction}"),
     }
 }
 

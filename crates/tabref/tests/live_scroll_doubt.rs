@@ -43,7 +43,7 @@ new IntersectionObserver(seen => {
 </script>"#;
 
 const IN_FLIGHT: &str = r#"<!doctype html><title>Pending</title><style>li{height:40px}</style>
-<ol id=rows>ROWS</ol><p id=wait></p>
+<ol id=rows>ROWS</ol><p id=wait>Idle</p>
 <script>
 function start() {
   let n = 0;
@@ -59,12 +59,29 @@ function start() {
 const LOAD_MORE: &str = r#"<!doctype html><title>Catalogue</title><style>li{height:40px}</style>
 <ol id=rows>ROWS</ol><button onclick="this.textContent='Loading'">Load more</button>"#;
 
+const NAVIGATES: &str = r#"<!doctype html><title>Jump</title><style>li{height:40px}</style>
+<ol id=rows>ROWS</ol><p id=tail></p>
+<script>
+new IntersectionObserver(seen => { if (seen[0].isIntersecting) location.href = '/more'; })
+  .observe(document.getElementById('tail'));
+</script>"#;
+
 fn site() -> (Harness, String) {
     let base = lazy_site(vec![
-        ("/spinner", SPINNER.replace("ROWS", &rows("li", "Entry", 30))),
-        ("/slow", SLOW_FETCH.replace("ROWS", &rows("li", "Entry", 30))),
-        ("/pending", IN_FLIGHT.replace("ROWS", &rows("li", "Entry", 30))),
+        (
+            "/spinner",
+            SPINNER.replace("ROWS", &rows("li", "Entry", 30)),
+        ),
+        (
+            "/slow",
+            SLOW_FETCH.replace("ROWS", &rows("li", "Entry", 30)),
+        ),
+        (
+            "/pending",
+            IN_FLIGHT.replace("ROWS", &rows("li", "Entry", 30)),
+        ),
         ("/more", LOAD_MORE.replace("ROWS", &rows("li", "Item", 30))),
+        ("/jump", NAVIGATES.replace("ROWS", &rows("li", "Entry", 30))),
     ]);
     (harness("scroll-doubt"), base)
 }
@@ -76,7 +93,11 @@ fn first_line(run: &Run) -> &str {
 fn assert_unsure(run: &Run) {
     let first = first_line(run);
     assert!(first.starts_with("scrolled down"), "{}", run.stdout);
-    assert!(first.contains("more may still be loading"), "{}", run.stdout);
+    assert!(
+        first.contains("more may still be loading"),
+        "{}",
+        run.stdout
+    );
     assert!(!first.contains("nothing new loaded"), "{}", run.stdout);
 }
 
@@ -151,5 +172,19 @@ fn a_page_that_loads_through_a_button_says_only_that_nothing_new_loaded() {
     assert_eq!(
         first_line(&stuck),
         "did not move: at the bottom, nothing new loaded"
+    );
+}
+
+#[test]
+fn a_page_that_navigates_away_mid_watch_still_reports_the_scroll() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/jump")]);
+    let run = tabref.ok(&["scroll", "down", "--px", "20000"]);
+    assert_eq!(
+        first_line(&run),
+        "scrolled down 20000px; could not check what loaded"
     );
 }

@@ -78,9 +78,7 @@ fn answer(mut stream: TcpStream, pages: &HashMap<String, String>) {
     let target = head.split_whitespace().nth(1).unwrap_or("/").to_owned();
     let (path, query) = target.split_once('?').unwrap_or((&target, ""));
     let (kind, body) = if path == "/entries" {
-        let delay = field(query, "delay")
-            .parse()
-            .unwrap_or(DEFAULT_DELAY_MS);
+        let delay = field(query, "delay").parse().unwrap_or(DEFAULT_DELAY_MS);
         std::thread::sleep(Duration::from_millis(delay));
         ("application/json", entries(query))
     } else {
