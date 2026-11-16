@@ -1,3 +1,4 @@
+pub(crate) mod capture_watch;
 pub(crate) mod evaluate;
 pub(crate) mod page_info;
 pub(crate) mod page_scroll;
