@@ -9,8 +9,8 @@
 //! watched one has none, which is how a navigation shows. A page with a
 //! frame or embedded object whose document the script cannot read, or with
 //! a CSS animation or transition running or pending in any document or
-//! shadow root (each root asked on its own, as a document's list leaves out
-//! frames), is blind: it never counts as unchanged, and the scan stops as
+//! shadow root (each root asked on its own: in Chrome 156 a document's list
+//! leaves out its shadow trees and frames), is blind: it never counts as unchanged, and the scan stops as
 //! soon as it knows. Form state includes a checkbox's `indeterminate` and a
 //! multi-select's whole selection; focus is followed into open shadow roots
 //! and same-origin frames.

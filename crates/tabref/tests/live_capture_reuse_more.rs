@@ -3,7 +3,8 @@
 //! or the hash, state no mutation shows (a multi-select's selection, a
 //! checkbox's `indeterminate`, focus inside a same-origin frame), a `js`
 //! run, and an in-process command between two daemon ones all make the
-//! next `find` or `snap` capture again.
+//! next `find` or `snap` capture again. A page whose main thread is held
+//! when the watch is armed is not kept.
 //! Opt-in: `TABREF_LIVE=1 cargo test -p tabref --test live_capture_reuse_more`.
 
 #![cfg(unix)]
@@ -60,6 +61,11 @@ const FRAMED: &str = r#"<!doctype html><html><head><title>Framed</title></head><
 addEventListener('load', () => document.getElementById('f').contentDocument.getElementById('a').focus());
 setTimeout(() => document.getElementById('f').contentDocument.getElementById('b').focus(), 600);
 </script></body></html>"#;
+
+const BUSY: &str = r#"<!doctype html><html><head><title>Busy</title></head><body>
+<h1>Guide</h1><p>Alpha needle text.</p>
+<script>addEventListener('load', () => setTimeout(() => { const until = Date.now() + 1500; while (Date.now() < until); }, 0));</script>
+</body></html>"#;
 
 fn run(tabref: &Harness, args: &[&str], env: &[(&str, &str)]) -> Run {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tabref"));
@@ -176,5 +182,24 @@ fn js_and_in_process_commands_drop_the_kept_capture() {
         opened,
         "kept across an in-process hover"
     );
+    stop(&tabref);
+}
+
+#[test]
+fn a_page_too_busy_to_arm_the_watch_is_not_kept() {
+    if !live() {
+        return;
+    }
+    let tabref = common::harness("reuse-busy");
+    let started = std::time::Instant::now();
+    let opened = open(&tabref, BUSY);
+    assert!(opened.stdout.contains("Alpha needle"), "{}", opened.stdout);
+    let found = run(&tabref, &["find", "needle"], &[]);
+    assert_ne!(
+        snapshot_id(&found),
+        snapshot_id(&opened),
+        "kept a capture whose watch was armed late"
+    );
+    assert!(started.elapsed() < Duration::from_secs(8));
     stop(&tabref);
 }
