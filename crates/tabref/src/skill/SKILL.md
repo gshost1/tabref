@@ -3,7 +3,7 @@
 Start: `tabref open <url>` loads the page and prints it (first call: `tabref skill && tabref open <url>`).
 Chrome is already connected. Output is plain text sized to read whole: do not pipe it through grep, head
 or sed, and do not sleep; every command waits for the page itself.
-Downloads, waits, saved logins, the user's own Chrome, apps built on Chrome: `tabref skill more`.
+Downloads, waits, JavaScript dialogs, saved logins, the user's own Chrome, apps built on Chrome: `tabref skill more`.
 Any command's options: `tabref CMD --help`.
 
 ## Reading

@@ -7,6 +7,8 @@ use tabref_core::{AppError, Deadline};
 use super::cdp_event::CdpEvent;
 use super::connection_health::{ConnectionGuard, ConnectionHealth};
 use super::connection_io::session_detached;
+use super::dialog_answers::DialogAnswers;
+use super::dialog_choice::DialogChoice;
 use super::event_buffer::EventBuffer;
 use super::reply_stash::ReplyStash;
 use super::session_ledger::SessionLedger;
@@ -31,7 +33,7 @@ pub struct CdpConnection {
     pub(super) events: EventBuffer,
     pub(super) ledger: SessionLedger,
     pub(super) replies: ReplyStash,
-    pub(super) answer_dialogs: bool,
+    pub(super) dialogs: DialogAnswers,
     pub(super) health: ConnectionHealth,
 }
 
@@ -43,7 +45,7 @@ impl CdpConnection {
             events: EventBuffer::default(),
             ledger: SessionLedger::default(),
             replies: ReplyStash::default(),
-            answer_dialogs: true,
+            dialogs: DialogAnswers::default(),
             health: ConnectionHealth::default(),
         }
     }
@@ -54,7 +56,40 @@ impl CdpConnection {
     /// `Page.javascriptDialogOpening` event stays buffered so the caller can
     /// report what the dialog said.
     pub fn set_answer_dialogs(&mut self, answer: bool) {
-        self.answer_dialogs = answer;
+        self.dialogs.auto = answer;
+    }
+
+    /// Answers the next dialog that opens as `choice` says (or clears an
+    /// earlier choice with `None`); the dialogs after it are accepted again.
+    /// The buffered `Page.javascriptDialogOpening` event of every dialog the
+    /// connection answers carries its answer in `params.answer`
+    /// (`{accept, text}`, `text` for a prompt).
+    pub fn answer_next_dialog(&mut self, choice: Option<DialogChoice>) {
+        self.dialogs.next = choice;
+    }
+
+    /// The choice no dialog used yet, which is cleared.
+    pub fn take_dialog_choice(&mut self) -> Option<DialogChoice> {
+        self.dialogs.next.take()
+    }
+
+    /// Records that `session_id` is the page session of the tab `target_id`,
+    /// so a dialog it (or an iframe session under it) opens names that tab
+    /// in `params.tab`.
+    pub fn note_session_tab(&mut self, session_id: &str, target_id: &str) {
+        self.ledger.note_tab(session_id, target_id);
+    }
+
+    /// Marks every dialog event buffered so far with `params.late`: they
+    /// opened while no command was running.
+    pub fn mark_buffered_dialogs_late(&mut self) {
+        let dialogs = self
+            .events
+            .drain(|event| event.method == "Page.javascriptDialogOpening");
+        for mut event in dialogs {
+            event.params["late"] = serde_json::Value::Bool(true);
+            self.events.push(event);
+        }
     }
 
     /// Ties the connection's waits to `cancel` (or unties them with `None`):

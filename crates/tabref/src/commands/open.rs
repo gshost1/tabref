@@ -7,6 +7,7 @@ use tabref_page::{DownloadRecord, PageInfo};
 
 use super::action_report::set;
 use super::app_guard::refuse_in_app;
+use super::dialog_report::{error_with_dialogs, kept_page, navigation_dialogs, with_dialogs};
 use super::download_folder::{choose_cap, choose_folder, clear_folder};
 use super::download_lines::{download_json, download_line};
 use super::downloads;
@@ -91,29 +92,46 @@ fn load(
         deadline.capped(Duration::from_millis(commit)),
         deadline.capped(Duration::from_millis(load)),
     );
-    let grace = downloads::grace_after(&navigated);
-    let started = downloads::after_action(session, page, None, deadline, grace);
-    if !started.is_empty() {
-        return Ok(downloaded(&started));
-    }
-    let unfinished = match navigated {
-        Ok(()) => false,
-        Err(error) if error.kind() == Some("cdp_load_timeout") => true,
-        Err(error) => return Err(error),
+    let dialogs = navigation_dialogs(session, Some(&page.target_id));
+    let after = || -> Result<Outcome, AppError> {
+        if dialogs
+            .iter()
+            .any(|dialog| dialog["type"] == "beforeunload")
+        {
+            let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
+            if let Some(kept) = kept_page(&dialogs, url, &info) {
+                return Ok(kept);
+            }
+        }
+        let grace = downloads::grace_after(&navigated);
+        let started = downloads::after_action(session, page, None, deadline, grace);
+        if !started.is_empty() {
+            let mut report = downloaded(&started);
+            with_dialogs(&mut report, &dialogs);
+            return Ok(report);
+        }
+        let unfinished = match navigated {
+            Ok(()) => false,
+            Err(error) if error.kind() == Some("cdp_load_timeout") => true,
+            Err(error) => return Err(error),
+        };
+        let captured = session.capture()?;
+        let options = ViewRequest::default().snap_options(&captured.info.url)?;
+        let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
+        if unfinished {
+            report.push_line(
+                "note: the page had not finished loading; snap again if parts are missing",
+            );
+        }
+        set(
+            &mut report.data,
+            "load_finished",
+            serde_json::json!(!unfinished),
+        );
+        with_dialogs(&mut report, &dialogs);
+        Ok(report)
     };
-    let captured = session.capture()?;
-    let options = ViewRequest::default().snap_options(&captured.info.url)?;
-    let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
-    if unfinished {
-        report
-            .push_line("note: the page had not finished loading; snap again if parts are missing");
-    }
-    set(
-        &mut report.data,
-        "load_finished",
-        serde_json::json!(!unfinished),
-    );
-    Ok(report)
+    after().map_err(|error| error_with_dialogs(error, &dialogs))
 }
 
 /// An `open` whose address downloaded: one line per download, the page

@@ -12,6 +12,7 @@ mod transport;
 pub use cdp::cdp_event::CdpEvent;
 pub use cdp::connection::CdpConnection;
 pub use cdp::connection_health::ConnectionGuard;
+pub use cdp::dialog_choice::DialogChoice;
 pub use cdp::protocol_error::{is_node_gone, is_protocol_error, is_target_gone, target_gone};
 pub use discovery::active_port::{ActivePort, parse_active_port, read_active_port};
 pub use discovery::browser_endpoint::BrowserEndpoint;

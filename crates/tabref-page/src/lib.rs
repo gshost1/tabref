@@ -77,6 +77,7 @@ pub use page::page_info::PageInfo;
 pub use page::page_scroll::scroll_page;
 pub use page::page_text::page_text;
 pub use settle::action_settle::{follow_late_navigation, settle_action, watch_navigation};
+pub use settle::dialog_json::{DIALOG_OPENING, dialog_json, drain_dialogs, mark_other_tab};
 pub use settle::download_events::{
     cancel_download, deny_downloads, enable_downloads, next_download_event, note_downloads, now_ms,
     restore_downloads,
