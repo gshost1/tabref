@@ -1,4 +1,6 @@
-use super::{TabState, pick_visible};
+use std::time::Duration;
+
+use super::{TabState, pick_visible, probe_budget, settled};
 
 fn state(id: &str, visible: bool, focused: bool) -> TabState {
     TabState {
@@ -21,4 +23,34 @@ fn the_focused_tab_comes_first_then_the_first_visible_one() {
     let hidden = [state("A", false, false), state("B", false, false)];
     assert_eq!(pick_visible(&hidden), None);
     assert_eq!(pick_visible(&[]), None);
+}
+
+#[test]
+fn the_probe_takes_at_most_half_the_time_left_and_never_more_than_a_second_and_a_half() {
+    assert_eq!(
+        probe_budget(Duration::from_secs(30)),
+        Duration::from_millis(1_500)
+    );
+    assert_eq!(
+        probe_budget(Duration::from_millis(1_000)),
+        Duration::from_millis(500)
+    );
+    assert_eq!(probe_budget(Duration::ZERO), Duration::ZERO);
+}
+
+#[test]
+fn the_wait_ends_on_a_focused_answer_on_all_answers_or_shortly_after_a_visible_one() {
+    let short = Duration::from_millis(20);
+    let long = Duration::from_millis(150);
+    assert!(settled(&[state("A", true, true)], 1, 3, Some(short)));
+    assert!(settled(
+        &[state("A", false, false), state("B", false, false)],
+        2,
+        2,
+        None
+    ));
+    assert!(!settled(&[state("A", true, false)], 1, 3, Some(short)));
+    assert!(settled(&[state("A", true, false)], 1, 3, Some(long)));
+    assert!(!settled(&[state("A", false, false)], 1, 3, None));
+    assert!(!settled(&[], 0, 3, None));
 }

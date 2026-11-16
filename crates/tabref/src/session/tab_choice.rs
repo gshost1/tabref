@@ -19,19 +19,24 @@ impl Session {
         let tabs = self.tabs()?;
         let chosen = match &self.scope.tab {
             Some(tab) => Some(tab.clone()),
-            None => {
-                let remembered = self.store.read_state(&self.tab_state_name());
-                let deadline = self.scope.deadline;
-                let connection = &mut self.connection;
-                choose_tab(
-                    &tabs,
-                    self.scope.tab_hint.as_deref(),
-                    remembered.as_deref(),
-                    || visible_tab(connection, &tabs, deadline),
-                )?
-            }
+            None => self.chosen_tab(&tabs)?,
         };
         Ok(chosen.and_then(|id| tabs.into_iter().find(|tab| tab.target_id == id)))
+    }
+
+    /// [`choose_tab`] among `tabs` with this command's `--tab` and the tab
+    /// remembered from the last command, asking the tabs which one shows
+    /// only when neither names one.
+    pub(crate) fn chosen_tab(&mut self, tabs: &[PageTarget]) -> Result<Option<String>, AppError> {
+        let remembered = self.store.read_state(&self.tab_state_name());
+        let deadline = self.scope.deadline;
+        let connection = &mut self.connection;
+        choose_tab(
+            tabs,
+            self.scope.tab_hint.as_deref(),
+            remembered.as_deref(),
+            || visible_tab(connection, tabs, deadline),
+        )
     }
 }
 
