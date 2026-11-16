@@ -203,4 +203,18 @@ fn a_host_that_delegates_focus_finds_a_control_it_can_focus_or_is_refused() {
         ),
         "tabbed-inner"
     );
+    let shut = tabref.run(&["--json", "focus", "Shut host"]).json();
+    assert_eq!(
+        shut["error"]["platform_detail"], "not focusable",
+        "a host that neither delegates nor has a tabindex is refused: {shut}"
+    );
+    tabref.ok(&["focus", "Own host"]);
+    assert_eq!(active(&tabref), "own");
+    assert_eq!(
+        read(
+            &tabref,
+            "String(document.activeElement.shadowRoot.activeElement)"
+        ),
+        "null"
+    );
 }

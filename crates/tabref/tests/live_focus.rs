@@ -244,3 +244,17 @@ fn a_host_whose_control_blurs_itself_is_focused_and_the_move_reported() {
         blurry.stdout
     );
 }
+
+#[test]
+fn leaving_a_tab_whose_page_stalls_does_not_hold_up_the_command() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-stall");
+    tabref.ok(&["focus", "Name"]);
+    tabref.ok(&["js", "window.stall = true; 1"]);
+    let started = Instant::now();
+    tabref.ok(&["--timeout", "20000", "open", "--new-tab", "about:blank"]);
+    let took = started.elapsed();
+    assert!(took < Duration::from_millis(4_000), "{took:?}");
+}

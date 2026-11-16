@@ -3,7 +3,7 @@ use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::drawn_element::drawn_element;
 use super::element_call::ElementCall;
-use super::element_errors::node_error;
+use super::element_errors::{node_error, stale};
 use super::focus_target::FocusTarget;
 use super::remote_element::{call_function, call_on_element, prove_document, with_element};
 use crate::{CdpConnection, ElementToken, PageSession};
@@ -14,13 +14,16 @@ const FOCUS_CONTROL: &str = r"function() {
 }";
 
 const FOCUS_IN_PAGE: &str = r"function() {
+  if (!this.isConnected) return 'gone';
   const doc = this.ownerDocument;
+  const root = this.getRootNode ? this.getRootNode() : doc;
   const deep = () => {
     let active = doc.activeElement;
     while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement;
     return active;
   };
   const before = deep();
+  const near = root && root.activeElement;
   let heard = false;
   const note = () => { heard = true; };
   doc.addEventListener('focusin', note, true);
@@ -29,10 +32,10 @@ const FOCUS_IN_PAGE: &str = r"function() {
     doc.removeEventListener('focusin', note, true);
     doc.removeEventListener('focusout', note, true);
   }
-  const root = this.getRootNode ? this.getRootNode() : doc;
   const active = (root && root.activeElement) || doc.activeElement;
   if (active === this || (!!active && this.contains(active))) return 'focused';
-  return heard || deep() !== before ? 'moved' : 'unchanged';
+  const moved = heard || deep() !== before || (root && root.activeElement) !== near;
+  return moved ? 'moved' : 'unchanged';
 }";
 
 const FOCUSABLE: &str = r"function() {
@@ -75,6 +78,7 @@ pub fn focus(
         )?;
         return match held.as_str() {
             Some("focused" | "moved") => Ok(()),
+            Some("gone") => Err(stale(token, "the node is no longer in its document")),
             _ => Err(not_focusable(token.backend_node_id, None)),
         };
     }

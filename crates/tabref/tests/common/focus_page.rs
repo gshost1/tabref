@@ -29,6 +29,8 @@ pub const PAGE: &str = r#"<!doctype html><title>Focus</title>
 <x-closed id=closed role=button aria-label="Closed host"></x-closed>
 <x-blurry id=blurry role=button aria-label="Blurry host"></x-blurry>
 <x-tabbed id=tabbed tabindex=0 role=button aria-label="Tabbed host"></x-tabbed>
+<x-shut id=shut role=button aria-label="Shut host"></x-shut>
+<x-own tabindex=0 id=own role=button aria-label="Own host"></x-own>
 <p id=out>Nothing</p>
 <p id=seen>Unseen</p>
 <script>
@@ -43,10 +45,19 @@ customElements.define('x-badtab', host('<span id=junk tabindex=abc>Junk</span><i
 customElements.define('x-veiled', host('<input id=ghost style="visibility:hidden"><input id=plain>'));
 customElements.define('x-blurry', host('<input id=slippery onfocus="this.blur()">'));
 customElements.define('x-tabbed', host('<input id=tabbed-inner>'));
+const keeper = html => class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = html; }
+};
+customElements.define('x-shut', keeper('<input id=shut-inner>'));
+customElements.define('x-own', keeper('<input id=own-inner>'));
 customElements.define('x-closed', class extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: 'closed', delegatesFocus: true }).innerHTML = '<input id=hidden-inside>'; }
 });
 window.ticks = { hidden: 0, wentHidden: false };
+window.stall = false;
+const stall = () => { if (!window.stall) return; const until = Date.now() + 8000; while (Date.now() < until) {} };
+window.addEventListener('blur', stall);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stall(); });
 setInterval(() => { if (document.visibilityState === 'hidden') window.ticks.hidden += 1; }, 10);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') window.ticks.wentHidden = true; });
 document.addEventListener('visibilitychange', () => { document.getElementById('seen').textContent = 'vis changed'; });
