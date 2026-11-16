@@ -16,7 +16,7 @@ use tabref_page::{ElementToken, upload_files};
 
 use common::{connect_to, deadline, launch, live, open_tab, serve};
 
-const DROPZONE: &str = r#"<!doctype html><html><head><title>Report</title></head><body>
+const DROPZONE: &str = r##"<!doctype html><html><head><title>Report</title></head><body>
 <form id="report" action="/r">
 <label>Description <textarea name="body"></textarea></label>
 <div class="dropzone"><span>Drop files here or</span> <a href="#" id="pick">select more files…</a></div>
@@ -35,12 +35,12 @@ input.className = 'dz-hidden-input';
 input.style.cssText = 'visibility:hidden;position:absolute;top:0;left:0;height:0;width:0';
 document.getElementById('report').appendChild(input);
 </script>
-</body></html>"#;
+</body></html>"##;
 
-const NONE: &str = r#"<!doctype html><html><head><title>None</title></head><body>
-<a href="#" id="pick">select files…</a></body></html>"#;
+const NONE: &str = r##"<!doctype html><html><head><title>None</title></head><body>
+<a href="#" id="pick">select files…</a></body></html>"##;
 
-const ONLY: &str = r#"<!doctype html><html><head><title>Only</title></head><body>
+const ONLY: &str = r##"<!doctype html><html><head><title>Only</title></head><body>
 <a href="#" id="pick">select files…</a>
 <script>
 const input = document.createElement('input');
@@ -49,7 +49,7 @@ input.multiple = true;
 input.className = 'dz-hidden-input';
 input.style.display = 'none';
 document.body.appendChild(input);
-</script></body></html>"#;
+</script></body></html>"##;
 
 fn token_of(connection: &mut CdpConnection, page: &PageSession, css: &str) -> ElementToken {
     let session = Some(page.session_id.as_str());
