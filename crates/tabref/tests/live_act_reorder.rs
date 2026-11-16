@@ -1,6 +1,7 @@
 //! Live runs of an action that reorders a table: the page draws the rows
-//! again in a new order, and the action must print the rows it now starts
-//! with instead of a cell-by-cell diff and a list of re-created cells.
+//! again in a new order and adds an Undo button, and the action must print
+//! the rows it now starts with instead of a cell-by-cell diff, one line for
+//! the row links made again, and the Undo button as a new control.
 //! Opt-in: `TABREF_LIVE=1 cargo test -p tabref --test live_act_reorder -- --test-threads=1`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -34,6 +35,7 @@ document.getElementById('sort').onclick = () => {
   descending = !descending;
   parcels.sort((a, b) => descending ? b[1] - a[1] : a[1] - b[1]);
   draw();
+  if (!document.getElementById('undo')) document.body.insertAdjacentHTML('beforeend', '<button id=undo>Undo sort</button>');
 };
 draw();
 </script>"#;
@@ -79,11 +81,20 @@ fn sorting_a_table_prints_the_rows_it_now_starts_with() {
     tabref.ok(&["open", &url]);
     let run = tabref.ok(&["click", "Weight"]);
     let out = run.stdout;
-    assert!(out.contains("reordered 8 rows, now starting:"), "{out}");
+    assert!(
+        out.contains("reordered 8 rows below \"Code Weight\", now starting:\n  P-106 61.5 kg"),
+        "{out}"
+    );
     let first = out.find("P-106 61.5 kg").expect(&out);
     let second = out.find("P-102 44 kg").expect(&out);
     assert!(first < second, "{out}");
-    assert!(!out.contains("new "), "{out}");
+    assert_eq!(out.matches("\nnew ").count(), 1, "{out}");
+    assert!(out.contains("Undo sort"), "{out}");
+    assert!(
+        out.contains(" new refs, earlier refs in them are stale: tabref snap")
+            && out.contains("\nrows drawn again: "),
+        "{out}"
+    );
     assert!(!out.contains(" -> "), "{out}");
     assert!(out.len() < 700, "{} bytes:\n{out}", out.len());
 }
@@ -99,13 +110,13 @@ fn a_sort_inside_a_batch_names_the_new_first_rows_on_its_line() {
     let mut lines = run.stdout.lines();
     let step = lines.next().unwrap();
     assert!(
-        step.contains("; reordered 8 rows, now starting: P-106 61.5 kg"),
+        step.contains("; reordered 8 rows below \"Code Weight\", now starting: P-106 61.5 kg"),
         "{}",
         run.stdout
     );
     assert!(
         run.stdout
-            .contains("reordered 8 rows, now starting:\n  P-103 3.25 kg"),
+            .contains("reordered 8 rows below \"Code Weight\", now starting:\n  P-103 3.25 kg"),
         "{}",
         run.stdout
     );

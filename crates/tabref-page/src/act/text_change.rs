@@ -7,17 +7,25 @@ const MIDDLE_CHARS: usize = 60;
 const BRIEF_ROWS_CHARS: usize = 80;
 const ROWS_LABEL: &str = "now starting:";
 const ROWS_SHOWN: usize = 5;
+const ABOVE_CHARS: usize = 40;
 
 /// One line of a page's rendered text that an action changed: rewritten in
 /// place, added or removed; or a run of lines the action put in a new
-/// order (a sorted table drawn again), as how many lines the run holds now
-/// and the first of them.
+/// order (a sorted list drawn again): the line above the run, the run's
+/// lines in their new order, and whether a table drew them as rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextChange {
-    Changed { before: String, after: String },
+    Changed {
+        before: String,
+        after: String,
+    },
     Added(String),
     Removed(String),
-    Reordered { count: usize, first: Vec<String> },
+    Reordered {
+        above: Option<String>,
+        run: Vec<String>,
+        table: bool,
+    },
 }
 
 impl TextChange {
@@ -26,7 +34,7 @@ impl TextChange {
     pub fn brief(&self) -> String {
         match self {
             Self::Added(line) => format!("+ {}", cut(line, LINE_CHARS)),
-            Self::Reordered { count, first } => brief_rows(*count, first),
+            Self::Reordered { above, run, table } => brief_rows(&run_head(above, run, *table), run),
             other => other.to_string(),
         }
     }
@@ -40,7 +48,9 @@ impl fmt::Display for TextChange {
     /// rows, one per indented line, and how to see the rest.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Reordered { count, first } => formatter.write_str(&rows_block(*count, first)),
+            Self::Reordered { above, run, table } => {
+                formatter.write_str(&rows_block(&run_head(above, run, *table), run))
+            }
             Self::Changed { before, after } => formatter.write_str(&inline_change(before, after)),
             Self::Added(line) => write!(formatter, "+ {}", cut(line, ADDED_CHARS)),
             Self::Removed(line) => write!(formatter, "- {}", cut(line, LINE_CHARS)),
@@ -48,9 +58,20 @@ impl fmt::Display for TextChange {
     }
 }
 
-fn rows_block(count: usize, first: &[String]) -> String {
-    let mut block = format!("reordered {count} rows, {ROWS_LABEL}");
-    let shown = first.len().min(ROWS_SHOWN);
+/// `reordered 8 rows below "Code Weight", now starting:`; `lines` when no
+/// table drew them, and no `below` when the run starts the page.
+fn run_head(above: &Option<String>, run: &[String], table: bool) -> String {
+    let noun = if table { "rows" } else { "lines" };
+    let below = above.as_ref().map_or_else(String::new, |line| {
+        format!(" below \"{}\"", cut(line, ABOVE_CHARS))
+    });
+    format!("reordered {} {noun}{below}, {ROWS_LABEL}", run.len())
+}
+
+fn rows_block(head: &str, first: &[String]) -> String {
+    let count = first.len();
+    let mut block = head.to_owned();
+    let shown = count.min(ROWS_SHOWN);
     for row in &first[..shown] {
         block.push_str("\n  ");
         block.push_str(&cut(row, LINE_CHARS));
@@ -61,7 +82,8 @@ fn rows_block(count: usize, first: &[String]) -> String {
     block
 }
 
-fn brief_rows(count: usize, first: &[String]) -> String {
+fn brief_rows(head: &str, first: &[String]) -> String {
+    let count = first.len();
     let mut rows = String::new();
     let mut shown = 0;
     for row in first {
@@ -77,7 +99,7 @@ fn brief_rows(count: usize, first: &[String]) -> String {
         shown += 1;
     }
     let more = if count > shown { " …" } else { "" };
-    format!("reordered {count} rows, {ROWS_LABEL} {rows}{more}")
+    format!("{head} {rows}{more}")
 }
 
 fn inline_change(before: &str, after: &str) -> String {
