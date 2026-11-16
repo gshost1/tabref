@@ -30,6 +30,16 @@ impl TabClaim {
         self.locks.claim(tab, self.owner, deadline, &self.cancel)
     }
 
+    /// Holds `tab` if no other command holds it; see [`TabLocks::try_hold`].
+    pub(crate) fn try_hold(&self, tab: &str) -> Option<bool> {
+        self.locks.try_hold(tab, self.owner)
+    }
+
+    /// Releases this claim's hold on `tab` alone.
+    pub(crate) fn release_tab(&self, tab: &str) {
+        self.locks.release_tab(tab, self.owner);
+    }
+
     pub(crate) fn cancel_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.cancel)
     }

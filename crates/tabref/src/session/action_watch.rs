@@ -65,6 +65,7 @@ impl Session {
             Some(tab) => match self.attach(&tab) {
                 Ok(page) => {
                     self.use_tab(&tab)?;
+                    let _ = self.attach(&tab);
                     let _ = wait_for_load(self.connection(), &page, deadline.capped(NEW_TAB_LOAD));
                     Some(tab)
                 }

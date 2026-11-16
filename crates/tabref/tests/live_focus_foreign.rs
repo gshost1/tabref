@@ -149,3 +149,58 @@ fn a_stale_launch_record_on_the_same_port_does_not_make_it_tabrefs_browser() {
         "Unseen"
     );
 }
+
+#[test]
+fn a_host_that_delegates_focus_finds_a_control_it_can_focus_or_is_refused() {
+    if !live() {
+        return;
+    }
+    let tabref = foreign_site("focus-delegates");
+    tabref.ok(&["focus", "Nested"]);
+    assert_eq!(
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.shadowRoot.activeElement.id"
+        ),
+        "inner"
+    );
+    tabref.ok(&["focus", "Skips hidden"]);
+    assert_eq!(
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
+        "real"
+    );
+    let empty = tabref.run(&["--json", "focus", "Empty host"]).json();
+    assert_eq!(
+        empty["error"]["platform_detail"], "not focusable",
+        "refused by tabref before DOM.focus: {empty}"
+    );
+    tabref.ok(&["focus", "Bad tab host"]);
+    assert_eq!(
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
+        "good"
+    );
+    tabref.ok(&["focus", "Veiled host"]);
+    assert_eq!(
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
+        "plain"
+    );
+    tabref.ok(&["focus", "Closed host"]);
+    assert_eq!(active(&tabref), "closed");
+    tabref.ok(&["focus", "Tabbed host"]);
+    assert_eq!(
+        read(
+            &tabref,
+            "document.activeElement.shadowRoot.activeElement.id"
+        ),
+        "tabbed-inner"
+    );
+}

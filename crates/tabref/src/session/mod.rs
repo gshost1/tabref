@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use serde_json::json;
 use tabref_cdp::{
     CdpConnection, PageSession, PageTarget, attach_to_target_with, create_background_tab,
-    is_protocol_error, list_page_targets, target_gone,
+    is_protocol_error, is_target_gone, list_page_targets, target_gone,
 };
 use tabref_core::{AppError, Deadline, RefStore};
 
@@ -139,9 +139,11 @@ impl Session {
         Ok(tab)
     }
 
-    /// Makes `target_id` the tab this and later commands work in.
+    /// Makes `target_id` the tab this and later commands work in. A tab
+    /// tabref worked in before stops being told it holds the window focus.
     pub(crate) fn use_tab(&mut self, target_id: &str) -> Result<(), AppError> {
         self.scope.claim(target_id)?;
+        self.leave_other_tabs(Some(target_id), self.scope.deadline);
         if remembered_is(&self.store, &self.tab_state_name(), target_id) {
             self.scope.tab = Some(target_id.to_owned());
             return Ok(());
@@ -176,12 +178,14 @@ impl Session {
         let focus = self.browser.launched && self.scope.tab.as_deref() == Some(target_id);
         if let Some(tab) = self.attached.get_mut(target_id) {
             if focus && !tab.focused {
-                self.connection.call(
-                    OWN_TAB_FOCUS,
-                    json!({ "enabled": true }),
-                    Some(&tab.session.session_id),
-                    deadline,
-                )?;
+                self.connection
+                    .call(
+                        OWN_TAB_FOCUS,
+                        json!({ "enabled": true }),
+                        Some(&tab.session.session_id),
+                        deadline,
+                    )
+                    .map_err(attach_error)?;
                 tab.focused = true;
             }
             return Ok(tab.session.clone());
@@ -194,14 +198,7 @@ impl Session {
             events.push((OWN_TAB_FOCUS, json!({ "enabled": true })));
         }
         let session = attach_to_target_with(&mut self.connection, target_id, &events, deadline)
-            .map_err(|error| {
-                if is_protocol_error(&error) {
-                    let detail = error.platform_detail.clone().unwrap_or_default();
-                    target_gone(failed_method(&error), detail)
-                } else {
-                    error
-                }
-            })?;
+            .map_err(attach_error)?;
         let tab = AttachedTab {
             session: session.clone(),
             focused: focus,
@@ -217,17 +214,81 @@ impl Session {
         self.browser.launched
     }
 
+    /// Stops telling each tab but `keep` that it holds the window focus,
+    /// so a tab tabref no longer works in goes back to the background:
+    /// hidden, with throttled timers. Only a tab no other daemon command
+    /// holds is told, held for that one call and released at once; a tab
+    /// another command works in now keeps its state, and its flag. A tab is marked as told no more only when the
+    /// browser took it or the tab is gone; a call that failed otherwise (a
+    /// cancel, the deadline) leaves the mark, so a later command tries
+    /// again.
+    fn leave_other_tabs(&mut self, keep: Option<&str>, deadline: Deadline) {
+        for (id, tab) in &mut self.attached {
+            if !tab.focused || keep == Some(id.as_str()) {
+                continue;
+            }
+            let Some(taken) = self.scope.try_hold(id) else {
+                continue;
+            };
+            let left = self.connection.call(
+                OWN_TAB_FOCUS,
+                json!({ "enabled": false }),
+                Some(&tab.session.session_id),
+                deadline,
+            );
+            if taken {
+                self.scope.release_tab(id);
+            }
+            if left.as_ref().map_or_else(is_target_gone, |_| true) {
+                tab.focused = false;
+            }
+        }
+    }
+
+    /// For a daemon command that ends, while it still holds its claim:
+    /// every tab this connection told it holds the window focus, other than
+    /// the tab later commands start in, is told so no longer, so a
+    /// connection that waits in the pool leaves no background tab visible.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub(crate) fn leave_background_tabs(&mut self) {
+        if !self.browser.launched || !self.attached.values().any(|tab| tab.focused) {
+            return;
+        }
+        let current = self.store.read_state(&self.tab_state_name());
+        if let Ok(deadline) = Deadline::after(LEAVE_MS) {
+            self.leave_other_tabs(current.as_deref().map(str::trim), deadline);
+        }
+    }
+
     fn tab_state_name(&self) -> String {
         format!("tab-{}", self.browser.endpoint.port())
     }
 }
 
 /// The attach hook for the tab tabref works in, in a browser tabref
-/// launched: the tab reads as holding the window focus for as long as the
-/// session lasts, and is never told otherwise, so its focus handlers run
-/// and every action sees the same focus state. Other tabs keep their own
-/// state, and a browser tabref did not launch is never told this.
+/// launched: the tab reads as holding the window focus while it is the
+/// current tab, so its focus handlers run and every action sees the same
+/// focus state, and is told otherwise when tabref moves to another tab
+/// (`leave_other_tabs`). Other tabs keep their own state, and a browser
+/// tabref did not launch is never told this. The daemon's pooled
+/// connections each keep their own record: a tab skipped because another
+/// command held it, or one another connection turned off, may stay told,
+/// or lose it, until a command next makes it current.
 const OWN_TAB_FOCUS: &str = "Emulation.setFocusEmulationEnabled";
+
+/// How long a command that ends spends telling tabs it left that they no
+/// longer hold the window focus.
+const LEAVE_MS: u64 = 300;
+
+/// An attach the browser refused: the target is gone.
+fn attach_error(error: AppError) -> AppError {
+    if is_protocol_error(&error) {
+        let detail = error.platform_detail.clone().unwrap_or_default();
+        target_gone(failed_method(&error), detail)
+    } else {
+        error
+    }
+}
 
 /// The method a protocol error names: attaching sends several, and the
 /// error should say which one the browser refused.

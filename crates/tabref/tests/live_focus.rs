@@ -11,6 +11,7 @@
 
 mod common;
 
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use common::focus_page::{active, in_back, open_page, own_browser, own_site, read, to_back};
@@ -135,5 +136,111 @@ fn a_focus_with_no_focus_listener_ends_with_the_settle() {
         first, "focused \"Deep jump\" (the page moved the focus away)",
         "{}",
         deep.stdout
+    );
+}
+
+#[test]
+fn a_tab_tabref_moves_away_from_goes_to_the_background() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-left-behind");
+    tabref.ok(&["focus", "Name"]);
+    assert_eq!(read(&tabref, "document.hasFocus()"), "true");
+    tabref.ok(&["open", "--new-tab", "about:blank"]);
+    std::thread::sleep(Duration::from_millis(1_000));
+    let ticks = in_back(&tabref, "JSON.stringify(window.ticks)");
+    let ticks: serde_json::Value = serde_json::from_str(&ticks).unwrap();
+    assert_eq!(ticks["wentHidden"], true, "{ticks}");
+    assert!(
+        ticks["hidden"].as_u64().unwrap() < 30,
+        "a hidden tab runs throttled timers: {ticks}"
+    );
+}
+
+#[test]
+fn a_tab_an_idle_daemon_connection_left_goes_to_the_background() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-pool");
+    let port = read(&tabref, "location.port");
+    let page = format!("http://127.0.0.1:{port}/focus");
+    tabref.ok(&["open", "--new-tab", &page]);
+    in_back(&tabref, "window.ticks.wentHidden = false; 1");
+    let mut long = Command::new(env!("CARGO_BIN_EXE_tabref"))
+        .args(["--cdp", &tabref.browser.port.to_string()])
+        .args([
+            "--timeout",
+            "2500",
+            "--tab",
+            "0",
+            "wait",
+            "--text",
+            "Never shown",
+        ])
+        .env("TABREF_HOME", &tabref.home)
+        .env("TABREF_REFS", "long")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(700));
+    tabref.ok(&["--tab", "1", "js", "1"]);
+    let _ = long.wait();
+    std::thread::sleep(Duration::from_millis(500));
+    let ticks = in_back(&tabref, "JSON.stringify(window.ticks)");
+    let ticks: serde_json::Value = serde_json::from_str(&ticks).unwrap();
+    assert_eq!(ticks["wentHidden"], true, "{ticks}");
+}
+
+#[test]
+fn leaving_a_tab_does_not_keep_it_locked_for_the_rest_of_the_command() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-unlocked");
+    let port = read(&tabref, "location.port");
+    tabref.ok(&[
+        "open",
+        "--new-tab",
+        &format!("http://127.0.0.1:{port}/focus"),
+    ]);
+    let mut long = Command::new(env!("CARGO_BIN_EXE_tabref"))
+        .args(["--cdp", &tabref.browser.port.to_string()])
+        .args([
+            "--timeout",
+            "6000",
+            "--tab",
+            "0",
+            "wait",
+            "--text",
+            "Never shown",
+        ])
+        .env("TABREF_HOME", &tabref.home)
+        .env("TABREF_REFS", "long")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(700));
+    let other = tabref.run(&["--timeout", "1000", "--tab", "1", "js", "1"]);
+    let _ = long.kill();
+    let _ = long.wait();
+    assert!(other.ok, "{}{}", other.stdout, other.stderr);
+}
+
+#[test]
+fn a_host_whose_control_blurs_itself_is_focused_and_the_move_reported() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-blurry");
+    let blurry = tabref.ok(&["focus", "Blurry host"]);
+    let first = blurry.stdout.lines().next().unwrap();
+    assert_eq!(
+        first, "focused \"Blurry host\" (the page moved the focus away)",
+        "{}",
+        blurry.stdout
     );
 }

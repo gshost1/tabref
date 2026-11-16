@@ -21,12 +21,34 @@ pub const PAGE: &str = r#"<!doctype html><title>Focus</title>
 <div id=badindex tabindex="abc" onclick="1">Bad index</div>
 <svg width=120 height=30><a id=svglink xlink:href=#svg><text x=5 y=20>Svg link</text></a></svg>
 <x-field id=xfield role=button aria-label="Delegated"></x-field>
+<x-outer id=outer role=button aria-label="Nested"></x-outer>
+<x-skip id=skip role=button aria-label="Skips hidden"></x-skip>
+<x-empty id=empty role=button aria-label="Empty host"></x-empty>
+<x-badtab id=badtab role=button aria-label="Bad tab host"></x-badtab>
+<x-veiled id=veiled role=button aria-label="Veiled host"></x-veiled>
+<x-closed id=closed role=button aria-label="Closed host"></x-closed>
+<x-blurry id=blurry role=button aria-label="Blurry host"></x-blurry>
+<x-tabbed id=tabbed tabindex=0 role=button aria-label="Tabbed host"></x-tabbed>
 <p id=out>Nothing</p>
 <p id=seen>Unseen</p>
 <script>
-customElements.define('x-field', class extends HTMLElement {
-  constructor() { super(); this.attachShadow({ mode: 'open', delegatesFocus: true }).innerHTML = '<input id=inner>'; }
+const host = html => class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'open', delegatesFocus: true }).innerHTML = html; }
+};
+customElements.define('x-field', host('<input id=inner>'));
+customElements.define('x-outer', host('<x-field id=middle></x-field>'));
+customElements.define('x-skip', host('<input type=hidden id=secret><input id=unseen style="display:none"><span id=frozen contenteditable=false>Frozen</span><input id=real>'));
+customElements.define('x-empty', host('<span>Nothing to focus</span>'));
+customElements.define('x-badtab', host('<span id=junk tabindex=abc>Junk</span><input id=good>'));
+customElements.define('x-veiled', host('<input id=ghost style="visibility:hidden"><input id=plain>'));
+customElements.define('x-blurry', host('<input id=slippery onfocus="this.blur()">'));
+customElements.define('x-tabbed', host('<input id=tabbed-inner>'));
+customElements.define('x-closed', class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'closed', delegatesFocus: true }).innerHTML = '<input id=hidden-inside>'; }
 });
+window.ticks = { hidden: 0, wentHidden: false };
+setInterval(() => { if (document.visibilityState === 'hidden') window.ticks.hidden += 1; }, 10);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') window.ticks.wentHidden = true; });
 document.addEventListener('visibilitychange', () => { document.getElementById('seen').textContent = 'vis changed'; });
 window.addEventListener('focus', () => { document.getElementById('seen').textContent = 'window focused'; });
 </script>"#;

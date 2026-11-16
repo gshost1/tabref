@@ -28,6 +28,25 @@ impl CommandScope {
         })
     }
 
+    /// Holds `tab` for one call if no other daemon command holds it, without
+    /// waiting: `Some(true)` when taken now (release it with
+    /// [`release_tab`](Self::release_tab) after the call), `Some(false)`
+    /// when this command held it already or runs outside the daemon,
+    /// `None` when another command holds it.
+    pub(crate) fn try_hold(&self, tab: &str) -> Option<bool> {
+        match &self.claim {
+            Some(claim) => claim.try_hold(tab),
+            None => Some(false),
+        }
+    }
+
+    /// Releases a hold [`try_hold`](Self::try_hold) took.
+    pub(crate) fn release_tab(&self, tab: &str) {
+        if let Some(claim) = &self.claim {
+            claim.release_tab(tab);
+        }
+    }
+
     /// Claims `tab` for this command when it runs in the daemon.
     pub(crate) fn claim(&self, tab: &str) -> Result<(), AppError> {
         match &self.claim {
