@@ -10,8 +10,8 @@
 use std::path::Path;
 
 use tabref_cdp::{
-    ActivePort, HeldPort, LaunchedBrowser, ListenerVerdict, ProcessView, check_listener,
-    launched_alive, read_active_port,
+    ActivePort, HeldPort, LaunchedBrowser, ListenerVerdict, ProcessView, check_active_port,
+    check_listener, launched_alive, read_active_port,
 };
 use tabref_core::AppError;
 
@@ -56,24 +56,19 @@ pub(crate) fn decide(
     alive: &dyn Fn() -> Option<bool>,
     read: &dyn Fn() -> Result<ActivePort, AppError>,
 ) -> LaunchCheck {
-    let _ = read;
-    match verdict {
+    let found = match verdict {
         ListenerVerdict::Trusted(held) => LaunchCheck::Held(held),
-        ListenerVerdict::Nothing | ListenerVerdict::Untrusted { .. } => LaunchCheck::Gone,
+        ListenerVerdict::Nothing | ListenerVerdict::Untrusted { .. } => return LaunchCheck::Gone,
         ListenerVerdict::Unknown | ListenerVerdict::CantCheck(_) => {
-            if alive() == Some(true) {
-                LaunchCheck::Alive
-            } else {
-                LaunchCheck::Gone
+            if alive() != Some(true) {
+                return LaunchCheck::Gone;
             }
+            LaunchCheck::Alive
         }
-    }
-    .with_record(record)
-}
-
-impl LaunchCheck {
-    fn with_record(self, _record: &LaunchedBrowser) -> Self {
-        self
+    };
+    match check_active_port(record, read()) {
+        Ok(()) => found,
+        Err(error) => LaunchCheck::Unverified(error),
     }
 }
 

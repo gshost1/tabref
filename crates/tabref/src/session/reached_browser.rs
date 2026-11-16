@@ -1,4 +1,4 @@
-use tabref_cdp::{BrowserEndpoint, EndpointSource, LaunchedBrowser};
+use tabref_cdp::{BrowserEndpoint, EndpointSource, LaunchedBrowser, same_browser_run};
 use tabref_core::RefStore;
 
 use super::launch_check::{LaunchCheck, launched_check};
@@ -26,9 +26,11 @@ impl ReachedBrowser {
 }
 
 /// Whether `record` names `endpoint`, a loopback endpoint reached another
-/// way (such as `--cdp`): on the record's port, and the browser listening
-/// there is the one the record names, as `check` says (its process runs the
-/// record's profile, see `launch_check`).
+/// way (such as `--cdp`): on the record's port, answered with the record's
+/// browser run (the DevTools id in its WebSocket path, from `/json/version`),
+/// and the browser listening there is the one the record names, as `check`
+/// says (see `launch_check`). Another browser that took the port has
+/// another id, even while the recorded pid lives.
 pub(crate) fn names_endpoint(
     record: &LaunchedBrowser,
     endpoint: &BrowserEndpoint,
@@ -36,6 +38,7 @@ pub(crate) fn names_endpoint(
 ) -> bool {
     endpoint.websocket_url.socket_addr().ip().is_loopback()
         && record.port == endpoint.port()
+        && same_browser_run(record, endpoint.websocket_url.path())
         && check(record).is_launched()
 }
 
