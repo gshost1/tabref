@@ -26,7 +26,9 @@ const ELLIPSIS: &str = " …";
 /// An action as a single command prints it: `clicked "Save"`, then what it
 /// set off, capped near 150 tokens: dialogs, the new address, the page's
 /// changed lines, the controls that appeared with their refs, or, when it
-/// led to another page, a snapshot of that page.
+/// led to another page, a snapshot of that page. A reload of the same
+/// address prints its changed lines and then the snapshot, since every
+/// ref is new and a form sent back with errors shows what it kept.
 pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome, AppError> {
     let mut first = format!("{} {}", past(acted.verb), acted.summary);
     if let Some(note) = nothing_seen(&acted) {
@@ -132,7 +134,9 @@ fn effect_block(
     lines.extend(within_budget(&changes));
     merge(&mut data, json!({ "changes": changes }));
     if effects.settled.navigated {
-        lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
+        let report = current_page_view(session)?;
+        lines.push(report.text);
+        merge(&mut data, json!({ "page": report.data }));
     } else if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
         let mut found = Vec::new();
