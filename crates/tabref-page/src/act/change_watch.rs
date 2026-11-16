@@ -1,7 +1,9 @@
 //! Watches what an action changes on the page. Before the action, one
-//! evaluation reads the address, title and rendered text and starts a
-//! `MutationObserver` on the document; after it, one more reads them again
-//! and the observer's count. The observer hangs off a registered symbol of
+//! evaluation reads the address, title and rendered text, open shadow roots
+//! and same-origin frames included, and starts a `MutationObserver` on the
+//! document and each of them; after it, one more reads them again, the
+//! observer's count and how many shown frames from other sites it could not
+//! read. The observer hangs off a registered symbol of
 //! `window`, which page scripts that list the window's keys never see. A
 //! document that replaced the watched one has no observer, which is how a
 //! navigation shows.
@@ -12,41 +14,10 @@ use tabref_core::{AppError, Deadline};
 use super::page_changes::PageChanges;
 use super::page_mark::PageMark;
 use super::text_diff::{diff_lines, text_lines};
+use super::watch_scripts::{COUNT_WATCH, READ_WATCH, SCAN, START_WATCH};
 use crate::{CdpConnection, PageSession};
 
 const TEXT_LIMIT: usize = 200_000;
-
-const START_WATCH: &str = r"(() => {
-  const key = Symbol.for('tabref.watch');
-  const old = window[key];
-  if (old) old.observer.disconnect();
-  const state = { count: 0 };
-  state.observer = new MutationObserver(records => { state.count += records.length; });
-  state.observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
-  window[key] = state;
-  const text = document.body ? document.body.innerText : '';
-  return { url: location.href, title: document.title, text: text.length > LIMIT ? null : text };
-})()";
-
-const READ_WATCH: &str = r"(() => {
-  const key = Symbol.for('tabref.watch');
-  const state = window[key];
-  let mutations = null;
-  if (state) {
-    mutations = state.count + state.observer.takeRecords().length;
-    state.observer.disconnect();
-    delete window[key];
-  }
-  const text = document.body ? document.body.innerText : '';
-  return { url: location.href, title: document.title, mutations, text: text.length > LIMIT ? null : text };
-})()";
-
-const COUNT_WATCH: &str = r"(() => {
-  const state = window[Symbol.for('tabref.watch')];
-  if (!state) return null;
-  state.count += state.observer.takeRecords().length;
-  return state.count;
-})()";
 
 /// Marks the page before an action and starts counting its DOM mutations.
 pub fn mark_page(
@@ -80,6 +51,7 @@ pub fn page_changes(
         url: text_field(&reply, "url"),
         title: text_field(&reply, "title"),
         mutations: reply.get("mutations").and_then(Value::as_u64),
+        unread_frames: reply.get("unread").and_then(Value::as_u64).unwrap_or(0),
         changes,
     })
 }
@@ -100,7 +72,9 @@ fn run(
     script: &str,
     deadline: Deadline,
 ) -> Result<Value, AppError> {
-    let expression = script.replace("LIMIT", &TEXT_LIMIT.to_string());
+    let expression = script
+        .replace("SCAN", SCAN)
+        .replace("LIMIT", &TEXT_LIMIT.to_string());
     let mut reply = connection.call(
         "Runtime.evaluate",
         json!({ "expression": expression, "returnByValue": true }),
