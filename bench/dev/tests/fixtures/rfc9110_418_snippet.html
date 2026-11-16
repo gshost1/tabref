@@ -1,0 +1,55 @@
+<div id="status.417">
+<section id="section-15.5.18">
+          <h4 id="name-417-expectation-failed">
+<a href="#section-15.5.18" class="section-number selfRef">15.5.18. </a><a href="#name-417-expectation-failed" class="section-name selfRef">417 Expectation Failed</a>
+          </h4>
+<span id="iref-417-expectation-failed-stat" class="iref"></span>
+          <p id="section-15.5.18-1">
+   The 417 (Expectation Failed) status code indicates that the
+   expectation given in the request's <a href="#field.expect" class="xref">Expect</a> header field
+   (<a href="#field.expect" class="xref">Section 10.1.1</a>) could not be met by at least one of the
+   inbound servers.<a href="#section-15.5.18-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="status.418">
+<section id="section-15.5.19">
+          <h4 id="name-418-unused">
+<a href="#section-15.5.19" class="section-number selfRef">15.5.19. </a><a href="#name-418-unused" class="section-name selfRef">418 (Unused)</a>
+          </h4>
+<span id="iref-418-unused-status-code-442" class="iref"></span>
+          <p id="section-15.5.19-1">
+                  <span>[<a href="#RFC2324" class="xref">RFC2324</a>]</span> was an April 1 RFC that lampooned the various ways
+   HTTP was abused; one such abuse was the definition of an
+   application-specific 418 status code, which has been deployed as a joke
+   often enough for the code to be unusable for any future use.<a href="#section-15.5.19-1" class="pilcrow">¶</a></p>
+<p id="section-15.5.19-2">
+   Therefore, the 418 status code is reserved in the IANA HTTP Status Code
+   Registry. This indicates that the status code cannot be assigned to other
+   applications currently. If future circumstances require its use (e.g.,
+   exhaustion of 4NN status codes), it can be re-assigned to another use.<a href="#section-15.5.19-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="status.421">
+<section id="section-15.5.20">
+          <h4 id="name-421-misdirected-request">
+<a href="#section-15.5.20" class="section-number selfRef">15.5.20. </a><a href="#name-421-misdirected-request" class="section-name selfRef">421 Misdirected Request</a>
+          </h4>
+<span id="iref-421-misdirected-request-sta" class="iref"></span>
+          <p id="section-15.5.20-1">
+   The 421 (Misdirected Request) status code indicates that the request was
+   directed at a server that is unable or unwilling to produce an
+   authoritative response for the target URI. An origin server (or gateway
+   acting on behalf of the origin server) sends 421 to reject a target URI
+   that does not match an <a href="#origin" class="xref">origin</a> for which the server has been
+   configured (<a href="#origin" class="xref">Section 4.3.1</a>) or does not match the connection
+   context over which the request was received
+   (<a href="#routing.reject" class="xref">Section 7.4</a>).<a href="#section-15.5.20-1" class="pilcrow">¶</a></p>
+<p id="section-15.5.20-2">
+   A client that receives a 421 (Misdirected Request) response <span class="bcp14">MAY</span> retry the
+   request, whether or not the request method is idempotent, over a different
+   connection, such as a fresh connection specific to the target resource's
+   origin, or via an alternative service <span>[<a href="#ALTSVC" class="xref">ALTSVC</a>]</span>.<a href="#section-15.5.20-2" class="pilcrow">¶</a></p>
+<p id="section-15.5.20-3">
+   A proxy <span class="bcp14">MUST NOT</span> generate a 421 response.<a href="#section-15.5.20-3" class="pilcrow">¶</a></p>
+</section>
+</div>

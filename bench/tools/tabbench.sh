@@ -12,7 +12,7 @@
 #                                                  earlier pass could have edited), then a pass as tabbench; the key goes over stdin into that process's
 #                                                  environment only (never a command line, file or log). With a
 #                                                  terminal and no pipe it asks for the key without echo.
-#   bench/tools/tabbench.sh smoke [--taskset fresh] [run_web.py args]
+#   bench/tools/tabbench.sh smoke [--taskset fresh|dev] [run_web.py args]
 #                                                  no model, no key: as tabbench, start the set's site, reset every
 #                                                  task for run 0 and count verifiers that reject an empty answer
 #   bench/tools/tabbench.sh results                copy tabbench's runs/ to bench/runs/tabbench/ for report.py
@@ -29,6 +29,10 @@
 # the pass the operator's original is seal-checked again; only then are the pass's staged rows committed to
 # results-web.jsonl (else discarded). The sealed output (answers, verifier text, transcripts) is moved out of
 # tabbench's home into this checkout's bench/runs/fresh-out/<pass id>/ (mode 700), so no later model can read it.
+#
+# --taskset dev (run and smoke): the unsealed tuning set in bench/dev/. It is tracked, so sync_files copies it with
+# the rest of the bench (commit it first: only `git ls-files` reach tabbench); no seal check, no staging, rows go
+# straight to results-web.jsonl like heldout ones and `results` copies them back.
 #
 # Only setup needs root. sync, run and results run as the operator and reach tabbench only through a root-owned
 # wrapper, /usr/local/bin/as-tabbench (`exec sudo -n -u tabbench "$@"`, with a sudoers drop-in
