@@ -96,6 +96,17 @@ pub(crate) enum Command {
         #[arg(value_name = "TARGET")]
         target: String,
     },
+    /// Save a PNG of the visible page, or of one element (TARGET)
+    ///
+    /// The PNG holds whatever the page shows, logged-in content included, and
+    /// lands in this directory (often a repository) unless --out names another.
+    Screenshot {
+        #[arg(value_name = "TARGET")]
+        target: Option<String>,
+        /// The .png file to write (default: tabref-screenshot-<id>.png in this directory)
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
     /// Move the pointer over an element
     Hover {
         #[arg(value_name = "TARGET")]
@@ -228,6 +239,8 @@ impl Command {
             Self::Uncheck { .. } => "uncheck",
             Self::Press { .. } => "press",
             Self::Focus { .. } => "focus",
+    },
+            Self::Screenshot { .. } => "screenshot",
             Self::Hover { .. } => "hover",
             Self::Scroll { .. } => "scroll",
             Self::Upload { .. } => "upload",
