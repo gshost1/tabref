@@ -166,3 +166,110 @@ fn a_document_answered_as_an_attachment_stops_holding_the_settle() {
     );
     assert_eq!(tracker.next_wait(now + QUIET, QUIET), SettleWait::Done);
 }
+
+fn fetch_answered(tracker: &mut SettleTracker, now: Instant, status: u64, headers: Value) {
+    tracker.absorb(
+        &event(
+            "Network.requestWillBeSent",
+            json!({ "requestId": "r", "type": "Fetch" }),
+        ),
+        now,
+    );
+    tracker.absorb(
+        &event(
+            "Network.responseReceived",
+            json!({ "requestId": "r", "type": "Fetch", "frameId": "F",
+                    "response": { "status": status, "headers": headers } }),
+        ),
+        now,
+    );
+}
+
+fn data(tracker: &mut SettleTracker, now: Instant, length: u64) {
+    tracker.absorb(
+        &event(
+            "Network.dataReceived",
+            json!({ "requestId": "r", "dataLength": length, "encodedDataLength": length }),
+        ),
+        now,
+    );
+}
+
+#[test]
+fn a_response_whose_every_byte_arrived_stops_holding_the_settle_without_loading_finished() {
+    let now = Instant::now();
+    let mut tracker = SettleTracker::new("F");
+    fetch_answered(
+        &mut tracker,
+        now,
+        200,
+        json!({ "Content-Length": "12", "Cache-Control": "no-store" }),
+    );
+    assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Network);
+    data(&mut tracker, now, 5);
+    assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Network);
+    data(&mut tracker, now, 7);
+    assert_eq!(
+        tracker.next_wait(now, QUIET),
+        SettleWait::QuietUntil(now + QUIET)
+    );
+    assert_eq!(tracker.next_wait(now + QUIET, QUIET), SettleWait::Done);
+}
+
+#[test]
+fn a_response_with_no_body_stops_holding_the_settle_when_it_arrives() {
+    let now = Instant::now();
+    for (status, headers) in [
+        (204, json!({})),
+        (200, json!({ "content-length": "0" })),
+        (304, json!({})),
+    ] {
+        let mut tracker = SettleTracker::new("F");
+        fetch_answered(&mut tracker, now, status, headers);
+        assert_eq!(
+            tracker.next_wait(now + QUIET, QUIET),
+            SettleWait::Done,
+            "{status}"
+        );
+    }
+}
+
+#[test]
+fn a_response_of_unknown_or_encoded_length_waits_for_loading_finished() {
+    let now = Instant::now();
+    let mut tracker = SettleTracker::new("F");
+    fetch_answered(
+        &mut tracker,
+        now,
+        200,
+        json!({ "Transfer-Encoding": "chunked" }),
+    );
+    data(&mut tracker, now, 4_096);
+    assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Network);
+    let mut tracker = SettleTracker::new("F");
+    fetch_answered(
+        &mut tracker,
+        now,
+        200,
+        json!({ "Content-Length": "100", "Content-Encoding": "gzip" }),
+    );
+    tracker.absorb(
+        &event(
+            "Network.dataReceived",
+            json!({ "requestId": "r", "dataLength": 400, "encodedDataLength": 0 }),
+        ),
+        now,
+    );
+    assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Network);
+    tracker.absorb(
+        &event(
+            "Network.dataReceived",
+            json!({ "requestId": "r", "dataLength": 0, "encodedDataLength": 100 }),
+        ),
+        now,
+    );
+    assert_eq!(
+        tracker.next_wait(now, QUIET),
+        SettleWait::QuietUntil(now + QUIET)
+    );
+}
