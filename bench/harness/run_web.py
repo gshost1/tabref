@@ -36,6 +36,9 @@ server on 8793). Both use the same arms, tool paragraphs, caps, Chrome setup, lo
   tool call names the sealed names or a path outside its folder, or a tool result shows a sealed name;
 - the console shows no verifier text and errors show only their exception type.
   laptop: <key on stdin> | BENCH_FRESH_DIR=<sealed dir> bench/tools/tabbench.sh run --taskset fresh --rounds 0-4
+Dev (--taskset dev): the unsealed tuning set in bench/dev/ (tasks_dev.py, site dev/web/server.py on 8794), run and
+reported like heldout (per-task tables and verifier text allowed); its work folders go under web-dev/.
+  laptop: <key on stdin> | bench/tools/tabbench.sh run --taskset dev --rounds 0-4
 --smoke: no model, no key, no Chrome: start the set's site, reset every task for run 0, fetch the local pages the
 prompts name, and count verifiers that reject an empty answer with an empty and with an untouched state
 (bench/tools/tabbench.sh smoke).
@@ -66,6 +69,8 @@ ORDER = ["hw1", "hw2", "hw3", "hw4", "hw5", "hw6", "hw7", "hp1", "hp2", "hp3"]
 TASKS = {t["id"]: t for t in th.WEB_TASKS}
 TIMEOUT_S = 600
 HELDOUT_BASE = "http://127.0.0.1:8792"
+DEV = core.BENCH / "dev"
+DEV_BASE = "http://127.0.0.1:8794"
 
 
 class TaskSet:
@@ -97,6 +102,8 @@ class TaskSet:
 def load_taskset(name, fresh_arg=None, disposable=False, vault=None):
     if name == "heldout":
         return TaskSet("heldout", th, ORDER, None)
+    if name == "dev":
+        return load_dev()
     try:
         root = fresh.fresh_dir(fresh_arg)
         mod = fresh.load(root)
@@ -105,6 +112,16 @@ def load_taskset(name, fresh_arg=None, disposable=False, vault=None):
     except Exception as e:
         sealed_error(vault, "loading the fresh task set", e)
     return TaskSet("fresh", mod, [t["id"] for t in mod.WEB_TASKS], fresh.server_script(root), root, disposable)
+
+
+def load_dev():
+    """The unsealed dev set: bench/dev/tasks_dev.py and its site, imported like any tracked bench file."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tasks_dev", DEV / "tasks_dev.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["tasks_dev"] = mod
+    spec.loader.exec_module(mod)
+    return TaskSet("dev", mod, list(mod.ORDER), DEV / "web" / "server.py")
 
 
 def sealed_error(vault, what, exc):
@@ -274,7 +291,7 @@ class Runner:
     def __init__(self, a, display, site, key, ts, vault=None):
         self.a, self.display, self.site, self.key, self.ts, self.vault = a, display, site, key, ts, vault
         self.runs = Path(a.out)
-        self.web = self.runs / ("web-fresh" if ts.sealed else "web")
+        self.web = self.runs / ("web-fresh" if ts.sealed else "web-dev" if ts.name == "dev" else "web")
         self.home = self.web / "home"
         self.home.mkdir(parents=True, exist_ok=True)
         self.tabref = core.tabref_bin(a.tabref_checkout)
@@ -464,13 +481,13 @@ def main():
     ap.add_argument("--rounds", default="0", help="e.g. 0-4 or 0,2")
     ap.add_argument("--tasks", default="")
     ap.add_argument("--model", default="claude-sonnet-5-5")
-    ap.add_argument("--taskset", default="heldout", choices=["heldout", "fresh"])
+    ap.add_argument("--taskset", default="heldout", choices=["heldout", "fresh", "dev"])
     ap.add_argument("--fresh-dir", default=None, help="the sealed fresh folder (default: $BENCH_FRESH_DIR)")
     ap.add_argument("--fresh-remove-copy", action="store_true",
                     help="the fresh folder is a disposable copy: delete it once loaded and served (tabbench.sh)")
     ap.add_argument("--fresh-pass-id", default=None, help="id of this fresh pass (default: time and pid)")
     ap.add_argument("--smoke", action="store_true", help="no model: reset every task and check empty answers fail")
-    ap.add_argument("--base", default=None, help="site URL (default: 127.0.0.1:8792 heldout, :8793 fresh)")
+    ap.add_argument("--base", default=None, help="site URL (default: 127.0.0.1:8792 heldout, :8793 fresh, :8794 dev)")
     ap.add_argument("--timeout", type=int, default=TIMEOUT_S)
     ap.add_argument("--host", default=None, help="host label for rows (default: vm or laptop)")
     ap.add_argument("--display", default="xvfb", choices=["xvfb", "headless", "host"])
@@ -494,7 +511,7 @@ def main():
             raise SystemExit(f"the fresh site runs on {fresh.BASE} only")
         if a.tasks and not set(a.tasks.split(",")) <= set(ts.order):
             raise SystemExit("--tasks names tasks outside the fresh set")
-    a.base = a.base or (fresh.BASE if ts.sealed else HELDOUT_BASE)
+    a.base = a.base or (fresh.BASE if ts.sealed else DEV_BASE if ts.name == "dev" else HELDOUT_BASE)
     if a.smoke:
         return smoke(a, ts, vault)
     why = core.isolation_problem(a.display)
