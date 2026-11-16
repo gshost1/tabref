@@ -22,6 +22,8 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
 ## Acting
 `click T`, `fill T VALUE`, `select T OPTION`, `check T`, `uncheck T`, `press KEY [T]`, `hover T`, `scroll down|T`.
 `type T TEXT` adds TEXT after what the field holds (`fill` replaces it); `double-click T` clicks twice.
+JavaScript dialogs (alert, confirm, prompt, leave-page) are accepted and reported; `--dialog dismiss`
+or `--dialog accept=TEXT` answers the first one a command meets.
 Downloads: an action or `open` that downloads prints the saved file's path; `tabref wait --download` waits for
 one still running (`open --download-dir DIR URL` picks the folder).
 In your own Chrome, tabref restores Chrome's default download behaviour after each command, and a download

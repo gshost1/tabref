@@ -25,6 +25,7 @@ pub(crate) mod js;
 pub(crate) mod kept_download;
 pub(crate) mod new_tab;
 pub(crate) mod open;
+pub(crate) mod open_dialogs;
 pub(crate) mod open_request;
 pub(crate) mod page_url;
 pub(crate) mod page_view;
@@ -62,8 +63,37 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         return Ok(skill::run());
     }
     let mut session = Session::open(&session_options(cli))?;
-    let outcome = dispatch(&mut session, &cli.command);
+    let outcome = dispatch_cli(&mut session, cli);
     session.with_warning(outcome)
+}
+
+/// Runs the parsed command line against `session`: its `--dialog` answer
+/// is set for the first dialog the command meets, and cleared after it, so
+/// a kept connection never carries it into the next command. A result says
+/// when no dialog used it.
+pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, AppError> {
+    session.connection().answer_next_dialog(cli.dialog.clone());
+    let outcome = dispatch(session, &cli.command);
+    let unused = session.connection().take_dialog_choice();
+    match (outcome, unused) {
+        (Ok(mut outcome), Some(_)) => {
+            let given = cli_dialog_text(cli);
+            outcome.push_line(&format!(
+                "note: --dialog {given} was not used: no dialog opened during this command"
+            ));
+            outcome.data["dialog_unused"] = serde_json::json!(true);
+            Ok(outcome)
+        }
+        (outcome, _) => outcome,
+    }
+}
+
+fn cli_dialog_text(cli: &Cli) -> String {
+    match &cli.dialog {
+        Some(tabref_cdp::DialogChoice::Dismiss) => "dismiss".to_owned(),
+        Some(tabref_cdp::DialogChoice::Accept { text: Some(text) }) => format!("accept={text}"),
+        _ => "accept".to_owned(),
+    }
 }
 
 /// What the parsed command asks of its session.

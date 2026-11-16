@@ -203,7 +203,9 @@ fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut V
     }
 }
 
-fn dialog_line(dialog: &Value) -> String {
+/// One dialog as a line: its type, its message when it has one, and how
+/// it was answered.
+pub(crate) fn dialog_line(dialog: &Value) -> String {
     let kind = dialog
         .get("type")
         .and_then(Value::as_str)
@@ -212,7 +214,23 @@ fn dialog_line(dialog: &Value) -> String {
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    format!("dialog {kind} {} accepted", quote_text(message))
+    if message.is_empty() {
+        return format!("dialog {kind} {}", answered(dialog));
+    }
+    format!("dialog {kind} {} {}", quote_text(message), answered(dialog))
+}
+
+/// How the connection answered a dialog, from its `answer`: "dismissed",
+/// "answered "TEXT"" for a prompt, or "accepted".
+pub(crate) fn answered(dialog: &Value) -> String {
+    let answer = &dialog["answer"];
+    if answer["accept"] == Value::Bool(false) {
+        return "dismissed".to_owned();
+    }
+    match answer["text"].as_str() {
+        Some(text) => format!("answered {}", quote_text(text)),
+        None => "accepted".to_owned(),
+    }
 }
 
 fn past(verb: &str) -> String {
@@ -247,3 +265,7 @@ pub(crate) fn styled(line: &str) -> String {
         _ => line.to_owned(),
     }
 }
+
+#[cfg(test)]
+#[path = "action_report_tests.rs"]
+mod tests;

@@ -11,6 +11,7 @@ use super::download_folder::{choose_cap, choose_folder, clear_folder};
 use super::download_lines::{download_json, download_line};
 use super::downloads;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
+use super::open_dialogs::{kept_page, navigation_dialogs, with_dialogs};
 use super::open_request::OpenRequest;
 use super::page_url::resolve_url;
 use crate::output::outcome::Outcome;
@@ -91,6 +92,10 @@ fn load(
         deadline.capped(Duration::from_millis(commit)),
         deadline.capped(Duration::from_millis(load)),
     );
+    let dialogs = navigation_dialogs(session);
+    if let Some(kept) = kept_page(&dialogs, url) {
+        return Ok(kept);
+    }
     let grace = downloads::grace_after(&navigated);
     let started = downloads::after_action(session, page, None, deadline, grace);
     if !started.is_empty() {
@@ -113,6 +118,7 @@ fn load(
         "load_finished",
         serde_json::json!(!unfinished),
     );
+    with_dialogs(&mut report, &dialogs);
     Ok(report)
 }
 

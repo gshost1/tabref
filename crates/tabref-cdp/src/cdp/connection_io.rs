@@ -9,6 +9,7 @@ use tabref_core::{AppError, Deadline, ErrorCode};
 
 use super::cdp_event::CdpEvent;
 use super::connection::CdpConnection;
+use super::dialog_choice::DialogChoice;
 use super::frame_envelope::FrameEnvelope;
 use super::incoming::Incoming;
 use super::protocol_error::{protocol_error, target_gone};
@@ -60,8 +61,8 @@ impl CdpConnection {
                 }
                 Ok(None)
             }
-            Some(Incoming::Event(event)) => {
-                self.answer_dialog(&event, deadline)?;
+            Some(Incoming::Event(mut event)) => {
+                self.answer_dialog(&mut event, deadline)?;
                 if event.method == DETACHED {
                     if let Some(session) = event.params.get("sessionId").and_then(Value::as_str) {
                         self.ledger.mark_detached(session);
@@ -95,30 +96,46 @@ impl CdpConnection {
         true
     }
 
+    /// Answers a dialog that opened: as the command chose for the next one,
+    /// else accepted (a prompt with its own default text). The event keeps
+    /// the answer in `params.answer` for the report.
     pub(super) fn answer_dialog(
         &mut self,
-        event: &CdpEvent,
+        event: &mut CdpEvent,
         deadline: Deadline,
     ) -> Result<(), AppError> {
-        if !self.answer_dialogs || event.method != DIALOG_OPENING {
+        if !self.dialogs.auto || event.method != DIALOG_OPENING {
             return Ok(());
         }
-        let Some(session_id) = event.session_id.as_deref() else {
+        let Some(session_id) = event.session_id.clone() else {
             return Ok(());
         };
         let id = self.next_id;
         self.next_id += 1;
-        let prompt = event
+        let default_prompt = event
             .params
             .get("defaultPrompt")
             .and_then(Value::as_str)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .to_owned();
+        let choice = self
+            .dialogs
+            .next
+            .take()
+            .unwrap_or(DialogChoice::Accept { text: None });
+        let (accept, text) = choice.answer(&default_prompt);
         let request = json!({
             "id": id,
             "method": "Page.handleJavaScriptDialog",
-            "params": { "accept": true, "promptText": prompt },
+            "params": { "accept": accept, "promptText": text },
             "sessionId": session_id,
         });
+        let prompt = event.params.get("type").and_then(Value::as_str) == Some("prompt");
+        let mut answer = json!({ "accept": accept });
+        if accept && prompt {
+            answer["text"] = Value::String(text);
+        }
+        event.params["answer"] = answer;
         self.send_text(&request.to_string(), deadline)
     }
 

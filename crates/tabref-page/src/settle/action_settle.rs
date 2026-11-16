@@ -74,6 +74,8 @@ pub fn settle_action(
             json!({
                 "type": event.params.get("type").cloned().unwrap_or(Value::Null),
                 "message": event.params.get("message").cloned().unwrap_or(Value::Null),
+                "url": event.params.get("url").cloned().unwrap_or(Value::Null),
+                "answer": event.params.get("answer").cloned().unwrap_or(Value::Null),
             })
         })
         .collect();

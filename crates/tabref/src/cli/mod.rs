@@ -1,6 +1,7 @@
 pub(crate) mod command;
 
 use clap::Parser;
+use tabref_cdp::DialogChoice;
 
 use command::Command;
 
@@ -25,6 +26,11 @@ pub(crate) struct Cli {
     /// 120000 for `do`)
     #[arg(long, global = true, value_name = "MS")]
     pub(crate) timeout: Option<u64>,
+    /// How to answer the first JavaScript dialog (alert, confirm, prompt,
+    /// beforeunload) this command meets: accept, accept=TEXT (a prompt's
+    /// answer) or dismiss. Every other dialog is accepted, as without it
+    #[arg(long, global = true, value_name = "ANSWER", value_parser = dialog_choice)]
+    pub(crate) dialog: Option<DialogChoice>,
     #[command(subcommand)]
     pub(crate) command: Command,
 }
@@ -40,4 +46,10 @@ impl Cli {
             _ => TIMEOUT_MS,
         })
     }
+}
+
+fn dialog_choice(text: &str) -> Result<DialogChoice, String> {
+    DialogChoice::parse(text).ok_or_else(|| {
+        format!("'{text}' is not a dialog answer: use accept, accept=TEXT or dismiss")
+    })
 }
