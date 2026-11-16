@@ -54,7 +54,12 @@ document.body.appendChild(input);
 fn token_of(connection: &mut CdpConnection, page: &PageSession, css: &str) -> ElementToken {
     let session = Some(page.session_id.as_str());
     let document = connection
-        .call("DOM.getDocument", json!({ "depth": 0 }), session, deadline())
+        .call(
+            "DOM.getDocument",
+            json!({ "depth": 0 }),
+            session,
+            deadline(),
+        )
         .unwrap();
     let root = document.pointer("/root/nodeId").unwrap().clone();
     let found = connection
@@ -81,7 +86,11 @@ fn token_of(connection: &mut CdpConnection, page: &PageSession, css: &str) -> El
         target_id: page.target_id.clone(),
         frame_id: frame["id"].as_str().unwrap().to_owned(),
         loader_id: frame["loaderId"].as_str().unwrap().to_owned(),
-        backend_node_id: described.pointer("/node/backendNodeId").unwrap().as_i64().unwrap(),
+        backend_node_id: described
+            .pointer("/node/backendNodeId")
+            .unwrap()
+            .as_i64()
+            .unwrap(),
     }
 }
 
@@ -167,9 +176,21 @@ fn a_drop_zone_link_label_and_form_each_reach_their_own_file_input() {
 
     let loose = token_of(&mut connection, &page, "#loose");
     let ambiguous = upload_files(&mut connection, &page, &loose, &both, deadline()).unwrap_err();
-    assert_eq!(ambiguous.kind(), Some("ambiguous_file_input"), "{ambiguous:?}");
-    assert!(ambiguous.message.contains("dz-hidden-input"), "{}", ambiguous.message);
-    assert!(ambiguous.message.contains("#avatar"), "{}", ambiguous.message);
+    assert_eq!(
+        ambiguous.kind(),
+        Some("ambiguous_file_input"),
+        "{ambiguous:?}"
+    );
+    assert!(
+        ambiguous.message.contains("dz-hidden-input"),
+        "{}",
+        ambiguous.message
+    );
+    assert!(
+        ambiguous.message.contains("#avatar"),
+        "{}",
+        ambiguous.message
+    );
 
     std::fs::remove_file(&first).unwrap();
     std::fs::remove_file(&second).unwrap();
@@ -187,9 +208,14 @@ fn the_only_file_input_is_used_and_a_page_without_one_says_so() {
 
     let page = open_tab(&mut connection, &format!("http://127.0.0.1:{port}/only"));
     let link = token_of(&mut connection, &page, "#pick");
-    let uploaded =
-        upload_files(&mut connection, &page, &link, std::slice::from_ref(&file), deadline())
-            .unwrap();
+    let uploaded = upload_files(
+        &mut connection,
+        &page,
+        &link,
+        std::slice::from_ref(&file),
+        deadline(),
+    )
+    .unwrap();
     assert!(uploaded.verified, "{uploaded:?}");
     assert_eq!(
         files_of(&mut connection, &page, ".dz-hidden-input"),
@@ -198,18 +224,20 @@ fn the_only_file_input_is_used_and_a_page_without_one_says_so() {
 
     let empty = open_tab(&mut connection, &format!("http://127.0.0.1:{port}/none"));
     let link = token_of(&mut connection, &empty, "#pick");
-    let error =
-        upload_files(&mut connection, &empty, &link, std::slice::from_ref(&file), deadline())
-            .unwrap_err();
+    let error = upload_files(
+        &mut connection,
+        &empty,
+        &link,
+        std::slice::from_ref(&file),
+        deadline(),
+    )
+    .unwrap_err();
     assert_eq!(error.kind(), Some("no_file_input"), "{error:?}");
     assert!(
         error.message.contains("no <input type=file> on the page"),
         "{}",
         error.message
     );
-    assert!(
-        !format!("{error:?}").contains("snap -a"),
-        "{error:?}"
-    );
+    assert!(!format!("{error:?}").contains("snap -a"), "{error:?}");
     std::fs::remove_file(&file).unwrap();
 }

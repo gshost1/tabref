@@ -2,10 +2,10 @@ use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
 use super::element_call::ElementCall;
-use super::element_errors::{script_failed, stale};
+use super::element_errors::script_failed;
 use super::file_input_choice::FileInputCandidate;
 use super::remote_element::call_function;
-use crate::{CdpConnection, ElementToken, PageSession};
+use crate::{CdpConnection, PageSession};
 
 /// Lists, or with `mode` "pick" returns, the file inputs of the target's
 /// document, open shadow roots included, each with the number of steps up
@@ -108,15 +108,15 @@ pub(crate) fn list_file_inputs(
     Ok(FileInputs { candidates, top })
 }
 
-/// The remote object id of the input the search listed at `index`.
+/// The remote object id of the input the search listed at `index`, or
+/// `None` when it left the page since it was listed.
 pub(crate) fn pick_file_input(
     connection: &mut CdpConnection,
     session: &PageSession,
     object: &str,
     index: usize,
-    token: &ElementToken,
     deadline: Deadline,
-) -> Result<String, AppError> {
+) -> Result<Option<String>, AppError> {
     let reply = connection.call(
         "Runtime.callFunctionOn",
         json!({
@@ -132,9 +132,8 @@ pub(crate) fn pick_file_input(
     if let Some(exception) = reply.get("exceptionDetails") {
         return Err(script_failed(exception));
     }
-    reply
+    Ok(reply
         .pointer("/result/objectId")
         .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| stale(token, "the file input left the page during the upload"))
+        .map(str::to_owned))
 }

@@ -27,7 +27,10 @@ fn the_target_itself_wins_over_anything_nearer() {
     let mut labelled = input(0, "input#labelled", None);
     labelled.labelled = true;
     let candidates = [labelled, own, input(2, "input#near", Some(1))];
-    assert_eq!(chosen(choose(&candidates, Some(4))), (1, FileInputVia::Itself));
+    assert_eq!(
+        chosen(choose(&candidates, Some(4))),
+        (1, FileInputVia::Itself)
+    );
 }
 
 #[test]
@@ -35,7 +38,10 @@ fn a_labelled_input_wins_over_the_nearest_one() {
     let mut labelled = input(1, "input#cv", Some(5));
     labelled.labelled = true;
     let candidates = [input(0, "input#near", Some(1)), labelled];
-    assert_eq!(chosen(choose(&candidates, Some(5))), (1, FileInputVia::Label));
+    assert_eq!(
+        chosen(choose(&candidates, Some(5))),
+        (1, FileInputVia::Label)
+    );
 }
 
 #[test]
@@ -44,7 +50,10 @@ fn the_nearest_ancestor_with_one_input_decides() {
         input(0, "input.dz-hidden-input", Some(2)),
         input(1, "input#avatar", Some(4)),
     ];
-    assert_eq!(chosen(choose(&candidates, Some(4))), (0, FileInputVia::Nearest));
+    assert_eq!(
+        chosen(choose(&candidates, Some(4))),
+        (0, FileInputVia::Nearest)
+    );
 }
 
 #[test]

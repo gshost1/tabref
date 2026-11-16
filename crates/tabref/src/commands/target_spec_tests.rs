@@ -50,7 +50,14 @@ fn css_selectors_are_told_apart_from_names() {
     ] {
         assert!(looks_like_css(css), "{css}");
     }
-    for name in ["Add to cart", "Save", "select more files…", "e4", "# of items", "Q3 report"] {
+    for name in [
+        "Add to cart",
+        "Save",
+        "select more files…",
+        "e4",
+        "# of items",
+        "Q3 report",
+    ] {
         assert!(!looks_like_css(name), "{name}");
     }
 }

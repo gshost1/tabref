@@ -59,7 +59,10 @@ fn summary(uploaded: &UploadOutcome, label: &str) -> String {
 }
 
 fn css_explained(error: AppError, target: &str) -> AppError {
-    let unmatched = matches!(error.code, ErrorCode::ElementNotFound | ErrorCode::InvalidArgs);
+    let unmatched = matches!(
+        error.code,
+        ErrorCode::ElementNotFound | ErrorCode::InvalidArgs
+    );
     if !unmatched || !looks_like_css(target) {
         return error;
     }

@@ -2,9 +2,9 @@ use serde_json::json;
 use tabref_core::ErrorCode;
 
 use super::upload_files;
-use crate::act::file_input_choice::FileInputVia;
 use crate::CdpConnection;
 use crate::act::act_fixture::{deadline, resolved, session, token};
+use crate::act::file_input_choice::FileInputVia;
 use tabref_cdp::ScriptedTransport;
 
 fn fixture_file(name: &str) -> std::path::PathBuf {
@@ -67,17 +67,17 @@ fn files_are_set_on_the_input_and_read_back() {
     );
 }
 
-fn refused(candidates: serde_json::Value, count: usize) -> tabref_core::AppError {
+fn refused(case: &str, candidates: serde_json::Value, count: usize) -> tabref_core::AppError {
     let files: Vec<_> = (0..count)
-        .map(|at| fixture_file(&format!("r{at}.txt")))
+        .map(|at| fixture_file(&format!("{case}-{at}.txt")))
         .collect();
     let transport = resolved(ScriptedTransport::new())
         .expect("Runtime.callFunctionOn", listed(candidates))
         .expect("Runtime.releaseObject", json!({}));
     let sent = transport.sent_log();
     let mut connection = CdpConnection::new(transport.boxed());
-    let error = upload_files(&mut connection, &session(), &token(5), &files, deadline())
-        .unwrap_err();
+    let error =
+        upload_files(&mut connection, &session(), &token(5), &files, deadline()).unwrap_err();
     for file in &files {
         std::fs::remove_file(file).unwrap();
     }
@@ -93,7 +93,7 @@ fn refused(candidates: serde_json::Value, count: usize) -> tabref_core::AppError
 
 #[test]
 fn a_page_without_a_file_input_is_refused_before_anything_is_set() {
-    let error = refused(json!([]), 1);
+    let error = refused("none", json!([]), 1);
     assert_eq!(error.code, ErrorCode::ActionNotSupported);
     assert_eq!(error.kind(), Some("no_file_input"));
     assert!(error.message.contains("no <input type=file> on the page"));
@@ -103,6 +103,7 @@ fn a_page_without_a_file_input_is_refused_before_anything_is_set() {
 #[test]
 fn two_equally_near_inputs_are_refused_and_named() {
     let error = refused(
+        "ambiguous",
         json!([
             { "index": 0, "name": "input.dz-hidden-input", "depth": 3 },
             { "index": 1, "name": "input#avatar", "depth": 3 },
@@ -121,6 +122,7 @@ fn two_equally_near_inputs_are_refused_and_named() {
 #[test]
 fn two_files_for_a_single_file_input_are_refused() {
     let error = refused(
+        "single",
         json!([{ "index": 0, "name": "input#avatar", "depth": 1, "multiple": false }]),
         2,
     );
@@ -131,6 +133,7 @@ fn two_files_for_a_single_file_input_are_refused() {
 #[test]
 fn a_disabled_input_is_refused() {
     let error = refused(
+        "disabled",
         json!([{ "index": 0, "name": "input#off", "self": true, "depth": 0, "disabled": true }]),
         1,
     );
