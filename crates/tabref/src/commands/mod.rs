@@ -37,6 +37,7 @@ pub(crate) mod page_url;
 pub(crate) mod page_view;
 pub(crate) mod press;
 pub(crate) mod read;
+pub(crate) mod redrawn_rows;
 pub(crate) mod screenshot;
 pub(crate) mod screenshot_path;
 pub(crate) mod scroll;

@@ -87,7 +87,11 @@ fn a_reorder_prints_its_first_rows_and_how_to_see_the_rest() {
     let first: Vec<String> = (1..=12)
         .map(|n| format!("Row {n} with some text"))
         .collect();
-    let change = TextChange::Reordered { count: 12, first };
+    let change = TextChange::Reordered {
+        above: None,
+        run: first,
+        table: true,
+    };
     let shown = change.to_string();
     let mut lines = shown.lines();
     assert_eq!(lines.next(), Some("reordered 12 rows, now starting:"));
@@ -97,5 +101,22 @@ fn a_reorder_prints_its_first_rows_and_how_to_see_the_rest() {
     assert_eq!(
         change.brief(),
         "reordered 12 rows, now starting: Row 1 with some text | Row 2 with some text | Row 3 with some text …"
+    );
+}
+
+#[test]
+fn a_reorder_names_the_line_above_it_and_says_lines_outside_a_table() {
+    let change = TextChange::Reordered {
+        above: Some("Shipments".into()),
+        run: vec!["Cap".into(), "Mug".into()],
+        table: false,
+    };
+    assert_eq!(
+        change.to_string(),
+        "reordered 2 lines below \"Shipments\", now starting:\n  Cap\n  Mug"
+    );
+    assert_eq!(
+        change.brief(),
+        "reordered 2 lines below \"Shipments\", now starting: Cap | Mug"
     );
 }

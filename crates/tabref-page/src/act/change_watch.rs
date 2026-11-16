@@ -13,7 +13,8 @@ use tabref_core::{AppError, Deadline};
 
 use super::page_changes::PageChanges;
 use super::page_mark::PageMark;
-use super::text_diff::{diff_lines, text_lines};
+use super::text_diff::{diff_page, text_lines};
+use super::text_reorder::cells_of;
 use super::watch_scripts::{COUNT_WATCH, READ_WATCH, SCAN, START_WATCH};
 use crate::{CdpConnection, PageSession};
 
@@ -42,9 +43,9 @@ pub fn page_changes(
     deadline: Deadline,
 ) -> Result<PageChanges, AppError> {
     let reply = run(connection, session, READ_WATCH, deadline)?;
-    let after = reply.get("text").and_then(Value::as_str).map(text_lines);
-    let changes = match (&mark.lines, &after) {
-        (Some(before), Some(after)) => diff_lines(before, after),
+    let text = reply.get("text").and_then(Value::as_str);
+    let changes = match (&mark.lines, text) {
+        (Some(before), Some(text)) => diff_page(before, &text_lines(text), &cells_of(text)),
         _ => Vec::new(),
     };
     Ok(PageChanges {

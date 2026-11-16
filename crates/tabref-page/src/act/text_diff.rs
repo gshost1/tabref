@@ -3,15 +3,13 @@
 //! action usually changes one spot; the middle is aligned by longest common
 //! subsequence when it is small enough, and otherwise reported whole. A
 //! middle that is mostly the same lines in a new order, too many moves for
-//! a few `-`/`+` lines to show, is one reorder with its new first lines.
-
-use std::collections::HashMap;
+//! a few `-`/`+` lines to show, is one reorder (see `text_reorder`).
 
 use super::text_change::TextChange;
+use super::text_reorder::{Cells, reorder};
 
 const MAX_TABLE_CELLS: usize = 1_000_000;
 const PLAIN_CHANGES: usize = 4;
-const ROWS_KEPT: usize = 5;
 
 /// The page's rendered text as diff lines: each line trimmed, runs of
 /// whitespace collapsed to one space, and blank lines dropped. A control
@@ -47,10 +45,15 @@ fn is_bidirectional(character: char) -> bool {
     )
 }
 
-/// The changes that turn `before` into `after`, in page order. A removed
-/// line followed by an added one that shares its first or last word is one
-/// line rewritten in place.
+#[cfg(test)]
 pub(crate) fn diff_lines(before: &[String], after: &[String]) -> Vec<TextChange> {
+    diff_page(before, after, &Cells::new())
+}
+
+/// The changes that turn `before` into `after`, in page order, with the
+/// table cells of `after`'s lines. A removed line followed by an added one
+/// that shares its first or last word is one line rewritten in place.
+pub(crate) fn diff_page(before: &[String], after: &[String], cells: &Cells) -> Vec<TextChange> {
     let head = before
         .iter()
         .zip(after)
@@ -70,55 +73,13 @@ pub(crate) fn diff_lines(before: &[String], after: &[String]) -> Vec<TextChange>
     for (removed, added) in hunks(old, new) {
         pair_up(removed, added, &mut changes);
     }
-    if changes.len() > PLAIN_CHANGES && moved_mostly(old, new) {
-        return vec![TextChange::Reordered {
-            count: new.len(),
-            first: new.iter().take(ROWS_KEPT).cloned().collect(),
-        }];
+    if changes.len() > PLAIN_CHANGES
+        && let Some(reordered) = reorder(before, after, head, tail, cells)
+    {
+        return reordered;
     }
     changes
 }
-
-/// Whether at least four in five of the lines on the longer side are on
-/// both sides and the shared ones changed order: a list drawn again sorted,
-/// not one with lines only added or taken out.
-fn moved_mostly(old: &[String], new: &[String]) -> bool {
-    if old.len() < 3 || new.len() < 3 {
-        return false;
-    }
-    let shared_new = shared_in_order(new, old);
-    if shared_new.len() * 5 < old.len().max(new.len()) * 4 {
-        return false;
-    }
-    let shared_old = shared_in_order(
-        old,
-        &shared_new
-            .iter()
-            .map(|line| (*line).to_owned())
-            .collect::<Vec<_>>(),
-    );
-    shared_old != shared_new
-}
-
-/// The lines of `side` that `other` holds too, counting repeats, in
-/// `side`'s order.
-fn shared_in_order<'a>(side: &'a [String], other: &[String]) -> Vec<&'a str> {
-    let mut pool: HashMap<&str, usize> = HashMap::new();
-    for line in other {
-        *pool.entry(line.as_str()).or_default() += 1;
-    }
-    side.iter()
-        .filter(|line| match pool.get_mut(line.as_str()) {
-            Some(left) if *left > 0 => {
-                *left -= 1;
-                true
-            }
-            _ => false,
-        })
-        .map(String::as_str)
-        .collect()
-}
-
 fn hunks<'a>(old: &'a [String], new: &'a [String]) -> Vec<(&'a [String], &'a [String])> {
     if old.is_empty() || new.is_empty() || old.len().saturating_mul(new.len()) > MAX_TABLE_CELLS {
         return vec![(old, new)];
@@ -158,7 +119,7 @@ fn hunks<'a>(old: &'a [String], new: &'a [String]) -> Vec<(&'a [String], &'a [St
     found
 }
 
-fn pair_up(removed: &[String], added: &[String], changes: &mut Vec<TextChange>) {
+pub(super) fn pair_up(removed: &[String], added: &[String], changes: &mut Vec<TextChange>) {
     if let ([before], [after]) = (removed, added) {
         changes.push(TextChange::Changed {
             before: before.clone(),

@@ -8,6 +8,7 @@ use super::change_lines::{distinct_changes, step_change};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
+use super::redrawn_rows::redrawn;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
@@ -134,33 +135,19 @@ fn effect_block(
         lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
     } else if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
-        let mut appeared = Vec::new();
-        new_controls(&captured.tree, known, &mut appeared);
-        let shown = if reordered(&page.changes) {
-            0
-        } else {
-            appeared.len().min(NEW_SHOWN)
-        };
-        lines.extend(
-            appeared
-                .iter()
-                .take(shown)
-                .map(|line| format!("new {line}")),
-        );
-        if appeared.len() > shown && shown > 0 {
-            lines.push(format!("+{} more new: tabref snap", appeared.len() - shown));
+        let mut found = Vec::new();
+        new_controls(&captured.tree, known, &mut found);
+        let (in_rows, outside) = redrawn(&page.changes, &found);
+        let shown = outside.len().min(NEW_SHOWN);
+        lines.extend(outside.iter().take(shown).map(|line| format!("new {line}")));
+        if outside.len() > shown {
+            lines.push(format!("+{} more new: tabref snap", outside.len() - shown));
         }
+        lines.extend(in_rows);
+        let appeared: Vec<&String> = found.iter().map(|(line, _)| line).collect();
         merge(&mut data, json!({ "new": appeared }));
     }
     Ok((lines, data))
-}
-
-/// Whether the page drew a list again in a new order: its cells and links
-/// are new elements then, and listing them would only repeat the rows.
-fn reordered(changes: &[tabref_page::TextChange]) -> bool {
-    changes
-        .iter()
-        .any(|change| matches!(change, tabref_page::TextChange::Reordered { .. }))
 }
 
 /// What a click, double-click, key press, hover or focus that showed no
@@ -239,7 +226,11 @@ fn cut_to_bytes(text: &str, room: usize) -> String {
     }
 }
 
-fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut Vec<String>) {
+fn new_controls(
+    node: &AccessibilityNode,
+    known: &HashSet<String>,
+    found: &mut Vec<(String, Option<String>)>,
+) {
     if node.ref_id.is_some()
         && node
             .identity
@@ -247,7 +238,10 @@ fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut V
             .as_ref()
             .is_some_and(|token| !known.contains(token))
     {
-        found.push(styled(&node_line(node, NEW_LINE_CHARS)));
+        found.push((
+            styled(&node_line(node, NEW_LINE_CHARS)),
+            node.identity.name.clone(),
+        ));
     }
     for child in &node.children {
         new_controls(child, known, found);
