@@ -99,7 +99,7 @@ fn opened_line(
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
     downloads::enable_for_action(session, deadline)?;
     let navigated = navigate(session.connection(), page, url, navigation);
-    let dialogs = navigation_dialogs(session);
+    let dialogs = navigation_dialogs(session, Some(&page.target_id));
     let said: String = dialog_lines(&dialogs)
         .iter()
         .map(|line| format!("; {line}"))

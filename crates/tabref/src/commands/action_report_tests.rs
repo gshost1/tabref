@@ -53,3 +53,19 @@ fn repeated_dialogs_collapse_and_the_list_is_capped() {
     assert_eq!(lines[10], "3 more dialogs");
     assert!(dialog_lines(&[]).is_empty());
 }
+
+#[test]
+fn only_repeats_next_to_each_other_collapse_and_one_more_is_singular() {
+    let alert = |message: &str| json!({ "type": "alert", "message": message, "answer": { "accept": true } });
+    let lines = dialog_lines(&[alert("A"), alert("B"), alert("A"), alert("A")]);
+    assert_eq!(
+        lines,
+        [
+            "dialog alert \"A\" accepted",
+            "dialog alert \"B\" accepted",
+            "dialog alert \"A\" accepted \u{d7}2",
+        ]
+    );
+    let many: Vec<_> = (0..11).map(|index| alert(&format!("N{index}"))).collect();
+    assert_eq!(dialog_lines(&many).last().unwrap(), "1 more dialog");
+}

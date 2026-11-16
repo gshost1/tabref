@@ -67,7 +67,7 @@ pub fn settle_action(
     if !tracker.committed() && (tracker.same_document() || tracker.saw_network()) {
         dom_quiet(connection, session, &mut tracker, cap)?;
     }
-    let dialogs = drain_dialogs(connection);
+    let dialogs = drain_dialogs(connection, Some(&session.target_id));
     connection.discard_events(|event| is_page_event(event, &id));
     let _ = connection.call("Network.disable", json!({}), Some(&id), cap);
     Ok(SettleOutcome {

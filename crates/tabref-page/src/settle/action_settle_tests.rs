@@ -116,7 +116,7 @@ fn watching_keeps_a_dialog_that_opened_before_so_it_is_still_reported() {
 
     watch_navigation(&mut connection, &session(), deadline()).unwrap();
 
-    let dialogs = crate::drain_dialogs(&mut connection);
+    let dialogs = crate::drain_dialogs(&mut connection, None);
     assert_eq!(dialogs.len(), 1, "{dialogs:?}");
     assert_eq!(dialogs[0]["message"], "Earlier?");
     assert!(

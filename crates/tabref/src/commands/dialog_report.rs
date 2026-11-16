@@ -7,15 +7,16 @@
 
 use serde_json::{Value, json};
 use tabref_core::AppError;
-use tabref_page::{PageInfo, drain_dialogs};
+use tabref_page::{PageInfo, drain_dialogs, mark_other_tab};
 
 use super::action_report::dialog_lines;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 
-/// The dialogs the connection answered that no report took yet.
-pub(crate) fn navigation_dialogs(session: &mut Session) -> Vec<Value> {
-    drain_dialogs(session.connection())
+/// The dialogs the connection answered that no report took yet, each
+/// marked when it opened in another tab than `tab`.
+pub(crate) fn navigation_dialogs(session: &mut Session, tab: Option<&str>) -> Vec<Value> {
+    drain_dialogs(session.connection(), tab)
 }
 
 /// The result when a dismissed `beforeunload` kept the page `info` shows,
@@ -79,22 +80,22 @@ pub(crate) fn error_with_dialogs(mut error: AppError, dialogs: &[Value]) -> AppE
 
 /// Marks the dialogs that opened in another tab than the one this command
 /// works in (`other_tab`), when the connection knew their tab.
+/// The command's own tab is the one it chose; only when it chose none is the
+/// tab listing asked, and a listing that fails marks nothing.
 pub(crate) fn mark_other_tabs(session: &mut Session, mut dialogs: Vec<Value>) -> Vec<Value> {
     if !dialogs.iter().any(|dialog| dialog["tab"].is_string()) {
         return dialogs;
     }
-    let current = session
-        .current_tab_unclaimed()
-        .ok()
-        .flatten()
-        .map(|tab| tab.target_id);
+    let current = match session.known_tab() {
+        Some(tab) => Some(tab.to_owned()),
+        None => session
+            .current_tab_unclaimed()
+            .ok()
+            .flatten()
+            .map(|tab| tab.target_id),
+    };
     for dialog in &mut dialogs {
-        let elsewhere = dialog["tab"]
-            .as_str()
-            .is_some_and(|tab| Some(tab) != current.as_deref());
-        if elsewhere {
-            dialog["other_tab"] = json!(true);
-        }
+        mark_other_tab(dialog, current.as_deref());
     }
     dialogs
 }

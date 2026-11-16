@@ -79,7 +79,7 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
 pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, AppError> {
     let outcome = dispatch(session, &cli.command);
     let unused = session.connection().take_dialog_choice();
-    let left = dialog_report::navigation_dialogs(session);
+    let left = dialog_report::navigation_dialogs(session, None);
     let left = dialog_report::mark_other_tabs(session, left);
     let mut outcome = match outcome {
         Ok(outcome) => outcome,

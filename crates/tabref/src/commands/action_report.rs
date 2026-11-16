@@ -230,15 +230,16 @@ pub(crate) fn dialog_line(dialog: &Value) -> String {
     line
 }
 
-/// The dialogs as lines: the same line repeated is one line with `×N`, and
-/// past `MAX_DIALOG_LINES` the rest is counted.
+/// The dialogs as lines, in the order they opened: the same line repeated
+/// back to back is one line with `×N`, and past `MAX_DIALOG_LINES` the
+/// rest is counted.
 pub(crate) fn dialog_lines(dialogs: &[Value]) -> Vec<String> {
     let mut counted: Vec<(String, usize)> = Vec::new();
     for dialog in dialogs {
         let line = dialog_line(dialog);
-        match counted.iter_mut().find(|(seen, _)| *seen == line) {
-            Some((_, count)) => *count += 1,
-            None => counted.push((line, 1)),
+        match counted.last_mut() {
+            Some((last, count)) if *last == line => *count += 1,
+            _ => counted.push((line, 1)),
         }
     }
     let more = counted.len().saturating_sub(MAX_DIALOG_LINES);
@@ -253,8 +254,10 @@ pub(crate) fn dialog_lines(dialogs: &[Value]) -> Vec<String> {
             }
         })
         .collect();
-    if more > 0 {
-        lines.push(format!("{more} more dialogs"));
+    match more {
+        0 => {}
+        1 => lines.push("1 more dialog".to_owned()),
+        more => lines.push(format!("{more} more dialogs")),
     }
     lines
 }

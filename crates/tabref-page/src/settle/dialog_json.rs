@@ -22,11 +22,33 @@ pub fn dialog_json(event: &CdpEvent) -> Value {
     })
 }
 
-/// The dialogs the connection holds events for, taken out of its buffer.
-pub fn drain_dialogs(connection: &mut CdpConnection) -> Vec<Value> {
+/// The dialogs the connection holds events for, taken out of its buffer,
+/// each marked when it opened in another tab than `tab` (the command's,
+/// when known).
+pub fn drain_dialogs(connection: &mut CdpConnection, tab: Option<&str>) -> Vec<Value> {
     connection
         .drain_events(|event| event.method == DIALOG_OPENING)
         .iter()
-        .map(dialog_json)
+        .map(|event| {
+            let mut dialog = dialog_json(event);
+            mark_other_tab(&mut dialog, tab);
+            dialog
+        })
         .collect()
 }
+
+/// Marks a dialog `other_tab` when it opened in another tab than `tab`,
+/// the command's own; nothing is marked when either tab is unknown.
+pub fn mark_other_tab(dialog: &mut Value, tab: Option<&str>) {
+    let elsewhere = match (dialog["tab"].as_str(), tab) {
+        (Some(opened_in), Some(command)) => opened_in != command,
+        _ => false,
+    };
+    if elsewhere {
+        dialog["other_tab"] = Value::Bool(true);
+    }
+}
+
+#[cfg(test)]
+#[path = "dialog_json_tests.rs"]
+mod tests;

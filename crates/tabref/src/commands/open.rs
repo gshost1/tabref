@@ -92,7 +92,7 @@ fn load(
         deadline.capped(Duration::from_millis(commit)),
         deadline.capped(Duration::from_millis(load)),
     );
-    let dialogs = navigation_dialogs(session);
+    let dialogs = navigation_dialogs(session, Some(&page.target_id));
     let after = || -> Result<Outcome, AppError> {
         if dialogs
             .iter()
