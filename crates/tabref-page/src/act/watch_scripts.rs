@@ -1,10 +1,14 @@
 //! The page scripts behind the change watch. `SCAN` finds the open shadow
 //! roots and same-origin frame documents of the page, nested either way,
 //! and counts the shown frames from other sites, whose documents a page
-//! script cannot read. `TEXT` is the rendered text of the document, then of
-//! each shown shadow root and frame, one block after another, so a change
-//! inside them reads as a change of the page. Closed shadow roots stay out
-//! of reach of any page script.
+//! script cannot read, when they are at least partly on screen and larger
+//! than a tracking pixel. `text` is the rendered text of the document, then
+//! of each shown shadow root and frame, one block after another, so a
+//! change inside them reads as a change of the page. The document's text
+//! has its own limit; the shadow and frame blocks share a second one, and a
+//! block that does not fit is left out, so a large frame never costs the
+//! document's diff. Closed shadow roots stay out of reach of any page
+//! script.
 
 pub(crate) const SCAN: &str = r"const scan = () => {
   const roots = [], docs = [];
@@ -21,19 +25,25 @@ pub(crate) const SCAN: &str = r"const scan = () => {
       try { inner = el.contentDocument; } catch (error) { inner = null; }
       if (inner && inner.documentElement) { docs.push(inner); visit(inner); continue; }
       const box = el.getBoundingClientRect();
-      if (box.width > 1 && box.height > 1) unread += 1;
+      const view = el.ownerDocument.defaultView;
+      const onScreen = box.bottom > 0 && box.right > 0 && box.top < view.innerHeight && box.left < view.innerWidth;
+      if (onScreen && box.width >= 10 && box.height >= 10) unread += 1;
     }
   };
   visit(document);
   const text = () => {
-    const parts = [document.body ? document.body.innerText : ''];
+    const main = document.body ? document.body.innerText : '';
+    if (main.length > LIMIT) return null;
+    const parts = [main];
+    let room = LIMIT;
+    const add = part => { if (part && part.length <= room) { parts.push(part); room -= part.length; } };
     for (const root of roots) {
       for (const node of root.childNodes) {
-        if (node.nodeType === 3) parts.push(node.textContent);
-        else if (node.nodeType === 1 && node.localName !== 'slot' && shown(node)) parts.push(node.innerText || '');
+        if (node.nodeType === 3) add(node.textContent);
+        else if (node.nodeType === 1 && node.localName !== 'slot' && shown(node)) add(node.innerText || '');
       }
     }
-    for (const doc of docs) parts.push(doc.body ? doc.body.innerText : '');
+    for (const doc of docs) add(doc.body ? doc.body.innerText : '');
     return parts.join('\n');
   };
   return { roots, docs, unread, text };
@@ -51,7 +61,7 @@ pub(crate) const START_WATCH: &str = r"(() => {
   for (const target of [document, ...found.roots, ...found.docs]) state.observer.observe(target, options);
   window[key] = state;
   const text = found.text();
-  return { url: location.href, title: document.title, text: text.length > LIMIT ? null : text };
+  return { url: location.href, title: document.title, text };
 })()";
 
 pub(crate) const READ_WATCH: &str = r"(() => {
@@ -66,7 +76,7 @@ pub(crate) const READ_WATCH: &str = r"(() => {
   }
   const found = scan();
   const text = found.text();
-  return { url: location.href, title: document.title, mutations, unread: found.unread, text: text.length > LIMIT ? null : text };
+  return { url: location.href, title: document.title, mutations, unread: found.unread, text };
 })()";
 
 pub(crate) const COUNT_WATCH: &str = r"(() => {
