@@ -7,11 +7,11 @@ use tabref_page::{DownloadRecord, PageInfo};
 
 use super::action_report::set;
 use super::app_guard::refuse_in_app;
+use super::dialog_report::{error_with_dialogs, kept_page, navigation_dialogs, with_dialogs};
 use super::download_folder::{choose_cap, choose_folder, clear_folder};
 use super::download_lines::{download_json, download_line};
 use super::downloads;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
-use super::open_dialogs::{kept_page, navigation_dialogs, with_dialogs};
 use super::open_request::OpenRequest;
 use super::page_url::resolve_url;
 use crate::output::outcome::Outcome;
@@ -93,18 +93,26 @@ fn load(
         deadline.capped(Duration::from_millis(load)),
     );
     let dialogs = navigation_dialogs(session);
-    if let Some(kept) = kept_page(&dialogs, url) {
-        return Ok(kept);
+    if dialogs
+        .iter()
+        .any(|dialog| dialog["type"] == "beforeunload")
+    {
+        let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
+        if let Some(kept) = kept_page(&dialogs, url, &info) {
+            return Ok(kept);
+        }
     }
     let grace = downloads::grace_after(&navigated);
     let started = downloads::after_action(session, page, None, deadline, grace);
     if !started.is_empty() {
-        return Ok(downloaded(&started));
+        let mut report = downloaded(&started);
+        with_dialogs(&mut report, &dialogs);
+        return Ok(report);
     }
     let unfinished = match navigated {
         Ok(()) => false,
         Err(error) if error.kind() == Some("cdp_load_timeout") => true,
-        Err(error) => return Err(error),
+        Err(error) => return Err(error_with_dialogs(error, &dialogs)),
     };
     let captured = session.capture()?;
     let options = ViewRequest::default().snap_options(&captured.info.url)?;

@@ -26,9 +26,10 @@ pub(crate) struct Cli {
     /// 120000 for `do`)
     #[arg(long, global = true, value_name = "MS")]
     pub(crate) timeout: Option<u64>,
-    /// How to answer the first JavaScript dialog (alert, confirm, prompt,
-    /// beforeunload) this command meets: accept, accept=TEXT (a prompt's
-    /// answer) or dismiss. Every other dialog is accepted, as without it
+    /// How to answer the first confirm, prompt or leave-page dialog of the
+    /// whole command, a `do` batch included: accept, dismiss, or
+    /// accept=TEXT (for the first prompt). Alerts, and every other dialog,
+    /// are accepted, as without it
     #[arg(long, global = true, value_name = "ANSWER", value_parser = dialog_choice)]
     pub(crate) dialog: Option<DialogChoice>,
     #[command(subcommand)]

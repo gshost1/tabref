@@ -21,6 +21,17 @@ impl DialogChoice {
         }
     }
 
+    /// Whether this choice answers a dialog of `kind`: never an `alert`,
+    /// which asks nothing (so a confirm after it still gets the choice);
+    /// `accept=TEXT` only a `prompt`; `accept` and `dismiss` a `confirm`,
+    /// `prompt` or `beforeunload`.
+    pub fn applies_to(&self, kind: &str) -> bool {
+        match self {
+            Self::Accept { text: Some(_) } => kind == "prompt",
+            _ => matches!(kind, "confirm" | "prompt" | "beforeunload"),
+        }
+    }
+
     /// Whether the dialog is accepted, and the text a prompt gets, given the
     /// prompt's own default.
     pub(crate) fn answer(&self, default_prompt: &str) -> (bool, String) {

@@ -96,9 +96,11 @@ impl CdpConnection {
         true
     }
 
-    /// Answers a dialog that opened: as the command chose for the next one,
-    /// else accepted (a prompt with its own default text). The event keeps
-    /// the answer in `params.answer` for the report.
+    /// Answers a dialog that opened: as the command chose, when the choice
+    /// applies to this kind of dialog (never an alert; see
+    /// `DialogChoice::applies_to`), else accepted (a prompt with its own
+    /// default text). The event keeps the answer in `params.answer` for the
+    /// report.
     pub(super) fn answer_dialog(
         &mut self,
         event: &mut CdpEvent,
@@ -118,19 +120,27 @@ impl CdpConnection {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let choice = self
-            .dialogs
-            .next
-            .take()
-            .unwrap_or(DialogChoice::Accept { text: None });
-        let (accept, text) = choice.answer(&default_prompt);
+        let kind = event
+            .params
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let chosen = match self.dialogs.next.take() {
+            Some(choice) if choice.applies_to(&kind) => choice,
+            unused => {
+                self.dialogs.next = unused;
+                DialogChoice::Accept { text: None }
+            }
+        };
+        let (accept, text) = chosen.answer(&default_prompt);
         let request = json!({
             "id": id,
             "method": "Page.handleJavaScriptDialog",
             "params": { "accept": accept, "promptText": text },
             "sessionId": session_id,
         });
-        let prompt = event.params.get("type").and_then(Value::as_str) == Some("prompt");
+        let prompt = kind == "prompt";
         let mut answer = json!({ "accept": accept });
         if accept && prompt {
             answer["text"] = Value::String(text);

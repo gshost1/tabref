@@ -108,3 +108,50 @@ fn a_choice_is_read_from_its_flag_value() {
     assert_eq!(DialogChoice::parse("maybe"), None);
     assert_eq!(DialogChoice::parse("dismiss=x"), None);
 }
+
+#[test]
+fn an_alert_never_takes_the_choice_so_the_confirm_after_it_is_dismissed() {
+    let (answers, reported) = clicked_through(
+        vec![
+            opening("alert", "Heads up"),
+            opening("confirm", "Delete all?"),
+        ],
+        Some(DialogChoice::Dismiss),
+    );
+    assert_eq!(answers[0]["accept"], true, "the alert");
+    assert_eq!(answers[1]["accept"], false, "the confirm");
+    assert_eq!(reported[1], json!({ "accept": false }));
+}
+
+#[test]
+fn a_prompt_answer_skips_a_confirm_and_goes_to_the_first_prompt() {
+    let (answers, reported) = clicked_through(
+        vec![opening("confirm", "Sure?"), opening("prompt", "Name?")],
+        Some(DialogChoice::Accept {
+            text: Some("Bob".to_owned()),
+        }),
+    );
+    assert_eq!(answers[0]["accept"], true);
+    assert_eq!(reported[0], json!({ "accept": true }));
+    assert_eq!(answers[1], json!({ "accept": true, "promptText": "Bob" }));
+}
+
+#[test]
+fn the_dialogs_a_choice_goes_to() {
+    let dismiss = DialogChoice::Dismiss;
+    let accept = DialogChoice::Accept { text: None };
+    let text = DialogChoice::Accept {
+        text: Some("x".to_owned()),
+    };
+    for kind in ["confirm", "prompt", "beforeunload"] {
+        assert!(
+            dismiss.applies_to(kind) && accept.applies_to(kind),
+            "{kind}"
+        );
+    }
+    assert!(!dismiss.applies_to("alert") && !accept.applies_to("alert"));
+    assert!(text.applies_to("prompt"));
+    for kind in ["alert", "confirm", "beforeunload"] {
+        assert!(!text.applies_to(kind), "{kind}");
+    }
+}

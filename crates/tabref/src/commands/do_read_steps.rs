@@ -9,8 +9,10 @@ use tabref_core::{AppError, Deadline};
 use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
 
 use super::act_target::resolve_target;
+use super::action_report::dialog_line;
 use super::app_guard::refuse_in_app;
 use super::batch_step::BatchStep;
+use super::dialog_report::{error_with_dialogs, kept_page, navigation_dialogs};
 use super::download_lines::{download_json, download_line};
 use super::downloads;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
@@ -97,29 +99,51 @@ fn opened_line(
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
     downloads::enable_for_action(session, deadline)?;
     let navigated = navigate(session.connection(), page, url, navigation);
+    let dialogs = navigation_dialogs(session);
+    let said: String = dialogs
+        .iter()
+        .map(|dialog| format!("; {}", dialog_line(dialog)))
+        .collect();
+    if dialogs
+        .iter()
+        .any(|dialog| dialog["type"] == "beforeunload")
+    {
+        let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
+        if let Some(kept) = kept_page(&dialogs, url, &info) {
+            let mut data = kept.data;
+            data["action"] = json!("open");
+            return Ok((
+                format!("ok open {url}: {}", kept.text.replace('\n', "; ")),
+                data,
+            ));
+        }
+    }
     let grace = downloads::grace_after(&navigated);
     let started = downloads::after_action(session, page, None, deadline, grace);
     if !started.is_empty() {
         let lines: Vec<String> = started.iter().map(download_line).collect();
         let data: Vec<Value> = started.iter().map(download_json).collect();
-        let text = format!("ok open {url}: {}", lines.join("; "));
+        let text = format!("ok open {url}: {}{said}", lines.join("; "));
         return Ok((
             text,
-            json!({ "action": "open", "opened": "download", "downloads": data }),
+            json!({ "action": "open", "opened": "download", "downloads": data, "dialogs": dialogs }),
         ));
     }
     match navigated {
         Ok(()) => {}
         Err(error) if error.kind() == Some("cdp_load_timeout") => {}
-        Err(error) => return Err(error),
+        Err(error) => return Err(error_with_dialogs(error, &dialogs)),
     }
     let info = PageInfo::read(session.connection(), &page.target_id, deadline)?;
     let text = format!(
-        "ok open {} {}",
+        "ok open {} {}{said}",
         short_url(from, &info.url),
         quote_text(&info.title)
     );
-    let data = json!({ "action": "open", "url": info.url, "title": info.title });
+    let mut data = json!({ "action": "open", "url": info.url, "title": info.title });
+    if !dialogs.is_empty() {
+        data["dialogs"] = json!(dialogs);
+    }
     Ok((text, data))
 }
 

@@ -1,11 +1,12 @@
-//! `--dialog accept|dismiss|accept=TEXT` answers the first JavaScript
-//! dialog a command meets, and every later one is accepted as before: a
-//! confirm dismissed, a prompt answered with text, the second dialog of one
-//! click accepted, a confirm in a same-origin and in a cross-origin iframe,
-//! and a `beforeunload` on navigation both kept (dismissed) and left
-//! (accepted). Each result says which dialog opened and how it was
-//! answered. Through the daemon, so the flag reaches it. Live
-//! (`TABREF_LIVE=1`).
+//! `--dialog accept|dismiss|accept=TEXT` answers the first confirm, prompt
+//! or `beforeunload` a command meets (an alert never takes it), and every
+//! later one is accepted as before: a confirm dismissed, also after an
+//! alert, a prompt answered with text, the second dialog of one click
+//! accepted, a confirm in a same-origin and in a cross-origin iframe, one
+//! that `js` raised, and a `beforeunload` on navigation kept (dismissed, by
+//! `open` and by `do`'s open step) and left (accepted). Each result says
+//! which dialog opened and how it was answered. Through the daemon, so the
+//! flag reaches it. Live (`TABREF_LIVE=1`).
 
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -19,6 +20,10 @@ const MAIN: &str = "<!doctype html><title>Start</title>\
     <button onclick=\"document.title = confirm('Sure?') ? 'yes' : 'no'\">Confirm</button>\
     <button onclick=\"document.title = 'got ' + prompt('Name?', 'def')\">Prompt</button>\
     <button onclick=\"document.title = [confirm('First?'), confirm('Second?')].join()\">Twice</button>\
+    <button onclick=\"alert('Heads up'); document.title = confirm('Delete all?') ? 'deleted' : 'kept'\">\
+    Warn</button>\
+    <button onclick=\"setTimeout(() => { document.title = confirm('Later?') ? 'ly' : 'ln'; }, 300)\">\
+    Later</button>\
     <button onclick=\"onbeforeunload = e => { e.preventDefault(); e.returnValue = ''; }; \
     document.title = 'armed'\">Arm</button>\
     <iframe srcdoc=\"<button onclick=&quot;parent.document.title = confirm('Inner?') ? 'iy' : \
@@ -61,8 +66,16 @@ fn dialog_answers_are_chosen_for_the_next_dialog_and_reported() {
     let cross = tabref.ok(&["--dialog", "dismiss", "click", "Cross"]);
     let after_cross = title();
     let unused = tabref.ok(&["--dialog", "dismiss", "js", "1 + 1"]);
+    let warned = tabref.ok(&["--dialog", "dismiss", "click", "Warn"]);
+    let after_warn = title();
+    let asked = tabref.ok(&["--dialog", "dismiss", "js", "confirm('Js?') ? 'y' : 'n'"]);
+    let later = tabref.ok(&["--dialog", "dismiss", "click", "Later"]);
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    let after_later = title();
 
-    tabref.ok(&["click", "Arm"]);
+    let do_open = format!("click Arm; open {away}");
+    let batch = tabref.run(&["--dialog", "dismiss", "do", &do_open]);
+    let batch_title = title();
     let kept = tabref.run(&["--dialog", "dismiss", "open", &away]);
     let kept_title = title();
     let left = tabref.ok(&["open", &away]);
@@ -121,6 +134,38 @@ fn dialog_answers_are_chosen_for_the_next_dialog_and_reported() {
         "{}",
         unused.stdout
     );
+    assert!(
+        warned.stdout.contains("dialog alert \"Heads up\" accepted"),
+        "{}",
+        warned.stdout
+    );
+    assert!(
+        warned
+            .stdout
+            .contains("dialog confirm \"Delete all?\" dismissed"),
+        "the alert took the choice: {}",
+        warned.stdout
+    );
+    assert_eq!(after_warn, "kept");
+    assert!(asked.stdout.contains('n'), "{}", asked.stdout);
+    assert!(
+        asked.stdout.contains("dialog confirm \"Js?\" dismissed"),
+        "a dialog js raised was not reported: {}",
+        asked.stdout
+    );
+    assert!(
+        later.stdout.contains("one that opens after it is accepted"),
+        "{}",
+        later.stdout
+    );
+    assert_eq!(after_later, "ly");
+    assert!(batch.ok, "{}{}", batch.stdout, batch.stderr);
+    assert!(
+        batch.stdout.contains("stayed on the page"),
+        "{}",
+        batch.stdout
+    );
+    assert_eq!(batch_title, "armed", "do's open step left the page");
     assert!(
         kept.stdout.contains("dialog beforeunload") && kept.stdout.contains("dismissed"),
         "{}{}",

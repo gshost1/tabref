@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
+use super::dialog_json::{DIALOG_OPENING, drain_dialogs};
 use super::page_barrier::page_turn;
 use super::settle_outcome::SettleOutcome;
 use super::settle_tracker::SettleTracker;
@@ -17,7 +18,6 @@ const QUIET: Duration = Duration::from_millis(50);
 const NETWORK_CAP: Duration = Duration::from_millis(1_500);
 const DOM_QUIET: Duration = Duration::from_millis(30);
 const DOM_QUIET_CAP: Duration = Duration::from_millis(300);
-const DIALOG_OPENING: &str = "Page.javascriptDialogOpening";
 
 /// Turns on the page and network events of `session` before an action and
 /// drops any already buffered, so [`settle_action`] sees only what the
@@ -35,7 +35,7 @@ pub fn watch_navigation(
         .next()
         .ok_or_else(|| transport_failed("Page.getFrameTree", "the page has no main frame"))?;
     let id = session.session_id.clone();
-    connection.discard_events(|event| is_page_event(event, &id) || event.method == DIALOG_OPENING);
+    connection.discard_events(|event| is_page_event(event, &id));
     Ok(main.frame_id)
 }
 
@@ -67,18 +67,7 @@ pub fn settle_action(
     if !tracker.committed() && (tracker.same_document() || tracker.saw_network()) {
         dom_quiet(connection, session, &mut tracker, cap)?;
     }
-    let dialogs = connection
-        .drain_events(|event| event.method == DIALOG_OPENING)
-        .into_iter()
-        .map(|event| {
-            json!({
-                "type": event.params.get("type").cloned().unwrap_or(Value::Null),
-                "message": event.params.get("message").cloned().unwrap_or(Value::Null),
-                "url": event.params.get("url").cloned().unwrap_or(Value::Null),
-                "answer": event.params.get("answer").cloned().unwrap_or(Value::Null),
-            })
-        })
-        .collect();
+    let dialogs = drain_dialogs(connection);
     connection.discard_events(|event| is_page_event(event, &id));
     let _ = connection.call("Network.disable", json!({}), Some(&id), cap);
     Ok(SettleOutcome {

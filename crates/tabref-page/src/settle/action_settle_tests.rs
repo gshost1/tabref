@@ -88,3 +88,37 @@ fn watching_enables_page_and_network_events_and_names_the_main_frame() {
     assert_eq!(main, "MAIN");
     assert_eq!(sent.lock().unwrap()[0]["sessionId"], "S");
 }
+
+#[test]
+fn watching_keeps_a_dialog_that_opened_before_so_it_is_still_reported() {
+    let transport = ScriptedTransport::new()
+        .expect_with_events(
+            "Page.enable",
+            vec![
+                page(
+                    "Page.javascriptDialogOpening",
+                    json!({ "type": "confirm", "message": "Earlier?" }),
+                ),
+                page("Page.frameNavigated", json!({})),
+            ],
+            json!({ "result": {} }),
+        )
+        .expect("Network.enable", json!({}))
+        .expect(
+            "Page.getFrameTree",
+            json!({ "frameTree": { "frame": { "id": "MAIN", "loaderId": "L" } } }),
+        );
+    let mut connection = CdpConnection::new(transport.boxed());
+    connection.set_answer_dialogs(false);
+
+    watch_navigation(&mut connection, &session(), deadline()).unwrap();
+
+    let dialogs = crate::drain_dialogs(&mut connection);
+    assert_eq!(dialogs.len(), 1, "{dialogs:?}");
+    assert_eq!(dialogs[0]["message"], "Earlier?");
+    assert!(
+        connection
+            .drain_events(|event| event.method == "Page.frameNavigated")
+            .is_empty()
+    );
+}
