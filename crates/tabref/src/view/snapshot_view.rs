@@ -9,6 +9,7 @@ use super::view_scope::ViewScope;
 use super::view_subject::ViewSubject;
 use crate::output::outcome::Outcome;
 use crate::output::page_report::page_report;
+use crate::output::trace;
 use crate::session::Session;
 use crate::session::captured_snapshot::CapturedSnapshot;
 
@@ -21,7 +22,10 @@ pub(crate) fn snapshot_view(
     scope: &ViewScope,
 ) -> Result<Outcome, AppError> {
     let input = match outline_input(session, Some(captured)) {
-        Ok(input) => input,
+        Ok(input) => {
+            trace::mark("dom");
+            input
+        }
         Err(error) => {
             let mut report = page_report(captured, ViewMode::Interactive);
             report.push_line(&format!(

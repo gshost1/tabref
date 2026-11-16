@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use tabref_cdp::{PageSession, navigate_by};
 use tabref_core::{AppError, Deadline};
-use tabref_page::{DownloadRecord, PageInfo};
+use tabref_page::{DownloadRecord, PageInfo, load_timing};
 
 use super::action_report::set;
 use super::app_guard::refuse_in_app;
@@ -14,6 +14,7 @@ use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open_request::OpenRequest;
 use super::page_url::resolve_url;
 use crate::output::outcome::Outcome;
+use crate::output::trace;
 use crate::session::Session;
 use crate::view::snapshot_view::snapshot_view;
 use crate::view::view_request::ViewRequest;
@@ -91,8 +92,11 @@ fn load(
         deadline.capped(Duration::from_millis(commit)),
         deadline.capped(Duration::from_millis(load)),
     );
+    trace::mark("navigated");
+    page_timing(session, page, "at_navigated", deadline);
     let grace = downloads::grace_after(&navigated);
     let started = downloads::after_action(session, page, None, deadline, grace);
+    trace::mark("downloads");
     if !started.is_empty() {
         return Ok(downloaded(&started));
     }
@@ -104,6 +108,8 @@ fn load(
     let captured = session.capture()?;
     let options = ViewRequest::default().snap_options(&captured.info.url)?;
     let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
+    trace::mark("rendered");
+    page_timing(session, page, "at_rendered", deadline);
     if unfinished {
         report
             .push_line("note: the page had not finished loading; snap again if parts are missing");
@@ -114,6 +120,22 @@ fn load(
         serde_json::json!(!unfinished),
     );
     Ok(report)
+}
+
+/// Adds the page's own load timings to the trace, when tracing.
+fn page_timing(session: &mut Session, page: &PageSession, at: &str, deadline: Deadline) {
+    if !trace::on() {
+        return;
+    }
+    let Ok(Some(timing)) = load_timing(session.connection(), page, deadline) else {
+        return;
+    };
+    if let Some(fields) = timing.as_object() {
+        for (key, value) in fields {
+            let value = value.as_u64().map_or(0, u128::from);
+            trace::note(&format!("{at}.{key}"), value);
+        }
+    }
 }
 
 /// An `open` whose address downloaded: one line per download, the page

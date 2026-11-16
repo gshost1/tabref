@@ -3,6 +3,7 @@ use tabref_page::{PageInfo, snapshot_page_within_budget};
 
 use super::Session;
 use super::captured_snapshot::CapturedSnapshot;
+use crate::output::trace;
 
 impl Session {
     /// Reads the current tab, gives every actionable node a ref (keeping
@@ -13,6 +14,7 @@ impl Session {
         let page = self.page()?;
         let deadline = self.deadline();
         let snapshot = snapshot_page_within_budget(self.connection(), &page, deadline)?;
+        trace::mark("snapshot");
         let info = PageInfo::read(self.connection(), &page.target_id, deadline)?;
         let snapshot_id = new_snapshot_id();
         let mut map = self.continued_refs(&page.target_id, &info.url);
@@ -20,6 +22,7 @@ impl Session {
         let ref_count = self.number_refs(&mut tree, &snapshot_id, &mut map)?;
         self.store().save(&snapshot_id, &map)?;
         self.remember_latest(&page.target_id, &snapshot_id)?;
+        trace::mark("captured");
         Ok(CapturedSnapshot {
             snapshot_id,
             tree,

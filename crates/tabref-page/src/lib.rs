@@ -68,6 +68,7 @@ pub use outline::text_runs::{collapse_run, cut_chars, squash};
 pub use outline::text_search::search_text;
 pub use outline::url_resolve::{origin_of, resolve_href, short_href};
 pub use page::evaluate::evaluate;
+pub use page::load_timing::load_timing;
 pub use page::page_info::PageInfo;
 pub use page::page_scroll::scroll_page;
 pub use page::page_text::page_text;

@@ -51,6 +51,7 @@ use tabref_core::AppError;
 use crate::cli::Cli;
 use crate::cli::command::Command;
 use crate::output::outcome::Outcome;
+use crate::output::trace;
 use crate::session::Session;
 use crate::session::session_options::SessionOptions;
 use crate::view::view_request::ViewRequest;
@@ -95,6 +96,13 @@ pub(crate) fn session_options(cli: &Cli) -> SessionOptions {
 
 /// Runs `command` against `session`, in-process or inside the daemon.
 pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
+    trace::begin(command.name());
+    let outcome = run_command(session, command);
+    trace::end();
+    outcome
+}
+
+fn run_command(session: &mut Session, command: &Command) -> Result<Outcome, AppError> {
     match command {
         Command::Open {
             url,
