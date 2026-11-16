@@ -15,6 +15,7 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
   one row per line. To count, use these numbers across the whole page, not the first block you see.
 - The last line says what was cut and the exact command for it (`tabref snap --rows 21-`,
   `tabref read --section "<heading>"`). Run it before answering about cut content.
+- `tabref screenshot [T] [--out FILE]` saves a PNG of the page, or of element T, and prints its path.
 - `tabref read` prints the main text. `tabref find <text>` searches all text, hidden too: each match with its
   section, its ref, and `(hidden; expand [e8 …])` when a click shows it.
 - A `dialog` line at the top is a popup: click one of its buttons first (decline cookie banners).

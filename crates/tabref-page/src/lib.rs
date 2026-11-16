@@ -32,6 +32,7 @@ pub use act::key_press::{press_key, supported_key_names};
 pub use act::page_changes::PageChanges;
 pub use act::page_mark::PageMark;
 pub use act::read::read_element;
+pub use act::screenshot::{capture_screenshot, png_size};
 pub use act::scroll::{box_center, scroll_into_view};
 pub use act::scroll_by::scroll_by;
 pub use act::select_option::select_option;

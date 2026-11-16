@@ -30,6 +30,7 @@ pub(crate) mod page_mark;
 pub(crate) mod press_point;
 pub(crate) mod read;
 pub(crate) mod remote_element;
+pub(crate) mod screenshot;
 pub(crate) mod scroll;
 pub(crate) mod scroll_by;
 pub(crate) mod select_option;
