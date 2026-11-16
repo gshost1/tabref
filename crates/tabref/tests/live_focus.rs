@@ -137,3 +137,22 @@ fn a_focus_with_no_focus_listener_ends_with_the_settle() {
         deep.stdout
     );
 }
+
+#[test]
+fn a_tab_tabref_moves_away_from_goes_to_the_background() {
+    if !live() {
+        return;
+    }
+    let tabref = own_site("focus-left-behind");
+    tabref.ok(&["focus", "Name"]);
+    assert_eq!(read(&tabref, "document.hasFocus()"), "true");
+    tabref.ok(&["open", "--new-tab", "about:blank"]);
+    std::thread::sleep(Duration::from_millis(1_000));
+    let ticks = in_back(&tabref, "JSON.stringify(window.ticks)");
+    let ticks: serde_json::Value = serde_json::from_str(&ticks).unwrap();
+    assert_eq!(ticks["wentHidden"], true, "{ticks}");
+    assert!(
+        ticks["hidden"].as_u64().unwrap() < 30,
+        "a hidden tab runs throttled timers: {ticks}"
+    );
+}

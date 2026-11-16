@@ -21,12 +21,19 @@ pub const PAGE: &str = r#"<!doctype html><title>Focus</title>
 <div id=badindex tabindex="abc" onclick="1">Bad index</div>
 <svg width=120 height=30><a id=svglink xlink:href=#svg><text x=5 y=20>Svg link</text></a></svg>
 <x-field id=xfield role=button aria-label="Delegated"></x-field>
+<x-outer id=outer role=button aria-label="Nested"></x-outer>
+<x-skip id=skip role=button aria-label="Skips hidden"></x-skip>
+<x-empty id=empty role=button aria-label="Empty host"></x-empty>
 <p id=out>Nothing</p>
 <p id=seen>Unseen</p>
 <script>
-customElements.define('x-field', class extends HTMLElement {
-  constructor() { super(); this.attachShadow({ mode: 'open', delegatesFocus: true }).innerHTML = '<input id=inner>'; }
-});
+const host = html => class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'open', delegatesFocus: true }).innerHTML = html; }
+};
+customElements.define('x-field', host('<input id=inner>'));
+customElements.define('x-outer', host('<x-field id=middle></x-field>'));
+customElements.define('x-skip', host('<input type=hidden id=secret><input id=unseen style="display:none"><span id=frozen contenteditable=false>Frozen</span><input id=real>'));
+customElements.define('x-empty', host('<span>Nothing to focus</span>'));
 document.addEventListener('visibilitychange', () => { document.getElementById('seen').textContent = 'vis changed'; });
 window.addEventListener('focus', () => { document.getElementById('seen').textContent = 'window focused'; });
 </script>"#;
