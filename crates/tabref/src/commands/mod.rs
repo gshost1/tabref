@@ -22,6 +22,7 @@ pub(crate) mod download_wait;
 pub(crate) mod downloads;
 pub(crate) mod fill;
 pub(crate) mod find;
+pub(crate) mod find_room;
 pub(crate) mod focus;
 pub(crate) mod hover;
 pub(crate) mod js;
@@ -221,7 +222,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             px,
         } => scroll::run(session, direction, target.as_deref(), *px),
         Command::Upload { target, files } => upload::run(session, target, files),
-        Command::Find { text, role } => find::run(session, text, role.as_deref()),
+        Command::Find { text, role } => find::run(session, &text.join(" "), role.as_deref()),
         Command::Read {
             target,
             section,
