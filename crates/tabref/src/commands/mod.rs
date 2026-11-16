@@ -6,6 +6,7 @@ pub(crate) mod batch_step;
 pub(crate) mod check;
 pub(crate) mod click;
 pub(crate) mod close;
+pub(crate) mod close_browser;
 pub(crate) mod connect;
 pub(crate) mod do_batch;
 pub(crate) mod do_expand;
@@ -185,7 +186,10 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
         } => do_batch::run(session, steps.as_deref(), *step_timeout),
         Command::Tabs => tabs::run(session),
         Command::Tab { tab } => tab::run(session, tab),
-        Command::Close { tab } => close::run(session, tab.as_deref()),
+        Command::Close { browser: true, .. } => Err(AppError::invalid_args(
+            "'close --browser' is handled by the client, not inside a session",
+        )),
+        Command::Close { tab, .. } => close::run(session, tab.as_deref()),
         Command::Skill { topic } => Ok(skill::run(topic.as_deref())),
         Command::Daemon { action } => crate::daemon::control::run_in_session(session, action),
         Command::Connect { .. } => Err(AppError::invalid_args(

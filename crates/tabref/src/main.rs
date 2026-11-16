@@ -32,6 +32,7 @@ fn main() -> ExitCode {
             user_data_dir,
             off,
         } => commands::connect::run(&cli, *user_chrome, user_data_dir.as_deref(), *off),
+        Command::Close { browser: true, .. } => commands::close_browser::run(&cli),
         Command::Skill { .. } => commands::run(&cli),
         _ => daemon::run_through_daemon(&cli).unwrap_or_else(|| commands::run(&cli)),
     };

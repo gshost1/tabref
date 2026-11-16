@@ -265,6 +265,7 @@ fn a_chosen_folder_that_became_unsafe_is_an_error_not_a_fallback() {
     let tabref = &site.tabref;
     let record = serde_json::to_string(&tabref.browser).unwrap();
     std::fs::write(tabref.home.join("launched.json"), record).unwrap();
+    common::private_record(&tabref.home.join("launched.json"));
     let real = site._outside.0.join("real");
     std::fs::create_dir_all(&real).unwrap();
     let link = site._outside.0.join("link");

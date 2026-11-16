@@ -171,8 +171,14 @@ pub(crate) enum Command {
     Tabs,
     /// Switch to a tab by index or id
     Tab { tab: String },
-    /// Close a tab (the current one by default)
-    Close { tab: Option<String> },
+    /// Close a tab (the current one by default), or quit the browser 'open --launch' started
+    Close {
+        #[arg(conflicts_with = "browser")]
+        tab: Option<String>,
+        /// Quit the browser 'open --launch' started (never one tabref did not launch)
+        #[arg(long)]
+        browser: bool,
+    },
     /// Opt in to driving your own, logged-in Chrome, or stop (--off)
     Connect {
         /// Attach to your own running browser, found through its remote-debugging file

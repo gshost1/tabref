@@ -51,6 +51,7 @@ pub fn launched_pid(home: &Path) -> Option<u32> {
 pub fn stop_browser(pid: u32) {
     let _ = Command::new("kill")
         .args(["-TERM", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
         .status();
     let started = Instant::now();
     while Path::new(&format!("/proc/{pid}")).exists() && started.elapsed() < Duration::from_secs(10)
@@ -59,6 +60,7 @@ pub fn stop_browser(pid: u32) {
     }
     let _ = Command::new("kill")
         .args(["-KILL", &format!("-{pid}")])
+        .stderr(std::process::Stdio::null())
         .status();
 }
 

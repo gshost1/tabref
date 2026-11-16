@@ -15,7 +15,7 @@ use super::launch_profile::{
     normalize, prepare_profile, requested_profile, running_on_profile, same_dir,
 };
 use super::launch_record::{
-    LAUNCH_FILE, forget_launched, load_launched, parse_launched, save_launched,
+    forget_launched, load_launched, parse_launched, read_launched, save_launched,
 };
 use super::session_options::SessionOptions;
 use super::user_chrome::{GONE_KIND, connect_user_chrome};
@@ -114,7 +114,7 @@ fn launched_browser(
     profile: Option<&Path>,
     deadline: Deadline,
 ) -> Result<Option<ConnectedBrowser>, AppError> {
-    let Some(text) = store.read_state(LAUNCH_FILE) else {
+    let Some(text) = read_launched(store) else {
         return Ok(None);
     };
     let Some(record) = parse_launched(&text) else {

@@ -3,9 +3,9 @@
 //! the socket tables cannot be read). A live browser keeps its port, so a
 //! browser that still runs means the port is still its own. A pid alone is
 //! not enough, as pids are reused: the process must also have the start time
-//! recorded at launch (Linux: `/proc/<pid>/stat`; macOS: `/bin/ps -o
-//! lstart=` in the C locale and UTC, so the text never depends on the
-//! caller's environment).
+//! recorded at launch (Linux: the boot id and `/proc/<pid>/stat`; macOS:
+//! `/bin/ps -o lstart=` in the C locale and UTC, so the text never depends
+//! on the caller's environment). A zombie counts as gone.
 //! Windows has neither without unsafe code, so there the profile's
 //! `lockfile`, which a running Chrome holds open exclusively, says it.
 
@@ -14,24 +14,33 @@ use std::path::Path;
 use crate::LaunchedBrowser;
 
 /// A text that names when process `pid` started, equal for the same process
-/// and different for a later one with the same pid; `None` when there is no
-/// such process or the platform cannot say.
+/// and different for a later one with the same pid, also across a reboot
+/// (Linux: the boot id, then the start time in clock ticks since boot);
+/// `None` when there is no such process, it has exited and only waits to be
+/// reaped (a zombie), or the platform cannot say.
 pub fn process_start(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        linux_start_time(&stat)
+        if linux_state(&stat)? == "Z" {
+            return None;
+        }
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+        Some(format!("{}:{}", boot.trim(), linux_start_time(&stat)?))
     }
     #[cfg(target_os = "macos")]
     {
         let output = std::process::Command::new("/bin/ps")
-            .args(["-o", "lstart=", "-p", &pid.to_string()])
+            .args(["-o", "stat=,lstart=", "-p", &pid.to_string()])
             .env("LC_ALL", "C")
             .env("TZ", "UTC0")
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        (output.status.success() && !text.is_empty()).then_some(text)
+        let (state, start) = text.split_once(char::is_whitespace)?;
+        let start = start.trim();
+        (output.status.success() && !state.starts_with('Z') && !start.is_empty())
+            .then(|| start.to_owned())
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
@@ -49,6 +58,12 @@ pub fn launched_alive(record: &LaunchedBrowser) -> Option<bool> {
     }
     let started = record.started.as_deref()?;
     Some(process_start(record.pid).as_deref() == Some(started))
+}
+
+/// The state field of a `/proc/<pid>/stat` line (`Z` for a zombie).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn linux_state(stat: &str) -> Option<&str> {
+    stat[stat.rfind(')')? + 1..].split_whitespace().next()
 }
 
 /// The start time field of a `/proc/<pid>/stat` line, read after the
