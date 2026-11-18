@@ -23,6 +23,8 @@ Uploads: `upload TARGET FILE...`: TARGET may be the drop zone, link or label; up
 input (same form first, else the only one on the page). A page with no file input: upload clicks TARGET
 and fills the file chooser that opens; no dialog shows.
 
+A slice of a long view: `tabref snap --from 1 --to 40` prints lines 1-40 (`read` takes both too).
+
 Screenshots: `tabref screenshot [T] [--out FILE]` saves a PNG of the page, or of element T, and prints its path.
 
 Waits: `tabref wait --text X`, `--gone X`, `--url TEXT` (the address contains it), `--idle`,
