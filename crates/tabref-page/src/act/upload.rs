@@ -5,6 +5,7 @@ use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::element_call::ElementCall;
 use super::element_errors::stale;
+use super::file_chooser::upload_through_chooser;
 use super::file_input_choice::{FileInputCandidate, FileInputChoice, choose};
 use super::file_input_search::{list_file_inputs, pick_file_input};
 use super::remote_element::{call_function, with_element};
@@ -22,9 +23,11 @@ const READ_FILES: &str = r"function() {
 /// A target that is not a file input stands for the one it means: the
 /// input its label controls, else the nearest file input around it (a
 /// drop zone's hidden input in the same form), else the only one on the
-/// page. A path that is not an existing file, several files for a
-/// single-file input, no file input, or several equally near are refused
-/// before anything is set.
+/// page. On a page with no file input at all the target is clicked and the
+/// files go to the file chooser that opens (see
+/// [`upload_through_chooser`]). A path that is not an existing file,
+/// several files for a single-file input, or several inputs equally near
+/// are refused before anything is set.
 pub fn upload_files(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -42,7 +45,9 @@ pub fn upload_files(
             let inputs = list_file_inputs(connection, session, object, deadline)?;
             let (input, via) = match choose(&inputs.candidates, inputs.top) {
                 FileInputChoice::Chosen(input, via) => (input.clone(), via),
-                FileInputChoice::None => return Err(no_file_input(token.backend_node_id)),
+                FileInputChoice::None => {
+                    return upload_through_chooser(connection, session, token, &paths, deadline);
+                }
                 FileInputChoice::Ambiguous(found) => {
                     return Err(ambiguous_file_input(token.backend_node_id, &found));
                 }
@@ -83,15 +88,9 @@ pub fn upload_files(
                 deadline,
             );
             let names = names?;
-            let verified = names.len() == paths.len()
-                && paths.iter().zip(&names).all(|(path, name)| {
-                    Path::new(path)
-                        .file_name()
-                        .is_some_and(|file| file.to_string_lossy() == name.as_str())
-                });
             Ok(UploadOutcome {
+                verified: shows_files(&paths, &names),
                 files: names,
-                verified,
                 input: input.name,
                 hidden: input.hidden,
                 via,
@@ -154,16 +153,15 @@ fn script(function: &'static str) -> ElementCall {
     }
 }
 
-fn no_file_input(backend_node_id: i64) -> AppError {
-    AppError::new(
-        ErrorCode::ActionNotSupported,
-        format!(
-            "DOM node {backend_node_id} is not a file input, and there is no <input type=file> on the page, hidden ones included"
-        ),
-    )
-    .with_suggestion("Some pages add their file input only after a click: click the upload control, then upload again")
-    .with_details(json!({ "kind": "no_file_input" }))
-    .with_disposition(DeliverySemantics::not_delivered())
+/// Whether the names an input reports are the files that were set, in
+/// order.
+pub(crate) fn shows_files(paths: &[String], names: &[String]) -> bool {
+    names.len() == paths.len()
+        && paths.iter().zip(names).all(|(path, name)| {
+            Path::new(path)
+                .file_name()
+                .is_some_and(|file| file.to_string_lossy() == name.as_str())
+        })
 }
 
 fn ambiguous_file_input(backend_node_id: i64, found: &[&FileInputCandidate]) -> AppError {
