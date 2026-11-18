@@ -54,6 +54,7 @@ fn to_stops_the_view_after_that_line_and_says_how_to_go_on() {
     assert_eq!(lines[1], "Paragraph number 001.");
     assert_eq!(lines[5], "Paragraph number 005.");
     let footer = lines[6];
+    assert!(footer.contains("shown 5 of 30 lines"), "{footer}");
     assert!(footer.contains("lines 6- after --to"), "{footer}");
     assert!(footer.contains("tabref snap --from 6"), "{footer}");
     assert!(!footer.contains("all shown"), "{footer}");
