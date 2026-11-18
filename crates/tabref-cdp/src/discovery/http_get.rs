@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use tabref_core::{AppError, Deadline};
 
-use super::connect_error::endpoint_unreachable;
-use super::http_response::{http_ok_body, read_http_response};
+use super::connect_error::{endpoint_unreachable, no_http_route};
+use super::http_response::{http_ok_body, http_status, read_http_response};
 use crate::transport::transport_error::{transport_failed, transport_timeout};
 
 const MIN_IO_SLICE: Duration = Duration::from_millis(1);
@@ -13,7 +13,10 @@ const MIN_IO_SLICE: Duration = Duration::from_millis(1);
 /// Issues one `GET` to the loopback `address` and returns the body of its `200`
 /// response. The reader ends the read once Content-Length
 /// bytes of body arrive, because Chromium holds the connection open after
-/// answering; every step is bounded by what remains of `deadline`.
+/// answering; every step is bounded by what remains of `deadline`. Any
+/// other HTTP status is kind `cdp_no_http_route`: a browser whose remote
+/// debugging was turned on at chrome://inspect answers `404` there, as its
+/// DevTools server speaks WebSocket only.
 pub(crate) fn http_get_loopback(
     address: SocketAddr,
     path: &str,
@@ -49,7 +52,10 @@ pub(crate) fn http_get_checked(
         }
         return Err(transport_failed("http", "the server sent no response"));
     };
-    http_ok_body(&raw).ok_or_else(|| transport_failed("http", "malformed HTTP response"))
+    http_ok_body(&raw).ok_or_else(|| match http_status(&raw) {
+        Some(status) => no_http_route(port, path, status),
+        None => transport_failed("http", "malformed HTTP response"),
+    })
 }
 
 fn slice(deadline: Deadline) -> Result<Duration, AppError> {

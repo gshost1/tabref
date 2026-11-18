@@ -14,6 +14,31 @@ pub(crate) fn endpoint_unreachable(port: u16, detail: &str) -> AppError {
     .with_disposition(DeliverySemantics::not_delivered())
 }
 
+/// A port that answers HTTP but not the DevTools `path` asked for. Chrome
+/// answers `/json/version` only when started with
+/// `--remote-debugging-port`; with remote debugging turned on at
+/// chrome://inspect the same port takes WebSocket connections alone.
+pub(crate) fn no_http_route(port: u16, path: &str, status: u16) -> AppError {
+    AppError::new(
+        ErrorCode::ActionFailed,
+        format!(
+            "Port {port} answered {path} with HTTP {status}: a browser is there, but it gives no DevTools address over HTTP"
+        ),
+    )
+    .with_suggestion(format!(
+        "A browser with remote debugging turned on at chrome://inspect speaks WebSocket only. \
+         For your own browser run 'tabref connect --user-chrome' (--user-data-dir DIR names \
+         one tabref does not know), or pass --cdp ws://127.0.0.1:{port}<path>, the path being \
+         line 2 of its profile's DevToolsActivePort file"
+    ))
+    .with_details(serde_json::json!({
+        "kind": "cdp_no_http_route",
+        "port": port,
+        "http_status": status,
+    }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
 /// The refusal for a port whose listening sockets changed between the owner
 /// check and the connection: whatever listens now was never checked.
 pub(crate) fn port_changed_hands(port: u16) -> AppError {
