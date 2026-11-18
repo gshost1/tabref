@@ -8,8 +8,8 @@ use crate::view::view_scope::ViewScope;
 
 /// Takes a new snapshot of the current tab and prints its page view. With
 /// `--root`, prints only that element's part of the page, with refs of the
-/// new snapshot; `--rows`, `--from` and `--full` pick the rows, the first
-/// line and whole lines.
+/// new snapshot; `--rows`, `--from`, `--to` and `--full` pick the rows, the
+/// first and last line and whole lines.
 pub(crate) fn run(session: &mut Session, request: &ViewRequest) -> Result<Outcome, AppError> {
     let scope = match &request.root {
         Some(root) => {
