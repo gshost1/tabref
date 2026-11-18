@@ -107,12 +107,18 @@ fn a_screenshot_reaches_the_daemon_as_a_file_in_the_clients_directory() {
         out: Some(PathBuf::from("shots/page.png")),
     };
     let paths = resolved_paths(&named).unwrap();
-    assert_eq!(paths, [here.join("shots/page.png").to_string_lossy()]);
+    assert_eq!(
+        paths,
+        [here.join("shots").join("page.png").to_string_lossy()]
+    );
     apply_paths(&mut named, Some(paths));
     let Command::Screenshot { out, .. } = &named else {
         unreachable!()
     };
-    assert_eq!(out.as_deref(), Some(here.join("shots/page.png").as_path()));
+    assert_eq!(
+        out.as_deref(),
+        Some(here.join("shots").join("page.png").as_path())
+    );
 
     let default = Command::Screenshot {
         target: None,
