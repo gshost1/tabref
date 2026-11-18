@@ -20,7 +20,8 @@ Apps built on Chrome (Electron, reached with `--cdp PORT`): `open`, `open --new-
 as the windows are the app; read and act with snap, click and fill (js to read).
 
 Uploads: `upload TARGET FILE...`: TARGET may be the drop zone, link or label; upload finds the hidden file
-input (same form first, else the only one on the page).
+input (same form first, else the only one on the page). A page with no file input: upload clicks TARGET
+and fills the file chooser that opens; no dialog shows.
 
 A slice of a long view: `tabref snap --from 1 --to 40` prints lines 1-40 (`read` takes both too).
 

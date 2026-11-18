@@ -127,7 +127,7 @@ pub(crate) enum Command {
         #[arg(long)]
         px: Option<u32>,
     },
-    /// Set the files of an <input type=file>
+    /// Set the files of a file input: TARGET is the input, its drop zone or label, or the button that opens the file chooser
     Upload {
         #[arg(value_name = "TARGET")]
         target: String,

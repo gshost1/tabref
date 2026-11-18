@@ -56,6 +56,7 @@ pub enum FileInputVia {
     Label,
     Nearest,
     OnlyOnPage,
+    Chooser,
 }
 
 impl FileInputVia {
@@ -65,6 +66,7 @@ impl FileInputVia {
             Self::Label => "the input its label controls",
             Self::Nearest => "the nearest file input",
             Self::OnlyOnPage => "the only file input on the page",
+            Self::Chooser => "the file chooser its click opened",
         }
     }
 }

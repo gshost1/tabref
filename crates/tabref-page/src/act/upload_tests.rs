@@ -92,15 +92,6 @@ fn refused(case: &str, candidates: serde_json::Value, count: usize) -> tabref_co
 }
 
 #[test]
-fn a_page_without_a_file_input_is_refused_before_anything_is_set() {
-    let error = refused("none", json!([]), 1);
-    assert_eq!(error.code, ErrorCode::ActionNotSupported);
-    assert_eq!(error.kind(), Some("no_file_input"));
-    assert!(error.message.contains("no <input type=file> on the page"));
-    assert!(!error.suggestion.unwrap_or_default().contains("snap"));
-}
-
-#[test]
 fn two_equally_near_inputs_are_refused_and_named() {
     let error = refused(
         "ambiguous",

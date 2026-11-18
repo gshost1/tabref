@@ -12,7 +12,7 @@ use tabref_core::ErrorCode;
 use tabref_page::upload_files;
 
 use common::{connect_to, deadline, launch, live, open_tab, serve};
-use upload_common::{files_of, fixture, name_of, token_of};
+use upload_common::{files_of, fixture, name_of, text_of, token_of};
 
 const DROPZONE: &str = r##"<!doctype html><html><head><title>Report</title></head><body>
 <form id="report" action="/r">
@@ -36,7 +36,19 @@ document.getElementById('report').appendChild(input);
 </body></html>"##;
 
 const NONE: &str = r##"<!doctype html><html><head><title>None</title></head><body>
-<a href="#" id="pick">select files…</a></body></html>"##;
+<a href="#" id="pick">select files…</a>
+<button id="attach">Attach files</button><p id="got"></p>
+<script>
+document.getElementById('attach').onclick = () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.onchange = () => {
+    document.getElementById('got').textContent = Array.from(input.files).map((f) => f.name).join(',');
+  };
+  input.click();
+};
+</script></body></html>"##;
 
 const ONLY: &str = r##"<!doctype html><html><head><title>Only</title></head><body>
 <a href="#" id="pick">select files…</a>
@@ -119,7 +131,7 @@ fn a_drop_zone_link_label_and_form_each_reach_their_own_file_input() {
 }
 
 #[test]
-fn the_only_file_input_is_used_and_a_page_without_one_says_so() {
+fn the_only_file_input_is_used_and_a_page_without_one_uploads_through_its_chooser() {
     if !live() {
         return;
     }
@@ -154,12 +166,25 @@ fn the_only_file_input_is_used_and_a_page_without_one_says_so() {
         deadline(),
     )
     .unwrap_err();
-    assert_eq!(error.kind(), Some("no_file_input"), "{error:?}");
+    assert_eq!(error.kind(), Some("no_file_chooser"), "{error:?}");
     assert!(
         error.message.contains("no <input type=file> on the page"),
         "{}",
         error.message
     );
     assert!(!format!("{error:?}").contains("snap -a"), "{error:?}");
+
+    let attach = token_of(&mut connection, &empty, "#attach");
+    let chosen = upload_files(
+        &mut connection,
+        &empty,
+        &attach,
+        std::slice::from_ref(&file),
+        deadline(),
+    )
+    .unwrap();
+    assert!(chosen.verified, "{chosen:?}");
+    assert_eq!(chosen.via, tabref_page::FileInputVia::Chooser);
+    assert_eq!(text_of(&mut connection, &empty, "#got"), name_of(&file));
     std::fs::remove_file(&file).unwrap();
 }
