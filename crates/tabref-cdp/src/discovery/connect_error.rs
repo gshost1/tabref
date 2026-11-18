@@ -18,18 +18,21 @@ pub(crate) fn endpoint_unreachable(port: u16, detail: &str) -> AppError {
 /// answers `/json/version` only when started with
 /// `--remote-debugging-port`; with remote debugging turned on at
 /// chrome://inspect the same port takes WebSocket connections alone.
+/// Whether a browser listens there is not known, so the hint says what to
+/// do if one does.
 pub(crate) fn no_http_route(port: u16, path: &str, status: u16) -> AppError {
     AppError::new(
         ErrorCode::ActionFailed,
         format!(
-            "Port {port} answered {path} with HTTP {status}: a browser is there, but it gives no DevTools address over HTTP"
+            "Port {port} answered {path} with HTTP {status}, so it gives no DevTools address over HTTP"
         ),
     )
     .with_suggestion(format!(
-        "A browser with remote debugging turned on at chrome://inspect speaks WebSocket only. \
-         For your own browser run 'tabref connect --user-chrome' (--user-data-dir DIR names \
-         one tabref does not know), or pass --cdp ws://127.0.0.1:{port}<path>, the path being \
-         line 2 of its profile's DevToolsActivePort file"
+        "If it is a browser with remote debugging turned on at chrome://inspect, it speaks \
+         WebSocket only. For your own browser run 'tabref connect --user-chrome' \
+         (--user-data-dir DIR names one tabref does not know), or pass \
+         --cdp ws://127.0.0.1:{port}<path>, the path being line 2 of its profile's \
+         DevToolsActivePort file"
     ))
     .with_details(serde_json::json!({
         "kind": "cdp_no_http_route",

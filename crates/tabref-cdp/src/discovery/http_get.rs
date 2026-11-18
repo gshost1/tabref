@@ -53,8 +53,8 @@ pub(crate) fn http_get_checked(
         return Err(transport_failed("http", "the server sent no response"));
     };
     http_ok_body(&raw).ok_or_else(|| match http_status(&raw) {
-        Some(status) => no_http_route(port, path, status),
-        None => transport_failed("http", "malformed HTTP response"),
+        Some(status) if status != 200 => no_http_route(port, path, status),
+        _ => transport_failed("http", "malformed HTTP response"),
     })
 }
 
