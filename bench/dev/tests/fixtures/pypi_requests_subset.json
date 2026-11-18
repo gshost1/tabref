@@ -1,0 +1,37 @@
+{
+ "info": {
+  "name": "requests"
+ },
+ "releases": {
+  "2.12.5": [
+   {
+    "upload_time_iso_8601": "2017-01-18T12:43:08.631826Z",
+    "filename": "requests-2.12.5-py2.py3-none-any.whl"
+   },
+   {
+    "upload_time_iso_8601": "2017-01-18T12:43:12.017010Z",
+    "filename": "requests-2.12.5.tar.gz"
+   }
+  ],
+  "2.13.0": [
+   {
+    "upload_time_iso_8601": "2017-01-24T12:53:25.259314Z",
+    "filename": "requests-2.13.0-py2.py3-none-any.whl"
+   },
+   {
+    "upload_time_iso_8601": "2017-01-24T12:53:28.060212Z",
+    "filename": "requests-2.13.0.tar.gz"
+   }
+  ],
+  "2.0.0": [
+   {
+    "upload_time_iso_8601": "2013-11-15T19:09:51.527323Z",
+    "filename": "requests-2.0.0-py2.py3-none-any.whl"
+   },
+   {
+    "upload_time_iso_8601": "2013-09-24T18:39:33.154169Z",
+    "filename": "requests-2.0.0.tar.gz"
+   }
+  ]
+ }
+}

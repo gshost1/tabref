@@ -28,13 +28,13 @@ pub(crate) fn run_request(
     })?;
     cli.cdp = request.cdp;
     apply_paths(&mut cli.command, request.paths);
-    if matches!(cli.command, Command::Skill) {
+    if matches!(cli.command, Command::Skill { .. }) {
         return commands::run(&cli);
     }
     let mut options = commands::session_options(&cli);
     options.stdin = request.stdin;
     let mut session = state.checkout(&options, cancel)?;
-    let outcome = commands::dispatch(&mut session, &cli.command);
+    let outcome = commands::dispatch_cli(&mut session, &cli);
     let outcome = session.with_warning(outcome);
     state.checkin(session);
     outcome

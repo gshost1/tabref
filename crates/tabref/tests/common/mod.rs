@@ -1,6 +1,7 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod exports;
+pub mod focus_page;
 #[cfg(unix)]
 pub mod own_chrome;
 
@@ -87,6 +88,17 @@ impl Drop for Scratch {
 pub fn scratch(name: &str) -> Scratch {
     Scratch(harness_home(&format!("scratch-{name}")))
 }
+
+/// Makes a launch record a test wrote private to the user, as tabref writes
+/// it: tabref ignores a record that others could write.
+#[cfg(unix)]
+pub fn private_record(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+}
+
+#[cfg(not(unix))]
+pub fn private_record(_path: &std::path::Path) {}
 
 /// A fresh private state directory for one test.
 pub fn harness_home(name: &str) -> PathBuf {

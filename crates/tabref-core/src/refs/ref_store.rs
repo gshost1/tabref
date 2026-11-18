@@ -16,8 +16,7 @@ const MAX_SAVED_SNAPSHOTS: usize = 128;
 const PRUNE_LOW_WATER: usize = 96;
 
 /// The snapshots tabref saved, under `<state root>/snapshots/<id>/refmap.json`
-/// with `latest_snapshot_id` naming the newest, the layout agent-desktop
-/// uses. Small named state files live beside them.
+/// with `latest_snapshot_id` naming the newest. Small named state files live beside them.
 #[derive(Debug, Clone)]
 pub struct RefStore {
     base_dir: PathBuf,

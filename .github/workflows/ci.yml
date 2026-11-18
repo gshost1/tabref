@@ -66,4 +66,4 @@ jobs:
         env:
           TABREF_LIVE: "1"
           TABREF_CHROME_ARGS: "--no-sandbox"
-        run: cargo test --locked -p tabref-page --test live_page && cargo test --locked -p tabref --test live_cli
+        run: cargo test --locked -p tabref-page --test live_page && cargo test --locked -p tabref --test live_cli && cargo test --locked -p tabref --test live_dialogs && TABREF_NO_DAEMON=1 cargo test --locked -p tabref --test live_dialogs

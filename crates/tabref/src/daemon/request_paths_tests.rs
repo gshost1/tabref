@@ -98,3 +98,32 @@ fn upload_files_are_made_absolute_and_a_missing_one_runs_in_process() {
     };
     assert!(runs_in_process(&missing));
 }
+
+#[test]
+fn a_screenshot_reaches_the_daemon_as_a_file_in_the_clients_directory() {
+    let here = std::env::current_dir().unwrap();
+    let mut named = Command::Screenshot {
+        target: None,
+        out: Some(PathBuf::from("shots/page.png")),
+    };
+    let paths = resolved_paths(&named).unwrap();
+    assert_eq!(paths, [here.join("shots/page.png").to_string_lossy()]);
+    apply_paths(&mut named, Some(paths));
+    let Command::Screenshot { out, .. } = &named else {
+        unreachable!()
+    };
+    assert_eq!(out.as_deref(), Some(here.join("shots/page.png").as_path()));
+
+    let default = Command::Screenshot {
+        target: None,
+        out: None,
+    };
+    let paths = resolved_paths(&default).unwrap();
+    let path = PathBuf::from(&paths[0]);
+    assert_eq!(path.parent(), Some(here.as_path()));
+    assert!(
+        path.to_string_lossy().ends_with(".png"),
+        "{}",
+        path.display()
+    );
+}

@@ -4,3 +4,5 @@ pub(crate) mod chrome_launch;
 pub(crate) mod launch_options;
 pub(crate) mod launched_browser;
 pub(crate) mod process_start;
+pub(crate) mod profile_use;
+pub(crate) mod recorded_process;

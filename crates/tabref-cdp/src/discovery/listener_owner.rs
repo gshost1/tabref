@@ -129,8 +129,9 @@ fn describe(view: &ProcessView) -> String {
     format!("\"{name}\" (pid {})", view.pid)
 }
 
+/// The process `/proc/<pid>` at `dir` describes, when it is `uid`'s.
 #[cfg(unix)]
-fn own_process(dir: &Path, uid: u32) -> Option<ProcessView> {
+pub(crate) fn own_process(dir: &Path, uid: u32) -> Option<ProcessView> {
     use std::os::unix::fs::MetadataExt;
     let pid = dir.file_name()?.to_str()?.parse::<u32>().ok()?;
     if std::fs::metadata(dir).ok()?.uid() != uid {

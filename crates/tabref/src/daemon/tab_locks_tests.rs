@@ -69,3 +69,41 @@ fn a_cancelled_command_stops_waiting_for_a_busy_tab() {
     assert_eq!(error.details.unwrap()["kind"], "cancelled");
     assert!(started.elapsed() < Duration::from_millis(500));
 }
+
+#[test]
+fn a_hold_without_waiting_says_whether_it_was_taken_now() {
+    let locks = TabLocks::default();
+    assert_eq!(locks.try_hold("T1", 1), Some(true));
+    assert_eq!(locks.try_hold("T1", 1), Some(false));
+    assert_eq!(locks.try_hold("T1", 2), None);
+    locks.release_tab("T1", 1);
+    assert_eq!(locks.held_count(), 0);
+    assert_eq!(locks.try_hold("T1", 2), Some(true));
+}
+
+#[test]
+fn a_tab_already_held_is_not_released_by_a_hold_that_did_not_take_it() {
+    let locks = TabLocks::default();
+    locks.claim("T1", 1, deadline(100), &live()).unwrap();
+    let taken = locks.try_hold("T1", 1);
+    assert_eq!(taken, Some(false));
+    if taken == Some(true) {
+        locks.release_tab("T1", 1);
+    }
+    assert_eq!(locks.try_hold("T1", 2), None);
+    locks.release_tab("T1", 2);
+    assert_eq!(locks.held_count(), 1);
+}
+
+#[test]
+fn releasing_one_tab_wakes_a_claim_waiting_for_it() {
+    let locks = Arc::new(TabLocks::default());
+    assert_eq!(locks.try_hold("T1", 1), Some(true));
+    let waiter = Arc::clone(&locks);
+    let started = Instant::now();
+    let claimed = thread::spawn(move || waiter.claim("T1", 2, deadline(2_000), &live()));
+    thread::sleep(Duration::from_millis(50));
+    locks.release_tab("T1", 1);
+    claimed.join().unwrap().unwrap();
+    assert!(started.elapsed() < Duration::from_millis(1_000));
+}

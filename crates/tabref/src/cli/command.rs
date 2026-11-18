@@ -91,6 +91,22 @@ pub(crate) enum Command {
         #[arg(value_name = "TARGET")]
         target: Option<String>,
     },
+    /// Move the keyboard focus to an element
+    Focus {
+        #[arg(value_name = "TARGET")]
+        target: String,
+    },
+    /// Save a PNG of the visible page, or of one element (TARGET)
+    ///
+    /// The PNG holds whatever the page shows, logged-in content included, and
+    /// lands in this directory (often a repository) unless --out names another.
+    Screenshot {
+        #[arg(value_name = "TARGET")]
+        target: Option<String>,
+        /// The .png file to write (default: tabref-screenshot-<id>.png in this directory)
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
     /// Move the pointer over an element
     Hover {
         #[arg(value_name = "TARGET")]
@@ -156,6 +172,12 @@ pub(crate) enum Command {
         /// Until a download finishes; prints its path, name, address, size and time
         #[arg(long)]
         download: bool,
+        /// Until this element (a ref or a name) reaches --state
+        #[arg(long = "ref", value_name = "TARGET", requires = "state")]
+        target: Option<String>,
+        /// The state --ref waits for: enabled, visible, hidden, gone or value=X
+        #[arg(long, value_name = "STATE", requires = "target")]
+        state: Option<String>,
     },
     /// Run several steps in one call, one per line, from STEPS or stdin
     Do {
@@ -171,8 +193,14 @@ pub(crate) enum Command {
     Tabs,
     /// Switch to a tab by index or id
     Tab { tab: String },
-    /// Close a tab (the current one by default)
-    Close { tab: Option<String> },
+    /// Close a tab (the current one by default), or quit the browser 'open --launch' started
+    Close {
+        #[arg(conflicts_with = "browser")]
+        tab: Option<String>,
+        /// Quit the browser 'open --launch' started (never one tabref did not launch)
+        #[arg(long)]
+        browser: bool,
+    },
     /// Opt in to driving your own, logged-in Chrome, or stop (--off)
     Connect {
         /// Attach to your own running browser, found through its remote-debugging file
@@ -185,8 +213,11 @@ pub(crate) enum Command {
         #[arg(long)]
         off: bool,
     },
-    /// Print the agent guide
-    Skill,
+    /// Print the agent guide (`more` adds the rare commands)
+    Skill {
+        #[arg(value_parser = ["more"])]
+        topic: Option<String>,
+    },
     /// Start, inspect or stop the background daemon that keeps the browser connection
     Daemon {
         #[arg(value_parser = ["start", "status", "stop"])]
@@ -207,6 +238,8 @@ impl Command {
             Self::Check { .. } => "check",
             Self::Uncheck { .. } => "uncheck",
             Self::Press { .. } => "press",
+            Self::Focus { .. } => "focus",
+            Self::Screenshot { .. } => "screenshot",
             Self::Hover { .. } => "hover",
             Self::Scroll { .. } => "scroll",
             Self::Upload { .. } => "upload",
@@ -219,7 +252,7 @@ impl Command {
             Self::Tab { .. } => "tab",
             Self::Close { .. } => "close",
             Self::Connect { .. } => "connect",
-            Self::Skill => "skill",
+            Self::Skill { .. } => "skill",
             Self::Daemon { .. } => "daemon",
         }
     }

@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use super::{parse_active_port, read_active_port};
 
 fn scratch_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("agent-desktop-web-{name}-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("tabref-active-port-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

@@ -2,6 +2,7 @@ use tabref_cdp::PageTarget;
 use tabref_core::{AppError, DeliverySemantics, ErrorCode};
 
 use super::Session;
+use super::visible_tab::visible_tab;
 
 impl Session {
     /// The address of the tab this command would work in, read from the tab
@@ -12,35 +13,63 @@ impl Session {
         Ok(self.current_tab_unclaimed()?.map(|tab| tab.url))
     }
 
+    /// The tab this command already works in, when it chose one; no
+    /// request is made.
+    pub(crate) fn known_tab(&self) -> Option<&str> {
+        self.scope.tab.as_deref()
+    }
+
     /// The tab this command would work in, read from the tab listing
     /// without claiming it. `None` when the browser has no tab.
     pub(crate) fn current_tab_unclaimed(&mut self) -> Result<Option<PageTarget>, AppError> {
         let tabs = self.tabs()?;
         let chosen = match &self.scope.tab {
             Some(tab) => Some(tab.clone()),
-            None => {
-                let remembered = self.store.read_state(&self.tab_state_name());
-                choose_tab(&tabs, self.scope.tab_hint.as_deref(), remembered.as_deref())?
-            }
+            None => self.chosen_tab(&tabs)?,
         };
         Ok(chosen.and_then(|id| tabs.into_iter().find(|tab| tab.target_id == id)))
+    }
+
+    /// [`choose_tab`] among `tabs` with this command's `--tab` and the tab
+    /// remembered from the last command, asking the tabs which one shows
+    /// only when neither names one. A tab this connection told it holds the
+    /// window focus answers yes whatever Chrome shows, so its answer counts
+    /// only when no other tab is showing; nothing is switched off to ask.
+    pub(crate) fn chosen_tab(&mut self, tabs: &[PageTarget]) -> Result<Option<String>, AppError> {
+        let remembered = self.store.read_state(&self.tab_state_name());
+        let deadline = self.scope.deadline;
+        let emulated = self.emulated_tabs();
+        let connection = &mut self.connection;
+        choose_tab(
+            tabs,
+            self.scope.tab_hint.as_deref(),
+            remembered.as_deref(),
+            || visible_tab(connection, tabs, &emulated, deadline),
+        )
     }
 }
 
 /// Picks the tab a command works in. `hint` (`--tab`, or `tab <n>`) is an
 /// index into `tabs` or a target id or unique id prefix; without one, the
-/// tab the last command used when it is still open, otherwise the first tab.
-/// `None` means the browser has no tab at all.
+/// tab the last command used when it is still open; otherwise, among more
+/// than one tab, the one `visible` names (the tab the user is looking at,
+/// asked only then), and the first tab when it names none of them. `None`
+/// means the browser has no tab at all.
 pub(crate) fn choose_tab(
     tabs: &[PageTarget],
     hint: Option<&str>,
     remembered: Option<&str>,
+    visible: impl FnOnce() -> Option<String>,
 ) -> Result<Option<String>, AppError> {
     if let Some(hint) = hint {
         return find_tab(tabs, hint).map(Some);
     }
-    let kept = remembered.and_then(|id| tabs.iter().find(|tab| tab.target_id == id));
-    Ok(kept
+    if let Some(kept) = remembered.and_then(|id| tabs.iter().find(|tab| tab.target_id == id)) {
+        return Ok(Some(kept.target_id.clone()));
+    }
+    let seen = if tabs.len() > 1 { visible() } else { None };
+    let shown = seen.and_then(|id| tabs.iter().find(|tab| tab.target_id == id));
+    Ok(shown
         .or_else(|| tabs.first())
         .map(|tab| tab.target_id.clone()))
 }

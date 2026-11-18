@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use tabref_core::{AppError, Deadline};
+use tabref_core::{AppError, Deadline, ErrorCode};
 
 use crate::transport::transport_error::transport_failed;
 use crate::{CdpConnection, PageSession, PageTarget};
@@ -33,6 +33,13 @@ pub fn attach_to_target(
     attach_to_target_with(connection, target_id, &[], deadline)
 }
 
+/// Why a tab that attached may not answer the first requests on its
+/// session: a JavaScript dialog that opened while no tabref connection was
+/// attached blocks the page, and a connection made after it can neither see
+/// nor answer it.
+const BLOCKED_BY_DIALOG: &str = "The page may be blocked by a dialog that opened after the last \
+    command; answer it in the browser, or retry with a longer --timeout";
+
 /// [`attach_to_target`], also sending `follow_ups` on the new session in the
 /// same round trip as the release, so a browser that is slow to answer (one
 /// that has just started) is waited on once instead of once per call.
@@ -49,9 +56,18 @@ pub fn attach_to_target_with(
         deadline,
     )?;
     let session_id = string_field(&result, "sessionId", "Target.attachToTarget")?;
+    connection.note_session_tab(&session_id, target_id);
     let mut calls = vec![("Runtime.runIfWaitingForDebugger", json!({}))];
     calls.extend(follow_ups.iter().cloned());
-    connection.call_all(&calls, Some(&session_id), deadline)?;
+    connection
+        .call_all(&calls, Some(&session_id), deadline)
+        .map_err(|error| {
+            if error.code == ErrorCode::Timeout {
+                error.with_suggestion(BLOCKED_BY_DIALOG)
+            } else {
+                error
+            }
+        })?;
     Ok(PageSession {
         target_id: target_id.to_owned(),
         session_id,

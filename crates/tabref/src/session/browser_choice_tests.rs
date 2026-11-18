@@ -15,7 +15,7 @@ fn launched(profile: &str) -> LaunchedBrowser {
         profile_dir: PathBuf::from(profile),
         headless: true,
         started: None,
-        persistent: true,
+        profile_use: tabref_cdp::ProfileUse::PERSISTENT,
     }
 }
 

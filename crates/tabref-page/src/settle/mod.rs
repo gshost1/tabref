@@ -1,12 +1,16 @@
 pub(crate) mod action_settle;
+pub(crate) mod dialog_json;
 pub(crate) mod download_events;
 pub(crate) mod download_origin;
 pub(crate) mod download_record;
 pub(crate) mod download_state;
 pub(crate) mod download_timing;
+pub(crate) mod element_state;
+pub(crate) mod element_wait;
 pub(crate) mod page_barrier;
 pub(crate) mod page_wait;
 pub(crate) mod settle_outcome;
 pub(crate) mod settle_tracker;
 pub(crate) mod settle_wait;
+pub(crate) mod state_wait;
 pub(crate) mod watched_action;

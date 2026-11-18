@@ -1,11 +1,10 @@
 # tabref: read and drive Chrome from the shell
 
 Start: `tabref open <url>` loads the page and prints it (first call: `tabref skill && tabref open <url>`).
-Chrome is already connected (TABREF_CDP). Output is plain text sized to read whole: do not pipe it through
-grep, head or sed, and do not sleep; every command waits for the page itself.
-Only when the user asks for their own browser: `tabref connect --user-chrome` (opt-in; it drives their
-logged-in Chrome and its sessions; `tabref connect --off` stops).
-To keep logins between runs: `tabref open <url> --launch --profile DIR` (a profile of tabref's own, not yours).
+Chrome is already connected. Output is plain text sized to read whole: do not pipe it through grep, head
+or sed, and do not sleep; every command waits for the page itself.
+Downloads, waits, JavaScript dialogs, saved logins, the user's own Chrome, apps built on Chrome: `tabref skill more`.
+Any command's options: `tabref CMD --help`.
 
 ## Reading
 One line per block in reading order; `#` lines are headings. Controls sit in brackets with their ref:
@@ -15,26 +14,20 @@ One line per block in reading order; `#` lines are headings. Controls sit in bra
   one row per line. To count, use these numbers across the whole page, not the first block you see.
 - The last line says what was cut and the exact command for it (`tabref snap --rows 21-`,
   `tabref read --section "<heading>"`). Run it before answering about cut content.
-- `tabref read` prints the main text. `tabref find <text>` searches all text, hidden too: each match with its
-  section, its ref, and `(hidden; expand [e8 …])` when a click shows it.
+- `tabref read` prints the main text. `tabref find <text>` searches all text, hidden too
+  (a hidden match names the ref that shows it).
 - A `dialog` line at the top is a popup: click one of its buttons first (decline cookie banners).
 
 ## Acting
-`click T`, `fill T VALUE`, `select T OPTION`, `check T`, `uncheck T`, `press KEY [T]`, `hover T`, `scroll down|T`.
-`type T TEXT` adds TEXT after what the field holds (`fill` replaces it); `double-click T` clicks twice.
-Downloads: an action or `open` that downloads prints the saved file's path; `tabref wait --download` waits for
-one still running (`open --download-dir DIR URL` picks the folder).
-In your own Chrome, tabref restores Chrome's default download behaviour after each command, and a download
-that starts after the command goes to Chrome's own folder and is not reported; one left running is named by
-the next `wait --download`.
+`click T`, `fill T VALUE`, `type T TEXT` (adds), `select T LABEL|VALUE`, `check T`, `uncheck T`,
+`press KEY [T]`, `focus T`, `hover T`, `scroll down|T`, `double-click T`, `upload T FILE`.
 T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
-`"Edit" in "<row text>"`, `"Reply" after "<text>"` (or `before`). Several or no matches fail with candidates;
-nothing is guessed. Each action prints what changed (new address, `{3 -> 4}`, field `"67.00" -> "62.00"`,
-new controls with refs, or the next page), so do not snapshot again to check. Dates, times and numbers take
-plain values (`fill "Due date" 2027-07-31`); `select` takes a label or value.
+`"Edit" in "<row text>"`, `"Reply" after "<text>"`. Several or no matches fail with candidates.
+Each action prints what changed (new address, `{3 -> 4}`, `"67.00" -> "62.00"`, new controls), so do not
+snapshot again to check. Dates, times and numbers take plain values (`fill "Due date" 2027-07-31`).
 
 ## Many steps: one call
-Use `tabref do` with a quoted heredoc, not shell loops. It stops at the first failing step and shows the page.
+Use `tabref do` with a quoted heredoc, not shell loops. It stops at the first failing step.
 
     tabref do <<'EOF'
     for size price in XS 47.00 L 49.00
@@ -46,12 +39,10 @@ Use `tabref do` with a quoted heredoc, not shell loops. It stops at the first fa
     end
     EOF
 
-Steps: any action above, `open URL`, `expect text|gone|url X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
-`tabref js "EXPR"` returns a page value as JSON (e.g. every link or row at once).
+Steps: any action but `upload`, `open URL`, `expect text|gone|url X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
+`expect T is enabled|visible|hidden|gone|value=X` waits for an element's state.
+`tabref js "EXPR"` returns a page value as JSON (every link or row at once).
 
 ## Errors (one line, code first)
-`ELEMENT_NOT_FOUND` lists the closest names; `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`;
-`STALE_REF`: use the fresh ref it gives; `TIMEOUT`; `INVALID_ARGS`. Tabs: `tabref tabs`, `tabref tab N`,
-`tabref open --new-tab URL` (relative too; the new tab becomes current).
-In an app built on Chrome (Electron, reached with `--cdp PORT`), `open` and `open --new-tab` are refused, as its
-windows are the app; read and act on them with snap, click and fill (js to read them).
+`ELEMENT_NOT_FOUND` lists close names; `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`; `STALE_REF`: use
+the fresh ref it gives. Tabs: `tabref tabs`, `tabref tab N`, `tabref open --new-tab URL`.

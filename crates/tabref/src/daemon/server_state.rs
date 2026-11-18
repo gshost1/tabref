@@ -106,6 +106,7 @@ impl ServerState {
 
     /// Returns a session after its command, unless its connection broke.
     pub(crate) fn checkin(&self, mut session: Session) {
+        session.leave_background_tabs();
         downloads::end_command(&mut session);
         session.end();
         if session.is_broken() || self.stopping() {

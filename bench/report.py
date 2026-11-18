@@ -9,7 +9,8 @@
            (results/linux-sonnet-5-5/, arms ad-14 bh pw ab) beside it; the host column says where each arm ran.
            One task set at a time (rows carry `taskset`; rows without one are heldout): heldout by
            default; --taskset fresh prints only the aggregate ranking (no per-task tables, no
-           verifier text). Ranking: pass rate, then USD per success (the control rule).
+           verifier text); --taskset dev (the unsealed tuning set, bench/dev/) prints everything heldout does.
+           Ranking: pass rate, then USD per success (the control rule).
   latency  per-command latency (latency/run.py): cold open and first snapshot, warm min/median/max ms, output tokens
   replay   model-free replay (replay/run.py): per arm and task the median tool s, output tokens and passes, the
            recorded run's numbers beside them, and which kinds of call carry the output tokens
@@ -18,7 +19,7 @@
 Warm and cold rows are never pooled: models and replay show only rows run after the warm-up named by --warmup
 (default the current one, harness/warmup.py VERSION); --warmup cold shows the rows from before it.
 
-Usage: python3 -I bench/report.py models [--baseline] [--model claude-sonnet-5-5] [--taskset heldout|fresh]
+Usage: python3 -I bench/report.py models [--baseline] [--model claude-sonnet-5-5] [--taskset heldout|fresh|dev]
                                           [--results f.jsonl ...]
        python3 -I bench/report.py latency [file.json]
        python3 -I bench/report.py replay [file.jsonl ...]
@@ -40,7 +41,8 @@ import report as heldout_report  # noqa: E402  (heldout/report.py = fork 7faca32
 BASELINE = HERE / "results" / "linux-sonnet-5-5" / "results-web.jsonl"
 ARMS = ["ad-14", "bh", "pw", "ab", "tabref"]
 TASKS = ["hw1", "hw2", "hw3", "hw4", "hw5", "hw6", "hw7", "hp1", "hp2", "hp3"]
-TASKSETS = ["heldout", "fresh"]
+TASKSETS = ["heldout", "fresh", "dev"]
+OPEN_SETS = {"heldout", "dev"}
 OPS = ["open", "snapshot", "click", "fill", "text"]
 heldout_report.ARM_ORDER = ARMS + [a for a in heldout_report.ARM_ORDER if a not in ARMS]
 
@@ -108,7 +110,7 @@ def load_by_taskset(paths, model, want, prompt=None, warm=None):
                 continue
             n = heldout_report.normalize(r)
             n["cost"] = row_cost(r)
-            if ts != "heldout":
+            if ts not in OPEN_SETS:
                 n["why"] = "sealed"
             rows[ts].append(n)
             hosts[ts][r.get("arm")].add(r.get("host", "mac"))
@@ -160,7 +162,7 @@ def models_section(ts, rows, hosts, skipped, paths):
              "CLI s is tool time (the arm wrapper's log); tokens are input (uncached + cache read + cache write) plus "
              "output. USD is Claude Code's total_cost_usd (a capped run: the runner's charge). A run that hit the cap "
              "is a valid failure.", ""]
-    if ts == "fresh":
+    if ts not in OPEN_SETS:
         lines += ["Sealed set: the aggregate ranking only (no per-task tables, no verifier text or answers).", ""]
     lines += [f"### web ({ts}): ranking (cannot reward failing)", "",
               "Order: pass rate, then cost per success (USD over every valid run / passes). The other per-success "
@@ -171,7 +173,7 @@ def models_section(ts, rows, hosts, skipped, paths):
         per = " | ".join(heldout_report.fmt(x["per"][m], m) for m, _ in heldout_report.METRICS)
         lines.append(f"| {i} | {x['arm']} | {', '.join(sorted(hosts.get(x['arm'], {'?'})))} | {x['passes']}/{x['runs']} | "
                      f"{x['passes'] / max(x['runs'], 1):.0%} | {x['zero_tasks']} | {usd(x['usd'])} | {per} |")
-    if ts != "heldout":
+    if ts not in OPEN_SETS:
         return lines + [""]
     rest = heldout_report.summary_tables(rows, "web")
     second = next(i for i, line in enumerate(rest) if i > 0 and line.startswith("### "))
@@ -368,7 +370,7 @@ def main():
                          "rows from before it, --baseline rows included; '' for all, which mixes them)")
     ap.add_argument("--model", default=None)
     ap.add_argument("--arms", default=None)
-    ap.add_argument("--taskset", default=None, choices=TASKSETS, help="models: which task set (default heldout; fresh shows the aggregate ranking only)")
+    ap.add_argument("--taskset", default=None, choices=TASKSETS, help="models: which task set (default heldout; fresh shows the aggregate ranking only; dev shows all)")
     a = ap.parse_args()
     out = []
     if a.what in ("models", "all"):

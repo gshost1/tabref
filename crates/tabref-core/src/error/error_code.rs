@@ -1,7 +1,7 @@
 use serde::Serialize;
 
-/// The machine-readable error codes, a subset of agent-desktop's with the
-/// same spelling, so an agent that knows one tool reads the other.
+/// The machine-readable error codes. Their spellings are stable, so an agent
+/// can match on them.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {

@@ -63,8 +63,8 @@ pub(crate) fn step_report(
         merge(&mut data, more);
         return Ok((line, data));
     }
-    for dialog in effects.dialogs() {
-        line.push_str(&format!("; {}", dialog_line(dialog)));
+    for dialog in dialog_lines(effects.dialogs()) {
+        line.push_str(&format!("; {dialog}"));
     }
     for download in &effects.downloads {
         line.push_str(&format!("; {}", download_line(download)));
@@ -96,7 +96,7 @@ fn effect_block(
     effects: &ActionEffects,
     known: &HashSet<String>,
 ) -> Result<(Vec<String>, Value), AppError> {
-    let mut lines: Vec<String> = effects.dialogs().iter().map(dialog_line).collect();
+    let mut lines: Vec<String> = dialog_lines(effects.dialogs());
     lines.extend(effects.downloads.iter().map(download_line));
     let mut data = json!({
         "dialogs": effects.dialogs(),
@@ -150,15 +150,21 @@ fn effect_block(
     Ok((lines, data))
 }
 
-/// Whether a click, key press or hover showed no effect at all: no
-/// navigation, tab, dialog, DOM mutation or text change. Changes inside a
-/// closed shadow root or drawn on a canvas look like this too.
+/// Whether a click, double-click, key press, hover or focus showed no
+/// effect at all: no navigation, tab, dialog, download, DOM mutation or text
+/// change. Changes inside a closed shadow root or drawn on a canvas look
+/// like this too. A focus the page moved away already says so.
 fn nothing_seen(acted: &Acted) -> bool {
+    if acted.data.get("focused") == Some(&Value::Bool(false)) {
+        return false;
+    }
     let Some(effects) = &acted.effects else {
         return false;
     };
-    matches!(acted.verb, "click" | "double-click" | "press" | "hover")
-        && !effects.settled.navigated
+    matches!(
+        acted.verb,
+        "click" | "double-click" | "press" | "hover" | "focus"
+    ) && !effects.settled.navigated
         && !effects.settled.same_document
         && effects.new_tab.is_none()
         && effects.dialogs().is_empty()
@@ -203,7 +209,11 @@ fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut V
     }
 }
 
-fn dialog_line(dialog: &Value) -> String {
+const MAX_DIALOG_LINES: usize = 10;
+
+/// One dialog as a line: its type, its message when it has one, and how
+/// it was answered.
+pub(crate) fn dialog_line(dialog: &Value) -> String {
     let kind = dialog
         .get("type")
         .and_then(Value::as_str)
@@ -212,7 +222,63 @@ fn dialog_line(dialog: &Value) -> String {
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    format!("dialog {kind} {} accepted", quote_text(message))
+    let mut line = if message.is_empty() {
+        format!("dialog {kind} {}", answered(dialog))
+    } else {
+        format!("dialog {kind} {} {}", quote_text(message), answered(dialog))
+    };
+    if dialog["late"] == Value::Bool(true) {
+        line.push_str(" (opened after the last command)");
+    }
+    if dialog["other_tab"] == Value::Bool(true) {
+        line.push_str(" (in another tab)");
+    }
+    line
+}
+
+/// The dialogs as lines, in the order they opened: the same line repeated
+/// back to back is one line with `×N`, and past `MAX_DIALOG_LINES` the
+/// rest is counted.
+pub(crate) fn dialog_lines(dialogs: &[Value]) -> Vec<String> {
+    let mut counted: Vec<(String, usize)> = Vec::new();
+    for dialog in dialogs {
+        let line = dialog_line(dialog);
+        match counted.last_mut() {
+            Some((last, count)) if *last == line => *count += 1,
+            _ => counted.push((line, 1)),
+        }
+    }
+    let more = counted.len().saturating_sub(MAX_DIALOG_LINES);
+    let mut lines: Vec<String> = counted
+        .into_iter()
+        .take(MAX_DIALOG_LINES)
+        .map(|(line, count)| {
+            if count > 1 {
+                format!("{line} \u{d7}{count}")
+            } else {
+                line
+            }
+        })
+        .collect();
+    match more {
+        0 => {}
+        1 => lines.push("1 more dialog".to_owned()),
+        more => lines.push(format!("{more} more dialogs")),
+    }
+    lines
+}
+
+/// How the connection answered a dialog, from its `answer`: "dismissed",
+/// "answered "TEXT"" for a prompt, or "accepted".
+pub(crate) fn answered(dialog: &Value) -> String {
+    let answer = &dialog["answer"];
+    if answer["accept"] == Value::Bool(false) {
+        return "dismissed".to_owned();
+    }
+    match answer["text"].as_str() {
+        Some(text) => format!("answered {}", quote_text(text)),
+        None => "accepted".to_owned(),
+    }
 }
 
 fn past(verb: &str) -> String {
@@ -247,3 +313,7 @@ pub(crate) fn styled(line: &str) -> String {
         _ => line.to_owned(),
     }
 }
+
+#[cfg(test)]
+#[path = "action_report_tests.rs"]
+mod tests;

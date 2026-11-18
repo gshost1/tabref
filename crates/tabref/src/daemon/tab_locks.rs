@@ -48,6 +48,32 @@ impl TabLocks {
         }
     }
 
+    /// Holds `tab` for `owner` if no other command holds it, without
+    /// waiting: `Some(true)` when it was taken now, `Some(false)` when
+    /// `owner` held it already, `None` when another command holds it.
+    pub(crate) fn try_hold(&self, tab: &str, owner: u64) -> Option<bool> {
+        let mut held = self.held.lock().ok()?;
+        match held.get(tab) {
+            None => {
+                held.insert(tab.to_owned(), owner);
+                Some(true)
+            }
+            Some(holder) if *holder == owner => Some(false),
+            Some(_) => None,
+        }
+    }
+
+    /// Releases `owner`'s hold on `tab` alone, so a command that held a tab
+    /// only for one call does not keep it for the rest of its run.
+    pub(crate) fn release_tab(&self, tab: &str, owner: u64) {
+        if let Ok(mut held) = self.held.lock()
+            && held.get(tab) == Some(&owner)
+        {
+            held.remove(tab);
+        }
+        self.freed.notify_all();
+    }
+
     pub(crate) fn release(&self, owner: u64) {
         if let Ok(mut held) = self.held.lock() {
             held.retain(|_, holder| *holder != owner);

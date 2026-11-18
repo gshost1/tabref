@@ -9,12 +9,14 @@ use tabref_core::{AppError, Deadline, ErrorCode};
 
 use super::cdp_event::CdpEvent;
 use super::connection::CdpConnection;
+use super::dialog_choice::DialogChoice;
 use super::frame_envelope::FrameEnvelope;
 use super::incoming::Incoming;
 use super::protocol_error::{protocol_error, target_gone};
 use crate::transport::transport_error::{is_timeout, transport_failed};
 
 const DETACHED: &str = "Target.detachedFromTarget";
+const ATTACHED: &str = "Target.attachedToTarget";
 const DIALOG_OPENING: &str = "Page.javascriptDialogOpening";
 const RAW_SCAN_MIN: usize = 64 * 1024;
 const CANCEL_SLICE: Duration = Duration::from_millis(50);
@@ -60,8 +62,9 @@ impl CdpConnection {
                 }
                 Ok(None)
             }
-            Some(Incoming::Event(event)) => {
-                self.answer_dialog(&event, deadline)?;
+            Some(Incoming::Event(mut event)) => {
+                self.note_child_tab(&event);
+                self.answer_dialog(&mut event, deadline)?;
                 if event.method == DETACHED {
                     if let Some(session) = event.params.get("sessionId").and_then(Value::as_str) {
                         self.ledger.mark_detached(session);
@@ -95,31 +98,77 @@ impl CdpConnection {
         true
     }
 
+    /// Answers a dialog that opened: as the command chose, when the choice
+    /// applies to this kind of dialog (never an alert; see
+    /// `DialogChoice::applies_to`), else accepted (a prompt with its own
+    /// default text). The event keeps the answer in `params.answer` for the
+    /// report.
     pub(super) fn answer_dialog(
         &mut self,
-        event: &CdpEvent,
+        event: &mut CdpEvent,
         deadline: Deadline,
     ) -> Result<(), AppError> {
-        if !self.answer_dialogs || event.method != DIALOG_OPENING {
+        if !self.dialogs.auto || event.method != DIALOG_OPENING {
             return Ok(());
         }
-        let Some(session_id) = event.session_id.as_deref() else {
+        let Some(session_id) = event.session_id.clone() else {
             return Ok(());
         };
         let id = self.next_id;
         self.next_id += 1;
-        let prompt = event
+        let default_prompt = event
             .params
             .get("defaultPrompt")
             .and_then(Value::as_str)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .to_owned();
+        let kind = event
+            .params
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let chosen = match self.dialogs.next.take() {
+            Some(choice) if choice.applies_to(&kind) => choice,
+            unused => {
+                self.dialogs.next = unused;
+                DialogChoice::Accept { text: None }
+            }
+        };
+        let (accept, text) = chosen.answer(&default_prompt);
         let request = json!({
             "id": id,
             "method": "Page.handleJavaScriptDialog",
-            "params": { "accept": true, "promptText": prompt },
+            "params": { "accept": accept, "promptText": text },
             "sessionId": session_id,
         });
+        let prompt = kind == "prompt";
+        let mut answer = json!({ "accept": accept });
+        if accept && prompt {
+            answer["text"] = Value::String(text);
+        }
+        event.params["answer"] = answer;
+        if let Some(tab) = self.ledger.tab_of(&session_id) {
+            event.params["tab"] = Value::String(tab.to_owned());
+        }
         self.send_text(&request.to_string(), deadline)
+    }
+
+    /// An iframe session auto-attached under a session belongs to that
+    /// session's tab.
+    fn note_child_tab(&mut self, event: &CdpEvent) {
+        if event.method != ATTACHED {
+            return;
+        }
+        let (Some(parent), Some(child)) = (
+            event.session_id.as_deref(),
+            event.params.get("sessionId").and_then(Value::as_str),
+        ) else {
+            return;
+        };
+        if let Some(tab) = self.ledger.tab_of(parent).map(str::to_owned) {
+            self.ledger.note_tab(child, &tab);
+        }
     }
 
     pub(super) fn send_text(&mut self, text: &str, deadline: Deadline) -> Result<(), AppError> {
