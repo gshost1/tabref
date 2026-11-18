@@ -19,6 +19,10 @@ logged-in Chrome and its sessions); `tabref connect --off` stops.
 Apps built on Chrome (Electron, reached with `--cdp PORT`): `open`, `open --new-tab` and `close` are refused,
 as the windows are the app; read and act with snap, click and fill (js to read).
 
+Uploads: `upload TARGET FILE...`: TARGET may be the drop zone, link or label; upload finds the hidden file
+input (same form first, else the only one on the page). A page with no file input: upload clicks TARGET
+and fills the file chooser that opens; no dialog shows.
+
 Screenshots: `tabref screenshot [T] [--out FILE]` saves a PNG of the page, or of element T, and prints its path.
 
 Waits: `tabref wait --text X`, `--gone X`, `--url TEXT` (the address contains it), `--idle`,
