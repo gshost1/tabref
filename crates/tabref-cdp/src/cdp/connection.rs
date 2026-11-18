@@ -121,6 +121,24 @@ impl CdpConnection {
         self.reply(id, deadline)
     }
 
+    /// [`call`](Self::call) for undoing a state this connection set in the
+    /// page, such as file-chooser interception: it is sent even when the
+    /// caller was cancelled, because a command whose client went away must
+    /// not leave the tab changed for the person using it. The guard still
+    /// holds, and the cancel flag is back in place when this returns.
+    pub fn call_restoring(
+        &mut self,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+        deadline: Deadline,
+    ) -> Result<Value, AppError> {
+        let cancel = self.health.cancel.take();
+        let outcome = self.call(method, params, session_id, deadline);
+        self.health.cancel = cancel;
+        outcome
+    }
+
     /// Sends every `(method, params)` on `session_id` before waiting for any
     /// reply, then returns the replies in order, so the calls cost one round
     /// trip instead of one each. The browser handles them in the order sent.
@@ -338,3 +356,7 @@ impl CdpConnection {
 #[cfg(test)]
 #[path = "connection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "connection_restore_tests.rs"]
+mod restore_tests;

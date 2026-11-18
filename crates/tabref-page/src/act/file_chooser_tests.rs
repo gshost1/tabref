@@ -172,3 +172,78 @@ fn a_chooser_of_another_tab_is_not_taken_for_this_click() {
 
     assert_eq!(error.kind(), Some("no_file_chooser"));
 }
+
+#[test]
+fn interception_that_cannot_be_turned_off_is_an_error_even_after_the_files_are_set() {
+    let file = fixture_file("left.txt");
+    let name = file.file_name().unwrap().to_string_lossy().into_owned();
+    let transport = clicked(opened("selectOne"))
+        .expect("DOM.setFileInputFiles", json!({}))
+        .expect("DOM.resolveNode", json!({ "object": { "objectId": "I" } }))
+        .expect(
+            "Runtime.callFunctionOn",
+            json!({ "result": { "type": "object", "value": { "name": "input#cv", "files": [name] } } }),
+        )
+        .expect("Runtime.releaseObject", json!({}))
+        .expect_error("Page.setInterceptFileChooserDialog", -32000, "Not allowed")
+        .expect("Runtime.releaseObject", json!({}));
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let error = upload_files(
+        &mut connection,
+        &session(),
+        &token(5),
+        std::slice::from_ref(&file),
+        deadline(),
+    )
+    .unwrap_err();
+    std::fs::remove_file(&file).unwrap();
+
+    assert_eq!(error.kind(), Some("file_chooser_left_intercepted"));
+    assert!(error.message.contains("1 files were set on input#cv"));
+    assert_eq!(
+        error.disposition.delivery(),
+        DeliveryDisposition::DeliveredVerified
+    );
+    assert!(error.suggestion.unwrap_or_default().contains("daemon stop"));
+}
+
+#[test]
+fn interception_that_fails_to_turn_on_is_still_turned_off_and_nothing_is_clicked() {
+    let file = fixture_file("arm.txt");
+    let transport = resolved(ScriptedTransport::new())
+        .expect(
+            "Runtime.callFunctionOn",
+            json!({ "result": { "type": "object", "value": { "top": 3, "candidates": [] } } }),
+        )
+        .expect("Page.enable", json!({}))
+        .expect_error("Page.setInterceptFileChooserDialog", -32000, "Not allowed")
+        .expect("Page.setInterceptFileChooserDialog", json!({}))
+        .expect("Runtime.releaseObject", json!({}));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+
+    let error = upload_files(
+        &mut connection,
+        &session(),
+        &token(5),
+        std::slice::from_ref(&file),
+        deadline(),
+    )
+    .unwrap_err();
+    std::fs::remove_file(&file).unwrap();
+
+    assert!(
+        error
+            .platform_detail
+            .unwrap_or_default()
+            .contains("Not allowed")
+    );
+    let sent = sent.lock().unwrap();
+    assert_eq!(intercepts(&sent), vec![true, false]);
+    assert!(
+        !sent
+            .iter()
+            .any(|request| request["method"] == "Input.dispatchMouseEvent")
+    );
+}
