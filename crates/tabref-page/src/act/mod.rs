@@ -18,6 +18,7 @@ pub(crate) mod drawn_element;
 pub(crate) mod element_call;
 pub(crate) mod element_errors;
 pub(crate) mod element_reading;
+pub(crate) mod file_chooser;
 pub(crate) mod file_input_choice;
 pub(crate) mod file_input_search;
 pub(crate) mod fill;

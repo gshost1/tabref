@@ -77,6 +77,26 @@ pub fn files_of(connection: &mut CdpConnection, page: &PageSession, css: &str) -
         .collect()
 }
 
+/// The text of the element `css` picks.
+pub fn text_of(connection: &mut CdpConnection, page: &PageSession, css: &str) -> String {
+    let reply = connection
+        .call(
+            "Runtime.evaluate",
+            json!({
+                "expression": format!("document.querySelector({css:?}).textContent"),
+                "returnByValue": true,
+            }),
+            Some(&page.session_id),
+            deadline(),
+        )
+        .unwrap();
+    reply
+        .pointer("/result/value")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned()
+}
+
 pub fn fixture(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("tabref-live-up-{}-{name}", std::process::id()));
     std::fs::write(&path, b"hello").unwrap();

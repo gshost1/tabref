@@ -11,7 +11,8 @@ use crate::session::Session;
 
 /// Sets the files of a file input without opening a file dialog. The
 /// target may be the drop zone, link or label that stands for a hidden
-/// input; the result names the input that took the files.
+/// input, or, on a page with no file input, the button whose click opens
+/// the file chooser; the result names the input that took the files.
 pub(crate) fn run(
     session: &mut Session,
     target: &str,
