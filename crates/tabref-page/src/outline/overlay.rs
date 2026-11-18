@@ -8,13 +8,17 @@ use super::text_runs::{cut_chars, squash, subtree_text};
 const MIN_OVERLAY_TEXT: usize = 40;
 const LABEL_LIMIT: usize = 80;
 
-/// Whether an element may be a dialog the view lifts to its top: a dialog
-/// by markup, or a fixed-position box covering at least half the viewport
+/// Whether an element the walk reached, so one with something showing
+/// inside it, may be a dialog the view lifts to its top: a dialog by
+/// markup, or a fixed-position box covering at least half the viewport
 /// that is not navigation (a modal sheet, a consent wall). A sticky bar is
-/// not one. Whether it stays a dialog is decided once its content is read.
+/// not one. A dialog by markup need not show a box of its own: a
+/// `visibility: hidden` layer whose pane turns visibility back on (a
+/// docked compose window) is still the dialog. Whether it stays a dialog
+/// is decided once its content is read.
 pub(crate) fn is_dialog_candidate(node: &DomNode, viewport: [f64; 2]) -> bool {
     if is_dialog_markup(node) {
-        return node.is_shown();
+        return true;
     }
     let Some(layout) = node.layout.as_ref().filter(|layout| layout.visible) else {
         return false;
@@ -102,3 +106,7 @@ fn first_heading(tree: &DomTree, index: usize) -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+#[path = "overlay_tests.rs"]
+mod tests;
