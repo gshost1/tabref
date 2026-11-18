@@ -46,6 +46,9 @@ pub(crate) enum Command {
         /// Start at this line of the view (the cut markers name it)
         #[arg(long, value_name = "LINE", default_value_t = 1)]
         from: usize,
+        /// Stop after this line of the view: --from 1 --to 40 prints lines 1-40
+        #[arg(long, value_name = "LINE")]
+        to: Option<usize>,
     },
     /// Click an element
     Click {
@@ -156,6 +159,9 @@ pub(crate) enum Command {
         /// Start at this line of the text (the cut markers name it)
         #[arg(long, value_name = "LINE", default_value_t = 1)]
         from: usize,
+        /// Stop after this line of the text: --from 1 --to 40 prints lines 1-40
+        #[arg(long, value_name = "LINE")]
+        to: Option<usize>,
     },
     /// Wait until a condition holds (bounded by --timeout)
     Wait {

@@ -68,9 +68,16 @@ pub(crate) fn page_view(
             line.text.push_str(&format!(" …({cut}: {command})"));
         }
     }
-    let lines: Vec<ViewLine> = lines.into_iter().skip(options.route.from - 1).collect();
+    let mut lines: Vec<ViewLine> = lines.into_iter().skip(options.route.from - 1).collect();
+    let after_to = options.route.to.and_then(|to| {
+        let past = lines.iter().position(|line| line.number > to)?;
+        let next = lines[past].number;
+        lines.truncate(past);
+        Some(next)
+    });
     let main = *scope == ViewScope::Page && has_main(&outline.body);
-    let (kept, report) = fit(lines, options, main);
+    let (kept, mut report) = fit(lines, options, main);
+    report.after_to = after_to;
     let mut text = header(subject, options);
     for line in &kept {
         text.push('\n');
@@ -136,3 +143,7 @@ fn no_section(wanted: &str) -> AppError {
 #[cfg(test)]
 #[path = "page_view_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "line_range_tests.rs"]
+mod line_range_tests;
