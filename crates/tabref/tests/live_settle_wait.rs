@@ -26,12 +26,12 @@ document.getElementById('save').addEventListener('click', () => {
 </script>"#;
 
 const DELAYED: &str = r#"<!doctype html><title>Delayed</title><h1>Delayed read</h1><p id=out>Nothing yet</p>
-<button onclick="go(0, 0)">Read 0</button><button onclick="go(150, 0)">Read 150</button>
-<button onclick="go(0, 1)">Read 0 stored</button>
+<button onclick="go(0, 0)">Read 0</button><button onclick="go(100, 0)">Read 100</button>
+<button onclick="go(0, 1)">Read 0 stored</button><button onclick="go(0, 0, '/gzip')">Read gzip</button>
 <script>
 let reads = 0;
-async function go(delay, store) {
-  const reply = await fetch('/data?store=' + store, { method: 'POST', body: 'x' });
+async function go(delay, store, path = '/data') {
+  const reply = await fetch(path + '?store=' + store, { method: 'POST', body: 'x' });
   await new Promise(done => setTimeout(done, delay));
   const body = await reply.json();
   reads += 1;
@@ -40,6 +40,17 @@ async function go(delay, store) {
 </script>"#;
 
 const SLOWEST_SETTLE: Duration = Duration::from_millis(1_000);
+const GZIP_STALL: Duration = Duration::from_millis(450);
+
+/// A gzipped JSON object with 4,096 padding characters before `"kept":true`.
+/// Most of the decoded bytes can arrive before the last encoded bytes.
+const GZIP_BODY: &[u8] = &[
+    0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0xed, 0xc1, 0xe1, 0x09, 0x00, 0x10,
+    0x14, 0x85, 0xd1, 0x5d, 0xee, 0x6f, 0x13, 0xd8, 0x46, 0x3d, 0x49, 0x4a, 0x2f, 0x51, 0x4a, 0x76,
+    0xb7, 0x87, 0xbe, 0x73, 0x8e, 0x3c, 0x99, 0xd5, 0x5e, 0x14, 0xb5, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0xc0, 0xf7, 0x14, 0xd4, 0xb2, 0x4f, 0xc5, 0x39, 0x56, 0xbe, 0x0f, 0xec, 0xbf, 0x54, 0x94, 0x1a,
+    0x10, 0x00, 0x00,
+];
 
 fn serve_no_store() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -83,6 +94,10 @@ fn answer(mut stream: TcpStream) {
                 Ok(read) => have += read,
             }
         }
+        if head.starts_with("POST /gzip?") {
+            let _ = write_stalled_gzip(&mut stream);
+            return;
+        }
         ("application/json", r#"{"kept":true}"#.to_owned())
     } else if head.starts_with("GET /delayed") {
         ("text/html; charset=utf-8", DELAYED.to_owned())
@@ -99,6 +114,19 @@ fn answer(mut stream: TcpStream) {
         body.len()
     );
     let _ = stream.write_all(response.as_bytes());
+}
+
+fn write_stalled_gzip(stream: &mut TcpStream) -> std::io::Result<()> {
+    stream.set_nodelay(true)?;
+    let (first, last) = GZIP_BODY.split_at(GZIP_BODY.len() - 14);
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        GZIP_BODY.len(),
+    )?;
+    stream.write_all(first)?;
+    std::thread::sleep(GZIP_STALL);
+    stream.write_all(last)
 }
 
 #[test]
@@ -133,7 +161,7 @@ fn a_page_that_reads_its_reply_a_little_later_is_reported_after_it_renders() {
     let port = serve_no_store();
     let tabref = harness("settle-delayed");
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/delayed")]);
-    for (at, button) in ["Read 0", "Read 150", "Read 0 stored"].iter().enumerate() {
+    for (at, button) in ["Read 0", "Read 100", "Read 0 stored"].iter().enumerate() {
         let run = tabref.ok(&["click", button]);
         assert!(
             run.stdout.contains("Loaded") && run.stdout.contains(&format!("{}}}", at + 1)),
@@ -141,4 +169,21 @@ fn a_page_that_reads_its_reply_a_little_later_is_reported_after_it_renders() {
             run.stdout
         );
     }
+}
+
+#[test]
+fn a_gzip_reply_holds_the_settle_until_its_last_bytes_arrive() {
+    if !live() {
+        return;
+    }
+    let port = serve_no_store();
+    let tabref = harness("settle-gzip");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/delayed")]);
+    let started = Instant::now();
+    let run = tabref.ok(&["click", "Read gzip"]);
+    assert!(
+        started.elapsed() >= GZIP_STALL && run.stdout.contains("Loaded true 1"),
+        "the click reported before the gzip reply rendered:\n{}",
+        run.stdout
+    );
 }
