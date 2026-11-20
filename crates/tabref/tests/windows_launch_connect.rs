@@ -47,22 +47,27 @@ fn connecting_to_a_launch_does_not_run_the_profile_owner_check() {
         .write_state("launched.json", &serde_json::to_string(&record).unwrap())
         .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
-        .args(["--json", "--timeout", "500", "tabs"])
-        .env("TABREF_HOME", &home.0)
-        .env("TABREF_NO_DAEMON", "1")
-        .env_remove("TABREF_CDP")
-        .env("SystemRoot", home.0.join("no-powershell"))
-        .output()
-        .unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let connected = listener.accept().is_ok();
-    drop(lock);
-
-    assert!(
-        connected,
-        "the command never reached the recorded port: {} {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
+            .args(["--json", "--timeout", "500"])
+            .args(args)
+            .env("TABREF_HOME", &home.0)
+            .env("TABREF_NO_DAEMON", "1")
+            .env_remove("TABREF_CDP")
+            .env("SystemRoot", home.0.join("no-powershell"))
+            .output()
+            .unwrap();
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let managed = run(&["open", "about:blank", "--launch"]);
+    assert_eq!(
+        managed["error"]["details"]["kind"], "cdp_launch_unverified",
+        "{managed}"
     );
+    let attached = run(&["tabs"]);
+    assert_ne!(
+        attached["error"]["details"]["kind"], "cdp_launch_unverified",
+        "{attached}"
+    );
+    drop(lock);
 }
