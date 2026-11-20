@@ -31,7 +31,7 @@ use super::ref_target::latest_snapshot_of;
 
 const MAX_AGE: Duration = Duration::from_secs(5);
 const WATCH_WAIT: Duration = Duration::from_millis(8);
-const ARM_WAIT: Duration = Duration::from_millis(300 + IDLE_WAIT_MS);
+const ARM_WAIT: Duration = Duration::from_millis(IDLE_WAIT_MS + 11);
 const MAX_KEPT: usize = 4;
 const PAGE_ACTIONS: &str = "page-actions";
 
