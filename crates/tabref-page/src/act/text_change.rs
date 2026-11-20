@@ -5,14 +5,28 @@ const COMPACT_CONTEXT_CHARS: usize = 8;
 const LINE_CHARS: usize = 100;
 const ADDED_CHARS: usize = 400;
 const MIDDLE_CHARS: usize = 60;
+const BRIEF_ROWS_CHARS: usize = 80;
+const ROWS_LABEL: &str = "now starting:";
+const ROWS_SHOWN: usize = 5;
+const ABOVE_CHARS: usize = 40;
 
 /// One line of a page's rendered text that an action changed: rewritten in
-/// place, added or removed.
+/// place, added or removed; or a run of lines the action put in a new
+/// order (a sorted list drawn again): the line above the run, the run's
+/// lines in their new order, and whether a table drew them as rows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TextChange {
-    Changed { before: String, after: String },
+    Changed {
+        before: String,
+        after: String,
+    },
     Added(String),
     Removed(String),
+    Reordered {
+        above: Option<String>,
+        run: Vec<String>,
+        table: bool,
+    },
 }
 
 impl TextChange {
@@ -21,6 +35,7 @@ impl TextChange {
     pub fn brief(&self) -> String {
         match self {
             Self::Added(line) => format!("+ {}", cut(line, LINE_CHARS)),
+            Self::Reordered { above, run, table } => brief_rows(&run_head(above, run, *table), run),
             other => other.to_string(),
         }
     }
@@ -35,15 +50,46 @@ impl TextChange {
             _ => None,
         }
     }
+
+    /// The reorder heading, complete rows that fit, and a count of the
+    /// rows left out. The byte budget includes newlines and the footer.
+    pub fn reorder_preview(&self, budget: usize) -> Option<(String, usize)> {
+        let Self::Reordered { above, run, table } = self else {
+            return None;
+        };
+        let mut head = run_head(above, run, *table);
+        for shown in (0..=run.len().min(ROWS_SHOWN)).rev() {
+            let footer = if shown < run.len() {
+                format!("\n  (+{} more: tabref snap)", run.len() - shown)
+            } else {
+                String::new()
+            };
+            let rows: usize = run[..shown].iter().map(|row| row.len() + 3).sum();
+            if head.len() + rows + footer.len() <= budget {
+                for row in &run[..shown] {
+                    head.push_str("\n  ");
+                    head.push_str(row);
+                }
+                head.push_str(&footer);
+                return Some((head, shown));
+            }
+        }
+        None
+    }
 }
 
 impl fmt::Display for TextChange {
     /// `▲ {3 -> 4} ▼ Books set in winter` for a rewritten line, keeping the
     /// words around the change; `+ line` otherwise, whole up to 400
     /// characters so a validation message keeps its list, and `- line` cut
-    /// to 100. A cut ends after a whole word.
+    /// to 100. A cut ends after a whole word. A reorder prints its first
+    /// rows, one per indented line, and how to see the rest.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Reordered { .. } => {
+                let (block, _) = self.reorder_preview(usize::MAX).ok_or(fmt::Error)?;
+                formatter.write_str(&block)
+            }
             Self::Changed { before, after } => {
                 formatter.write_str(&inline_change(before, after, CONTEXT_CHARS))
             }
@@ -51,6 +97,36 @@ impl fmt::Display for TextChange {
             Self::Removed(line) => write!(formatter, "- {}", cut(line, LINE_CHARS)),
         }
     }
+}
+
+/// `reordered 8 rows below "Code Weight", now starting:`; `lines` when no
+/// table drew them, and no `below` when the run starts the page.
+fn run_head(above: &Option<String>, run: &[String], table: bool) -> String {
+    let noun = if table { "rows" } else { "lines" };
+    let below = above.as_ref().map_or_else(String::new, |line| {
+        format!(" below \"{}\"", cut(line, ABOVE_CHARS))
+    });
+    format!("reordered {} {noun}{below}, {ROWS_LABEL}", run.len())
+}
+
+fn brief_rows(head: &str, first: &[String]) -> String {
+    let count = first.len();
+    let mut rows = String::new();
+    let mut shown = 0;
+    for row in first {
+        let row = cut(row, BRIEF_ROWS_CHARS);
+        let joined = rows.chars().count() + row.chars().count() + 3;
+        if shown > 0 && joined > BRIEF_ROWS_CHARS {
+            break;
+        }
+        if shown > 0 {
+            rows.push_str(" | ");
+        }
+        rows.push_str(&row);
+        shown += 1;
+    }
+    let more = if count > shown { " …" } else { "" };
+    format!("{head} {rows}{more}")
 }
 
 fn inline_change(before: &str, after: &str, context_chars: usize) -> String {

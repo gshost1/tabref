@@ -1,12 +1,45 @@
+use std::time::{Duration, Instant};
+
 use serde_json::json;
 use tabref_page::TextChange;
-
-use std::time::{Duration, Instant};
 
 use super::super::action_report_changes::{
     change_data, counted, reload_head, step_change, within_budget,
 };
 use super::{NOTHING_READ, NOTHING_SEEN, dialog_line, dialog_lines, nothing_seen};
+
+#[test]
+fn reorder_preview_fits_whole_cjk_rows_and_reports_omissions() {
+    let rows: Vec<_> = (1..=8)
+        .map(|n| format!("{n} {}", "界".repeat(82)))
+        .collect();
+    let changes = [
+        TextChange::Reordered {
+            above: Some("Header".into()),
+            run: rows.clone(),
+            table: true,
+        },
+        TextChange::Added("追加".repeat(180)),
+        TextChange::Added("Another change".into()),
+    ];
+    let counts = counted(&changes);
+    let text = within_budget(&counts).join("\n");
+    assert!(text.len() <= 600, "{}", text.len());
+    let mut lines = text.lines().skip(1);
+    for row in &rows[..2] {
+        assert_eq!(lines.next().map(str::trim_start), Some(row.as_str()));
+    }
+    assert_eq!(lines.next(), Some("  (+6 more: tabref snap)"));
+    assert_eq!(lines.next(), Some("+2 more: tabref snap"));
+    let data = change_data(&counts);
+    assert_eq!(data["changes"][0], "rows reordered: 2 of 8");
+    assert_eq!(data["change_counts"][0]["line"], data["changes"][0]);
+    assert_eq!(data["change_counts"][0]["count"], 1);
+    assert_eq!(
+        data["reordered"],
+        serde_json::json!({ "above": "Header", "rows": 2, "total": 8, "table": true })
+    );
+}
 
 #[test]
 fn a_quiet_action_selects_the_unread_frame_note() {

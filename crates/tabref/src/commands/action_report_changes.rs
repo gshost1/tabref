@@ -47,27 +47,41 @@ pub(super) fn change_data(changes: &[CountedChange<'_>]) -> Value {
     let limit = changes.len().min(JSON_CHANGE_LIMIT);
     let mut lines = Vec::with_capacity(limit);
     let mut counts = Vec::with_capacity(limit);
+    let mut reordered = None;
     for change in &changes[..limit] {
-        let line = change.change.to_string();
+        let line = match change.change {
+            TextChange::Reordered { above, run, table } => {
+                let rows =
+                    reorder_preview(change, change_budget(changes)).map_or(0, |(_, rows)| rows);
+                let total = run.len();
+                reordered.get_or_insert_with(
+                    || json!({ "above": above, "rows": rows, "total": total, "table": table }),
+                );
+                let noun = if *table { "rows" } else { "lines" };
+                format!("{noun} reordered: {rows} of {total}")
+            }
+            other => other.to_string(),
+        };
         lines.push(format!("{line}{}", change.suffix()));
         counts.push(json!({ "line": line, "count": change.count }));
     }
-    json!({
+    let mut data = json!({
         "changes": lines,
         "change_counts": counts,
         "distinct_changes_omitted": changes.len() - limit,
-    })
+    });
+    if let Some(reordered) = reordered {
+        data["reordered"] = reordered;
+    }
+    data
 }
 
 /// Show the text lines that fit the byte budget. A cut keeps the repeat
 /// count. The first rewrite can use less context to keep its edit intact.
 pub(super) fn within_budget(changes: &[CountedChange<'_>]) -> Vec<String> {
-    let mut shown = preview(changes, CHANGE_BUDGET);
+    let mut shown = preview(changes, change_budget(changes));
     if shown.len() < changes.len() {
-        shown.push(format!(
-            "+{} more: tabref snap",
-            changes.len() - shown.len()
-        ));
+        shown.push(omitted(changes.len() - shown.len()));
     }
     shown
 }
@@ -89,9 +103,41 @@ pub(super) fn reload_head(changes: &[CountedChange<'_>]) -> Vec<String> {
     shown
 }
 
+fn omitted(count: usize) -> String {
+    format!("+{count} more: tabref snap")
+}
+
+/// A reorder takes multiple lines and may use most of the budget. Keep
+/// room for the notice about other changes omitted after it.
+fn change_budget(changes: &[CountedChange<'_>]) -> usize {
+    if changes.len() > 1 && matches!(changes[0].change, TextChange::Reordered { .. }) {
+        return CHANGE_BUDGET - omitted(changes.len()).len() - 1;
+    }
+    CHANGE_BUDGET
+}
+
+fn reorder_preview(change: &CountedChange<'_>, room: usize) -> Option<(String, usize)> {
+    let suffix = change.suffix();
+    let (block, rows) = change
+        .change
+        .reorder_preview(room.checked_sub(suffix.len())?)?;
+    Some((format!("{block}{suffix}"), rows))
+}
+
 fn preview(changes: &[CountedChange<'_>], mut room: usize) -> Vec<String> {
     let mut shown = Vec::new();
     for change in changes {
+        if !shown.is_empty() {
+            room = room.saturating_sub(1);
+        }
+        if matches!(change.change, TextChange::Reordered { .. }) {
+            let Some((block, _)) = reorder_preview(change, room) else {
+                break;
+            };
+            room -= block.len();
+            shown.push(block);
+            continue;
+        }
         let text = change.change.to_string();
         let suffix = change.suffix();
         if text.len() + suffix.len() <= room {

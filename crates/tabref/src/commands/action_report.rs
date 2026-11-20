@@ -8,6 +8,7 @@ use super::action_report_changes::{change_data, counted, reload_head, step_chang
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
+use super::redrawn_rows::{NewControl, redrawn};
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
@@ -152,18 +153,16 @@ fn effect_block(
     }
     let captured = if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
-        let mut appeared = Vec::new();
-        new_controls(&captured.tree, known, &mut appeared);
-        let shown = appeared.len().min(NEW_SHOWN);
-        lines.extend(
-            appeared
-                .iter()
-                .take(shown)
-                .map(|line| format!("new {line}")),
-        );
-        if appeared.len() > shown {
-            lines.push(format!("+{} more new: tabref snap", appeared.len() - shown));
+        let mut found = Vec::new();
+        new_controls(&captured.tree, known, &mut found);
+        let (in_rows, outside) = redrawn(&page.changes, &found, |target| captured.dom(target));
+        let shown = outside.len().min(NEW_SHOWN);
+        lines.extend(outside.iter().take(shown).map(|line| format!("new {line}")));
+        if outside.len() > shown {
+            lines.push(format!("+{} more new: tabref snap", outside.len() - shown));
         }
+        lines.extend(in_rows);
+        let appeared: Vec<&String> = found.iter().map(|control| &control.line).collect();
         merge(&mut data, json!({ "new": appeared }));
         Some(captured)
     } else {
@@ -216,15 +215,20 @@ fn nothing_seen(acted: &Acted) -> Option<&'static str> {
     })
 }
 
-fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut Vec<String>) {
+fn new_controls<'a>(
+    node: &'a AccessibilityNode,
+    known: &HashSet<String>,
+    found: &mut Vec<NewControl<'a>>,
+) {
     if node.ref_id.is_some()
-        && node
-            .identity
-            .retained_object
-            .as_ref()
-            .is_some_and(|token| !known.contains(token))
+        && let Some(token) = &node.identity.retained_object
+        && !known.contains(token)
     {
-        found.push(styled(&node_line(node, NEW_LINE_CHARS)));
+        found.push(NewControl {
+            line: styled(&node_line(node, NEW_LINE_CHARS)),
+            name: node.identity.name.as_deref(),
+            token,
+        });
     }
     for child in &node.children {
         new_controls(child, known, found);

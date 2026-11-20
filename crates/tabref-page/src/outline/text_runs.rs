@@ -38,7 +38,7 @@ const BOX_TAGS: &[&str] = &[
 /// runs join as the page set them; a box of its own (a block, an inline
 /// block, a line break) is set off by spaces. Script and style text is left
 /// out.
-pub(crate) fn subtree_text(tree: &DomTree, index: usize) -> String {
+pub fn subtree_text(tree: &DomTree, index: usize) -> String {
     block_text(tree, index, &|_| false)
 }
 
