@@ -1,12 +1,11 @@
 use std::fmt::Write as _;
 
-use tabref_page::{Control, cut_chars, short_href, squash};
+use tabref_page::{CONTROL_NAME_LIMIT, Control, cut_chars, short_href, squash};
 
 use super::escape::{escape_href, escape_in_token};
 use super::node_line::quote_text;
 use super::view_options::ViewOptions;
 
-const NAME_LIMIT: usize = 100;
 const VALUE_LIMIT: usize = 80;
 const HREF_LIMIT: usize = 120;
 const CROSS_SITE_LIMIT: usize = 80;
@@ -45,7 +44,7 @@ pub(crate) fn control_token(
         out.push_str(&options.refs.print(ref_text));
         out.push(' ');
     }
-    let name = limited(escape_in_token(&control.name), NAME_LIMIT);
+    let name = limited(escape_in_token(&control.name), CONTROL_NAME_LIMIT);
     let href = control
         .href
         .as_deref()
