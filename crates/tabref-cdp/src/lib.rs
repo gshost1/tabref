@@ -33,7 +33,10 @@ pub use discovery::websocket_url::WebSocketUrl;
 pub use launch::abandon::abandon_launch;
 pub use launch::chrome_binary::{CHROME_ENV, find_chrome};
 pub use launch::chrome_launch::launch_chrome;
-pub use launch::launch_identity::{browser_guid, check_active_port, same_browser_run};
+pub use launch::launch_identity::{
+    browser_guid, check_active_port, read_launch_active_port, same_browser_run,
+    unverified_launch_port,
+};
 pub use launch::launch_options::LaunchOptions;
 pub use launch::launched_browser::LaunchedBrowser;
 pub use launch::process_start::{launched_alive, process_start};

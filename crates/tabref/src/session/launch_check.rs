@@ -11,7 +11,7 @@ use std::path::Path;
 
 use tabref_cdp::{
     ActivePort, HeldPort, LaunchedBrowser, ListenerVerdict, ProcessView, check_active_port,
-    check_listener, launched_alive, read_active_port,
+    check_listener, launched_alive, read_launch_active_port,
 };
 use tabref_core::AppError;
 
@@ -43,13 +43,13 @@ pub(crate) fn launched_check(record: &LaunchedBrowser) -> LaunchCheck {
         record,
         check_listener(record.port, &launched_from(&record.profile_dir)),
         &|| launched_alive(record),
-        &|| read_active_port(&record.profile_dir),
+        &|| read_launch_active_port(record),
     )
 }
 
 /// The launch check from the port's `verdict`, whether the recorded process
-/// is `alive` (asked only when the verdict cannot say), and the profile's
-/// `DevToolsActivePort` as `read`.
+/// is `alive` (asked when the listener does not confirm the launch), and
+/// the profile's `DevToolsActivePort` as `read`.
 pub(crate) fn decide(
     record: &LaunchedBrowser,
     verdict: ListenerVerdict,
@@ -58,13 +58,9 @@ pub(crate) fn decide(
 ) -> LaunchCheck {
     let found = match verdict {
         ListenerVerdict::Trusted(held) => LaunchCheck::Held(held),
-        ListenerVerdict::Nothing | ListenerVerdict::Untrusted { .. } => return LaunchCheck::Gone,
-        ListenerVerdict::Unknown | ListenerVerdict::CantCheck(_) => {
-            if alive() != Some(true) {
-                return LaunchCheck::Gone;
-            }
-            LaunchCheck::Alive
-        }
+        _ if alive() != Some(true) => return LaunchCheck::Gone,
+        ListenerVerdict::Nothing | ListenerVerdict::Untrusted { .. } => LaunchCheck::Gone,
+        ListenerVerdict::Unknown | ListenerVerdict::CantCheck(_) => LaunchCheck::Alive,
     };
     match check_active_port(record, read()) {
         Ok(()) => found,
