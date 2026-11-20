@@ -22,7 +22,7 @@ use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 use crate::cli::Cli;
 use crate::daemon::control::stop_endpoint_less;
 use crate::output::outcome::Outcome;
-use crate::session::endpoint_choice::launched_check;
+use crate::session::launch_check::{LaunchCheck, launched_check};
 use crate::session::launch_record::{forget_launched, load_launched, lock_launched, read_launched};
 
 const CLOSE_BUDGET: Duration = Duration::from_secs(5);
@@ -117,9 +117,9 @@ fn ask_to_close(record: &LaunchedBrowser, deadline: Deadline) -> bool {
         return false;
     };
     let connection = match launched_check(record) {
-        Some(Some(held)) => connect_held(&endpoint, &held, deadline),
-        Some(None) => connect(&endpoint, deadline),
-        None => return false,
+        LaunchCheck::Held(held) => connect_held(&endpoint, &held, deadline),
+        LaunchCheck::Alive => connect(&endpoint, deadline),
+        LaunchCheck::Unverified(_) | LaunchCheck::Gone => return false,
     };
     connection.is_ok_and(|mut connection| {
         connection

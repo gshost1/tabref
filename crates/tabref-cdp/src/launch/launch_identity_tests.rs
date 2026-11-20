@@ -16,7 +16,7 @@ fn record() -> LaunchedBrowser {
         profile_dir: PathBuf::from("/home/u/.cache/tabref-profile-a"),
         headless: true,
         started: Some("x".to_owned()),
-        persistent: false,
+        profile_use: crate::ProfileUse::THROWAWAY,
     }
 }
 
