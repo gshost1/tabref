@@ -278,7 +278,7 @@ impl<'a> BlockRenderer<'a> {
                 None => block.items.get(position).cloned(),
             })
             .collect();
-        let mut line = LineText::new(self.options, is_prose(&items));
+        let mut line = LineText::new(self.options, is_prose(&items), false);
         for item in &items {
             line.push_item(item);
         }
@@ -290,17 +290,25 @@ impl<'a> BlockRenderer<'a> {
     /// The block on one line, or `None` when it holds a table, a heading,
     /// a landmark or too much to fit. Inline content alone always fits.
     pub(crate) fn pack(&self, block: &Block) -> Option<String> {
-        self.pack_with(block, true, false)
+        self.pack_with(block, true, false, false)
     }
 
     /// The block on one line however long, for a heading or a table cell.
     pub(crate) fn pack_unbounded(&self, block: &Block) -> String {
-        self.pack_with(block, false, false).unwrap_or_default()
+        let cell = matches!(block.kind, BlockKind::Cell | BlockKind::HeaderCell);
+        self.pack_with(block, false, false, cell)
+            .unwrap_or_default()
     }
 
-    fn pack_with(&self, block: &Block, bounded: bool, prose_around: bool) -> Option<String> {
+    fn pack_with(
+        &self,
+        block: &Block,
+        bounded: bool,
+        prose_around: bool,
+        in_cell: bool,
+    ) -> Option<String> {
         let prose = prose_around || is_prose(&block.items);
-        let mut line = LineText::new(self.options, prose);
+        let mut line = LineText::new(self.options, prose, in_cell);
         let mut parts = 0usize;
         let echoes = label_echoes(&block.items);
         for (position, item) in block.items.iter().enumerate() {
@@ -317,7 +325,7 @@ impl<'a> BlockRenderer<'a> {
             }
             let text = match &inner.kind {
                 BlockKind::List if bounded => self.pack_list(inner)?,
-                _ => self.pack_with(inner, bounded, prose)?,
+                _ => self.pack_with(inner, bounded, prose, in_cell)?,
             };
             let separator = match inner.kind {
                 BlockKind::Cell | BlockKind::HeaderCell => " | ",

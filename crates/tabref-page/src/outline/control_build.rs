@@ -23,6 +23,14 @@ const TYPED_INPUTS: &[&str] = &[
     "color",
 ];
 
+pub(crate) fn is_printed_control_state(state: &str) -> bool {
+    SHOWN_STATES.contains(&state)
+        || state == "collapsed"
+        || state
+            .strip_prefix("type=")
+            .is_some_and(|kind| TYPED_INPUTS.contains(&kind))
+}
+
 const NOT_CONTROLS: &[&str] = &[
     "cell",
     "row",

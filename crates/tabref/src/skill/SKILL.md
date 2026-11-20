@@ -20,6 +20,7 @@ A `dialog` line at the top: click one of its buttons (decline cookies).
 `press KEY [T]`, `focus T`, `hover T`, `scroll down|T`, `double-click T`, `upload T FILE`.
 T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
 `"Edit" in "<row text>"`, `"Reply" after "<text>"`.
+Copy a data table row from `snap` to use it as an `in` scope.
 Dates and times take plain values (`2027-07-31`, `14:30`). Each action prints what it changed (new address,
 `"67.00" -> "62.00"`, new rows and controls): read that instead of taking a snapshot.
 

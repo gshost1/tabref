@@ -19,17 +19,19 @@ pub(crate) struct LineText<'a> {
     hrefs: Vec<String>,
     options: &'a ViewOptions,
     prose: bool,
+    in_cell: bool,
     after_control: bool,
     shortened: bool,
 }
 
 impl<'a> LineText<'a> {
-    pub(crate) fn new(options: &'a ViewOptions, prose: bool) -> Self {
+    pub(crate) fn new(options: &'a ViewOptions, prose: bool, in_cell: bool) -> Self {
         Self {
             out: String::new(),
             hrefs: Vec::new(),
             options,
             prose,
+            in_cell,
             after_control: false,
             shortened: false,
         }
@@ -45,7 +47,7 @@ impl<'a> LineText<'a> {
                 if self.after_control && run.starts_with(char::is_alphanumeric) {
                     self.out.push(' ');
                 }
-                self.out.push_str(&escape_text(run));
+                self.out.push_str(&self.escape_run(run));
                 self.after_control = false;
             }
             Item::Break => {
@@ -60,7 +62,7 @@ impl<'a> LineText<'a> {
     pub(crate) fn push_control(&mut self, control: &Control) {
         let reading = self.options.reading() && !control.has_state("collapsed");
         if reading {
-            self.push_word(&escape_text(&control_reading(control)));
+            self.push_word(&self.escape_run(&control_reading(control)));
             self.after_control = true;
             return;
         }
@@ -85,6 +87,15 @@ impl<'a> LineText<'a> {
         self.shortened |= cut;
         self.push_word(&token);
         self.after_control = true;
+    }
+
+    fn escape_run(&self, run: &str) -> String {
+        let escaped = escape_text(run);
+        if self.in_cell {
+            escaped.replace('|', "\\|")
+        } else {
+            escaped
+        }
     }
 
     /// Whether a control token on the line was cut.

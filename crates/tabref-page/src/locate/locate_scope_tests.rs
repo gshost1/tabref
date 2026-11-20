@@ -33,7 +33,7 @@ fn text(name: &str) -> AccessibilityNode {
 }
 
 fn cell(children: Vec<AccessibilityNode>) -> AccessibilityNode {
-    node("group", "", children)
+    node("cell", "", children)
 }
 
 fn near(tree: &AccessibilityNode, name: &str, scope: &str) -> Result<String, ErrorCode> {
@@ -104,6 +104,74 @@ fn a_sold_out_card_does_not_borrow_the_next_card_s_button() {
         Err(ErrorCode::ElementNotFound)
     );
     assert_eq!(near(&tree, "Add", "Widget C"), Ok("button Add".into()));
+}
+
+#[test]
+fn pasted_row_fields_match_in_order_without_using_the_ref() {
+    let row = |stock: &str, edit: Option<AccessibilityNode>| {
+        node(
+            "row",
+            "",
+            vec![
+                cell(vec![text("Mug")]),
+                cell(vec![text(stock)]),
+                cell(edit.into_iter().collect()),
+            ],
+        )
+    };
+    let tree = node(
+        "table",
+        "",
+        vec![row("3", Some(control("link", "Edit"))), row("8", None)],
+    );
+
+    for scope in ["Mug | 3", "Mug | 3 | [e999 Edit -> /items/3]"] {
+        assert_eq!(near(&tree, "Edit", scope), Ok("link Edit".into()));
+    }
+    for scope in ["3 | Mug", "Mug | 8", "Mug | 3 | [e999 Delete -> /items/3]"] {
+        assert_eq!(near(&tree, "Edit", scope), Err(ErrorCode::ElementNotFound));
+    }
+}
+
+#[test]
+fn a_pasted_row_that_matches_two_rows_is_ambiguous() {
+    let row = || {
+        node(
+            "row",
+            "",
+            vec![
+                cell(vec![text("Mug")]),
+                cell(vec![text("3")]),
+                cell(vec![control("button", "Edit")]),
+            ],
+        )
+    };
+    let tree = node("table", "", vec![row(), row()]);
+    assert_eq!(
+        near(&tree, "Edit", "Mug | 3 | [e2 button Edit]"),
+        Err(ErrorCode::AmbiguousTarget)
+    );
+}
+
+#[test]
+fn a_plain_text_scope_can_climb_through_a_row_to_its_record() {
+    let row = node("row", "", vec![cell(vec![text("Mug")])]);
+    let tree = node("group", "", vec![row, control("button", "Edit")]);
+    assert_eq!(near(&tree, "Edit", "Mug"), Ok("button Edit".into()));
+}
+
+#[test]
+fn a_pasted_row_cannot_reach_a_control_outside_the_row() {
+    let row = node(
+        "row",
+        "",
+        vec![cell(vec![text("Mug")]), cell(vec![text("9.50")])],
+    );
+    let tree = node("group", "", vec![row, control("button", "Edit")]);
+    assert_eq!(
+        near(&tree, "Edit", "Mug | 9.50"),
+        Err(ErrorCode::ElementNotFound)
+    );
 }
 
 #[test]
