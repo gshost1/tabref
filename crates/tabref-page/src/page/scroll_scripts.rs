@@ -9,7 +9,7 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
   const win = doc.defaultView;
   const root = doc.scrollingElement || doc.documentElement;
   const key = Symbol.for('tabref.scroll');
-  const requests = Symbol.for('tabref.scroll-requests');
+  const requests = Symbol.for('tabref.scroll-request-tracker');
   const parent = node => node.parentElement || (node.getRootNode() || {}).host;
   const left = (el, dx, dy) => dy > 0 ? el.scrollHeight - el.clientHeight - el.scrollTop
     : dy < 0 ? el.scrollTop
@@ -141,7 +141,7 @@ pub(crate) const WATCH: &str = r"function() {
   if (containingRoot instanceof win.ShadowRoot) observe(containingRoot);
   observeRoots(el);
   const before = [el.scrollLeft, el.scrollTop];
-  const started = (win.performance.timeOrigin + win.performance.now()) / 1000;
+  const started = win.Date.now() / 1000;
   if (el === root) win.scrollBy(dx, dy); else el.scrollBy(dx, dy);
   const moved = el.scrollLeft !== before[0] || el.scrollTop !== before[1];
   return { moved, atEnd: left(el, dx, dy) < 2, started };

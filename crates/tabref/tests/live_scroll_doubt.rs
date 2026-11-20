@@ -145,12 +145,34 @@ fn a_cross_site_fetch_is_followed_and_reports_the_loaded_rows() {
     let base = lazy_site(vec![("/feed", page)]);
     let tabref = harness("scroll-cross-site");
     tabref.ok(&["open", &format!("{base}/feed")]);
+    tabref.ok(&[
+        "js",
+        "Object.defineProperty(performance, 'timeOrigin', {value: Date.now() + 60000}); 1",
+    ]);
     let run = tabref.ok(&["scroll", "down", "--px", "20000"]);
     assert!(
         first_line(&run).contains("10 new items loaded"),
         "{}",
         run.stdout
     );
+}
+
+#[test]
+fn a_tab_with_an_old_request_tracker_can_still_scroll() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/more")]);
+    tabref.ok(&[
+        "js",
+        "window[Symbol.for('tabref.scroll-requests')] = {pending: 0}; 1",
+    ]);
+    let moved = tabref.ok(&["--json", "scroll", "down", "--px", "20000"]);
+    assert_eq!(moved.json()["data"]["at_end"], true, "{}", moved.stdout);
+    let at_end = tabref.ok(&["--json", "scroll", "down"]);
+    assert_eq!(at_end.json()["data"]["moved"], false, "{}", at_end.stdout);
+    assert_eq!(at_end.json()["data"]["loading"], false, "{}", at_end.stdout);
 }
 
 #[test]
