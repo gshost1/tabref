@@ -11,6 +11,7 @@ use super::page_view::current_page_view;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
+use crate::view::bot_check::action_bot_check;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
 
@@ -88,6 +89,11 @@ pub(crate) fn step_report(
             line.push_str(&format!("; {note}"));
         }
         merge(&mut data, text_check_data(page));
+        if let Some(check) = action_bot_check(session, &page.title, None) {
+            line.push('\n');
+            line.push_str(&check.note());
+            check.add_data(&mut data);
+        }
     }
     merge(&mut data, json!({ "navigated": effects.settled.navigated }));
     Ok((line, data))
@@ -142,7 +148,9 @@ fn effect_block(
         let report = current_page_view(session)?;
         lines.push(report.text);
         merge(&mut data, json!({ "page": report.data }));
-    } else if page.changed_anything() || effects.settled.same_document {
+        return Ok((lines, data));
+    }
+    let captured = if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
         let mut appeared = Vec::new();
         new_controls(&captured.tree, known, &mut appeared);
@@ -157,6 +165,13 @@ fn effect_block(
             lines.push(format!("+{} more new: tabref snap", appeared.len() - shown));
         }
         merge(&mut data, json!({ "new": appeared }));
+        Some(captured)
+    } else {
+        None
+    };
+    if let Some(check) = action_bot_check(session, &page.title, captured.as_ref()) {
+        lines.insert(0, check.note());
+        check.add_data(&mut data);
     }
     Ok((lines, data))
 }
