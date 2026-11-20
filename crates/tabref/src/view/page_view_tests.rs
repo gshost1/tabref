@@ -279,7 +279,7 @@ fn long_paragraphs_and_code_are_cut_with_a_marker_and_whole_with_full() {
 }
 
 #[test]
-fn a_heading_that_is_a_link_is_named_by_its_words_in_the_section_hint() {
+fn the_footer_resumes_at_the_cut_even_when_later_sections_have_links() {
     let mut dom = Dom::new();
     let mut refs = HashMap::new();
     for i in 0..60 {
@@ -303,10 +303,13 @@ fn a_heading_that_is_a_link_is_named_by_its_words_in_the_section_hint() {
     }
     let out = view(dom, refs);
     let footer = out.lines().last().unwrap();
+    let (_, cut) = footer.split_once("cut: lines ").unwrap();
+    let from = cut.split_once('-').unwrap().0;
     assert!(
-        footer.contains("tabref read --section \"Post \\\"title\\\" "),
+        footer.contains(&format!("more: tabref snap --from {from}")),
         "{footer}"
     );
+    assert!(!footer.contains("read --section"), "{footer}");
     assert!(!footer.contains("[e1"), "{footer}");
 }
 
