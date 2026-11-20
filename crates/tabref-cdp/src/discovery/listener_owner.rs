@@ -28,6 +28,8 @@ const CHROME_FAMILY: &[&str] = &[
     "headless_shell",
     "msedge",
     "brave",
+    "vivaldi-bin",
+    "opera",
 ];
 
 /// Who holds `port` on this machine, with `trusted` saying which of this

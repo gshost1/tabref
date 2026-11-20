@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use tabref_cdp::{
-    ListenerVerdict, ProcessView, check_listener, connect_held, connect_with,
+    ListenerVerdict, ProcessView, UserBrowser, check_listener, connect_held, connect_with,
     default_user_data_dirs, endpoint_from_user_data_dir, is_chrome_family, listener_pids,
     process_start, profile_lock_pid, read_active_port,
 };
@@ -29,15 +29,18 @@ pub(crate) const GONE_KIND: &str = "cdp_user_chrome_gone";
 const START_TIMES: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
 /// The user's browser to attach to: the one in `dir`, or the one default
-/// profile whose browser has remote debugging on. Only these directories'
-/// `DevToolsActivePort` files and profile locks are read.
+/// profile whose browser runs with remote debugging on. A
+/// `DevToolsActivePort` an exited browser left behind does not count while
+/// another browser runs, even when both files name the same port. Only
+/// these directories' `DevToolsActivePort` files and profile locks are
+/// read.
 pub(crate) fn find_user_chrome(dir: Option<&Path>) -> Result<UserChromeRecord, AppError> {
     if cfg!(windows) {
         return Err(unsupported());
     }
     let (name, dir) = match dir {
         Some(dir) => named_profile(dir)?,
-        None => only_profile()?,
+        None => only_profile(default_user_data_dirs())?,
     };
     let pid = profile_lock_pid(&dir).ok_or_else(|| not_running(&dir))?;
     let started = process_start(pid);
@@ -62,27 +65,41 @@ fn named_profile(dir: &Path) -> Result<(&'static str, PathBuf), AppError> {
     Ok((name, dir))
 }
 
-fn only_profile() -> Result<(&'static str, PathBuf), AppError> {
-    let found: Vec<(&'static str, PathBuf)> = default_user_data_dirs()
+/// The one browser of `browsers` that runs with remote debugging on. When
+/// none runs, the first profile with a left-over `DevToolsActivePort` is
+/// named as not running, so the error says which browser to start.
+pub(crate) fn only_profile(
+    browsers: Vec<UserBrowser>,
+) -> Result<(&'static str, PathBuf), AppError> {
+    let debugged: Vec<(&'static str, PathBuf)> = browsers
         .into_iter()
         .filter(|browser| read_active_port(&browser.user_data_dir).is_ok())
         .map(|browser| (browser.name, browser.user_data_dir))
         .collect();
-    match found.as_slice() {
-        [one] => Ok(one.clone()),
-        [] => Err(AppError::new(
-            ErrorCode::ActionFailed,
-            "None of your browsers has remote debugging turned on",
-        )
-        .with_suggestion(
-            "Turn it on at chrome://inspect/#remote-debugging in your browser (it asks you to allow \
-             each connection), then run 'tabref connect --user-chrome' again",
-        )
-        .with_details(serde_json::json!({ "kind": "cdp_user_chrome_not_found" }))
-        .with_disposition(DeliverySemantics::not_delivered())),
+    let running: Vec<&(&'static str, PathBuf)> =
+        debugged.iter().filter(|(_, dir)| is_running(dir)).collect();
+    match running.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => match debugged.first() {
+            Some((_, left_over)) => Err(not_running(left_over)),
+            None => Err(AppError::new(
+                ErrorCode::ActionFailed,
+                "None of your browsers has remote debugging turned on",
+            )
+            .with_suggestion(
+                "Turn it on at chrome://inspect/#remote-debugging in your browser (it asks you to \
+                 allow each connection), then run 'tabref connect --user-chrome' again; for a \
+                 browser tabref does not know, add --user-data-dir DIR",
+            )
+            .with_details(serde_json::json!({ "kind": "cdp_user_chrome_not_found" }))
+            .with_disposition(DeliverySemantics::not_delivered())),
+        },
         several => Err(AppError::new(
             ErrorCode::AmbiguousTarget,
-            format!("{} of your browsers have remote debugging on", several.len()),
+            format!(
+                "{} of your running browsers have remote debugging on",
+                several.len()
+            ),
         )
         .with_suggestion(format!(
             "Name one with --user-data-dir: {}",
@@ -94,6 +111,14 @@ fn only_profile() -> Result<(&'static str, PathBuf), AppError> {
         ))
         .with_details(serde_json::json!({ "kind": "cdp_user_chrome_ambiguous" }))
         .with_disposition(DeliverySemantics::not_delivered())),
+    }
+}
+
+/// Whether a live browser process holds the profile's lock.
+fn is_running(dir: &Path) -> bool {
+    match profile_lock_pid(dir) {
+        Some(pid) => !START_TIMES || process_start(pid).is_some(),
+        None => false,
     }
 }
 
@@ -122,7 +147,7 @@ pub(crate) fn connect_user_chrome(
     Ok(ConnectedBrowser {
         endpoint,
         connection,
-        warning: Some(format!("in your {} (logged in)", record.name)),
+        warning: Some(format!("your logged-in {}", record.name)),
         choice: None,
         started_headless_profile: false,
     })
@@ -144,16 +169,28 @@ pub(crate) fn same_process(record: &UserChromeRecord) -> bool {
 /// `lsof` reports them must all be the opted-in browser; with no such check
 /// (Windows), tabref refuses.
 fn listener_is(port: u16, record: &UserChromeRecord) -> Result<(), AppError> {
-    match listener_pids(port) {
+    listeners_are(port, record, listener_pids(port))
+}
+
+/// [`listener_is`] for the listener `pids` found (`None`: none could be
+/// found on this platform).
+pub(crate) fn listeners_are(
+    port: u16,
+    record: &UserChromeRecord,
+    pids: Option<Vec<u32>>,
+) -> Result<(), AppError> {
+    match pids {
         Some(pids) if pids.is_empty() => Err(gone(record)),
-        Some(pids) if pids.iter().all(|pid| *pid == record.pid) => Ok(()),
-        Some(pids) => Err(not_the_profile(
-            record,
-            port,
-            &ListenerVerdict::Untrusted {
-                holder: Some(format!("pid {}", pids.first().copied().unwrap_or_default())),
-            },
-        )),
+        Some(pids) => match pids.iter().find(|pid| **pid != record.pid) {
+            None => Ok(()),
+            Some(stranger) => Err(not_the_profile(
+                record,
+                port,
+                &ListenerVerdict::Untrusted {
+                    holder: Some(format!("pid {stranger}")),
+                },
+            )),
+        },
         None => Err(unsupported()),
     }
 }

@@ -126,6 +126,7 @@ pub(crate) enum Command {
     },
     /// Set the files of an <input type=file>
     Upload {
+        /// Ref, visible name, or css=SELECTOR for one file input in the main document
         #[arg(value_name = "TARGET")]
         target: String,
         #[arg(required = true)]

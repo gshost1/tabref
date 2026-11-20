@@ -6,7 +6,8 @@ use serde_json::json;
 use tabref_cdp::{ListenerVerdict, ProcessView};
 use tabref_core::{AppError, ErrorCode};
 
-use super::{browser_is_gone, implicit_port, launched_check, launched_from, reached};
+use super::super::launch_check::{launched_check, launched_from};
+use super::{browser_is_gone, implicit_port, reached};
 
 #[test]
 fn a_port_that_changed_hands_or_points_elsewhere_is_an_error_not_no_browser() {
@@ -83,7 +84,7 @@ fn a_launch_record_whose_port_is_free_is_not_used() {
         started: tabref_cdp::process_start(std::process::id()),
         profile_use: tabref_cdp::ProfileUse::THROWAWAY,
     };
-    assert!(launched_check(&record).is_none());
+    assert!(!launched_check(&record).is_launched());
 }
 
 #[cfg(target_os = "linux")]
