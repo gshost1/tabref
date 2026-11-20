@@ -65,6 +65,13 @@ impl TestDom {
         )
     }
 
+    /// Gives the rendered node at `index` `visibility: hidden`.
+    pub(crate) fn hide(&mut self, index: usize) {
+        if let Some(layout) = self.tree.nodes[index].layout.as_mut() {
+            layout.visible = false;
+        }
+    }
+
     pub(crate) fn form(&mut self, index: usize) -> &mut FormState {
         &mut self.tree.nodes[index].form
     }

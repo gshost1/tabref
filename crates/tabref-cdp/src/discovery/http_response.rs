@@ -63,6 +63,17 @@ pub(crate) fn http_ok_body(raw: &[u8]) -> Option<String> {
     status_ok.then(|| body.trim().to_owned())
 }
 
+/// The status code of an HTTP response, or `None` for bytes that do not
+/// start with an HTTP status line.
+pub(crate) fn http_status(raw: &[u8]) -> Option<u16> {
+    let text = String::from_utf8_lossy(raw);
+    let mut parts = text.lines().next()?.split_whitespace();
+    parts
+        .next()
+        .filter(|version| version.starts_with("HTTP/"))?;
+    parts.next()?.parse().ok()
+}
+
 #[cfg(test)]
 #[path = "http_response_tests.rs"]
 mod tests;
