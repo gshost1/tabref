@@ -19,7 +19,7 @@ mod silent;
 use std::path::Path;
 
 use common::{Run, harness_home};
-use profile_home::{Dirs, tabref, tabref_command};
+use profile_home::{Dirs, launch_on, tabref, tabref_command};
 use silent::{gone, kill, launch_record, start_detached, start_time, write_record};
 
 /// `close --browser` with `temp` as the temp folder.
@@ -156,6 +156,53 @@ fn an_adopted_browser_is_asked_to_close_and_never_killed() {
         "browser_not_closed",
         "{}",
         run.stdout
+    );
+}
+
+#[test]
+fn a_mismatched_port_file_blocks_close_and_attachment_without_killing_the_browser() {
+    let home = harness_home("close-mismatch");
+    let tools = harness_home("close-mismatch-tools");
+    let profiles = harness_home("close-mismatch-profiles");
+    let _dirs = Dirs {
+        homes: vec![home.clone(), tools.clone(), profiles.clone()],
+    };
+    let profile = profiles.join("work");
+    let (pid, port) = start_detached(&tools, &profile);
+    let record = launch_record(pid, port, &profile, true, false);
+    write_record(&home, &record);
+    std::fs::write(
+        profile.join("DevToolsActivePort"),
+        format!("{port}\n/devtools/browser/another-run\n"),
+    )
+    .unwrap();
+
+    let config = home.with_extension("config");
+    for result in [
+        close_browser(&home, &profiles),
+        tabref(&home, &config, &["--json", "tabs"], true),
+        launch_on(&home, &config, &profile),
+    ] {
+        assert!(!result.ok, "{}", result.stdout);
+        let error = &result.json()["error"];
+        assert_eq!(error["details"]["kind"], "cdp_launch_unverified", "{error}");
+        let hint = error["suggestion"].as_str().unwrap();
+        assert!(hint.contains(&format!("pid {pid}")), "{hint}");
+        assert!(hint.contains(profile.to_str().unwrap()), "{hint}");
+        assert!(
+            hint.contains("tabref open <url> --launch --profile <profile-dir>"),
+            "{hint}"
+        );
+    }
+    assert_eq!(
+        start_time(pid),
+        serde_json::from_str::<serde_json::Value>(&record).unwrap()["started"]
+            .as_str()
+            .unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.join("launched.json")).unwrap(),
+        record
     );
 }
 

@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
-use tabref_page::TextChange;
 
 use super::acted::Acted;
+use super::action_report_changes::{change_data, counted, reload_head, step_change, within_budget};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
@@ -14,21 +14,19 @@ use crate::session::action_effects::ActionEffects;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
 
-const CHANGE_BUDGET: usize = 600;
-const RELOAD_BUDGET: usize = 200;
 const NOTHING_SEEN: &str = " (no visible change)";
+const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
 const NEW_SHOWN: usize = 8;
 const NEW_LINE_CHARS: usize = 80;
 
 /// An action as a single command prints it: `clicked "Save"`, then what it
 /// set off, capped near 150 tokens: dialogs, the new address, the page's
 /// changed lines, the controls that appeared with their refs, or, when it
-/// led to another page, a snapshot of that page. A same-address reload
-/// shows its added lines and a new view with fresh refs.
+/// led to another page, a snapshot of that page.
 pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome, AppError> {
     let mut first = format!("{} {}", past(acted.verb), acted.summary);
-    if nothing_seen(&acted) {
-        first.push_str(NOTHING_SEEN);
+    if let Some(note) = nothing_seen(&acted) {
+        first.push_str(note);
     }
     let mut outcome = Outcome::new(first, acted.data);
     if let Some(effects) = &acted.effects {
@@ -50,8 +48,8 @@ pub(crate) fn step_report(
     last: bool,
 ) -> Result<(String, Value), AppError> {
     let mut line = format!("ok {} {}", acted.verb, acted.summary);
-    if nothing_seen(&acted) {
-        line.push_str(NOTHING_SEEN);
+    if let Some(note) = nothing_seen(&acted) {
+        line.push_str(note);
     }
     let mut data = acted.data;
     let Some(effects) = &acted.effects else {
@@ -80,14 +78,16 @@ pub(crate) fn step_report(
         }
         if effects.settled.navigated {
             line.push_str(&format!(" {}", quote_text(&page.title)));
-        }
-        let leaves = effects.settled.navigated && effects.url_before != page.url;
-        if !leaves && let Some(first) = page.changes.first() {
-            line.push_str(&format!("; {first}"));
-            if page.changes.len() > 1 {
-                line.push_str(&format!(" (+{} more)", page.changes.len() - 1));
+            if effects.url_before == page.url {
+                line.push_str("; page reloaded");
             }
+        } else if let Some(change) = step_change(&page.changes) {
+            line.push_str(&format!("; {change}"));
         }
+        if let Some(note) = text_check_note(page) {
+            line.push_str(&format!("; {note}"));
+        }
+        merge(&mut data, text_check_data(page));
     }
     merge(&mut data, json!({ "navigated": effects.settled.navigated }));
     Ok((line, data))
@@ -120,6 +120,7 @@ fn effect_block(
         return Ok((lines, data));
     };
     merge(&mut data, json!({ "url": page.url, "title": page.title }));
+    merge(&mut data, text_check_data(page));
     if effects.settled.navigated && effects.url_before != page.url {
         let report = current_page_view(session)?;
         lines.push(report.text);
@@ -129,13 +130,14 @@ fn effect_block(
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
-    let changes: Vec<String> = page.changes.iter().map(ToString::to_string).collect();
-    lines.extend(if effects.settled.navigated {
-        reload_head(&page.changes)
+    let changes = counted(&page.changes);
+    if effects.settled.navigated {
+        lines.extend(reload_head(&changes));
     } else {
-        within_budget(&changes)
-    });
-    merge(&mut data, json!({ "changes": changes }));
+        lines.extend(within_budget(&changes));
+    }
+    merge(&mut data, change_data(&changes));
+    lines.extend(text_check_note(page));
     if effects.settled.navigated {
         let report = current_page_view(session)?;
         lines.push(report.text);
@@ -159,80 +161,44 @@ fn effect_block(
     Ok((lines, data))
 }
 
-/// Whether a click, double-click, key press, hover or focus showed no
-/// effect at all: no navigation, tab, dialog, download, DOM mutation or text
-/// change. Changes inside a closed shadow root or drawn on a canvas look
-/// like this too. A focus the page moved away already says so.
-fn nothing_seen(acted: &Acted) -> bool {
+fn text_check_data(page: &tabref_page::PageChanges) -> Value {
+    json!({
+        "unread_frames": page.unread_frames,
+        "unchecked_text_blocks": page.unchecked_text_blocks,
+    })
+}
+
+fn text_check_note(page: &tabref_page::PageChanges) -> Option<String> {
+    let count = page.unchecked_text_blocks;
+    (count > 0).then(|| format!("Text blocks over budget and not checked: {count}"))
+}
+
+/// Reports no visible change after a click, key press, hover or focus when
+/// the document, open shadow roots and same-origin frames showed no effect.
+/// Names the gap when a visible cross-origin frame could not be checked.
+/// A focus the page moved away already says so.
+fn nothing_seen(acted: &Acted) -> Option<&'static str> {
     if acted.data.get("focused") == Some(&Value::Bool(false)) {
-        return false;
+        return None;
     }
-    let Some(effects) = &acted.effects else {
-        return false;
-    };
-    matches!(
+    let effects = acted.effects.as_ref()?;
+    let quiet = matches!(
         acted.verb,
         "click" | "double-click" | "press" | "hover" | "focus"
     ) && !effects.settled.navigated
         && !effects.settled.same_document
         && effects.new_tab.is_none()
         && effects.dialogs().is_empty()
-        && effects.downloads.is_empty()
-        && effects
-            .page
-            .as_ref()
-            .is_some_and(|page| page.mutations == Some(0) && page.changes.is_empty())
-}
-
-/// The added lines shown before the refreshed view. Leave removed lines in
-/// the JSON changes, since they belong to the previous page.
-fn reload_head(changes: &[TextChange]) -> Vec<String> {
-    let added: Vec<&TextChange> = changes
-        .iter()
-        .filter(|change| matches!(change, TextChange::Added(_)))
-        .collect();
-    let mut lines = Vec::new();
-    let mut remaining = RELOAD_BUDGET;
-    for change in &added {
-        let line = change.to_string();
-        if line.len() < remaining {
-            remaining -= line.len() + 1;
-            lines.push(line);
-        } else {
-            if remaining >= 60 {
-                let mut end = remaining - "…\n".len();
-                while !line.is_char_boundary(end) {
-                    end -= 1;
-                }
-                lines.push(format!("{}…", &line[..end]));
-            }
-            break;
-        }
+        && effects.downloads.is_empty();
+    let page = effects.page.as_ref()?;
+    if !quiet || page.mutations != Some(0) || !page.changes.is_empty() {
+        return None;
     }
-    if lines.len() < added.len() {
-        let more = added.len() - lines.len();
-        lines.push(format!("+{more} more added lines, in the view below"));
-    }
-    lines
-}
-
-fn within_budget(changes: &[String]) -> Vec<String> {
-    let mut used = 0;
-    let mut shown = Vec::new();
-    for change in changes {
-        if used + change.len() > CHANGE_BUDGET && !shown.is_empty() {
-            break;
-        }
-        used += change.len();
-        shown.push(change.clone());
-    }
-    if shown.len() < changes.len() {
-        shown.push(format!(
-            "+{} more: tabref snap",
-            changes.len() - shown.len()
-        ));
-    }
-    shown
+    Some(if page.unread_frames > 0 {
+        NOTHING_READ
+    } else {
+        NOTHING_SEEN
+    })
 }
 
 fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut Vec<String>) {

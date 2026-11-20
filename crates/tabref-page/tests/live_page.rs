@@ -112,7 +112,7 @@ fn form_controls_fill_select_check_upload_and_read_back() {
     )
     .unwrap();
     std::fs::remove_file(&upload).unwrap();
-    assert!(uploaded.verified, "{uploaded:?}");
+    assert!(uploaded.page_reports_requested_files, "{uploaded:?}");
 }
 
 #[test]

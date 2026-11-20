@@ -84,3 +84,21 @@ fn a_reload_of_the_same_address_prints_the_new_view() {
     assert!(bytes <= 260, "{bytes} bytes before the view: {head:?}");
     let _ = tabref.run(&["daemon", "stop"]);
 }
+
+#[test]
+fn a_reload_in_a_middle_step_does_not_report_text_from_the_old_page() {
+    if !live() {
+        return;
+    }
+    let port = serve(&[("/book", FORM)]);
+    let tabref = harness("reload-middle-step");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/book")]);
+    let sent = tabref.ok(&[
+        "do",
+        "click \"Book it\"\nexpect text \"Phone must be digits and dashes.\"",
+    ]);
+    let click = sent.stdout.lines().next().unwrap();
+    assert!(click.starts_with("ok click"), "{click}");
+    assert!(click.contains("page reloaded"), "{click}");
+    assert!(!click.contains("Draft from this morning"), "{click}");
+}
