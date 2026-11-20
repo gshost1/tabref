@@ -9,6 +9,8 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
   const win = doc.defaultView;
   const root = doc.scrollingElement || doc.documentElement;
   const key = Symbol.for('tabref.scroll');
+  const requests = Symbol.for('tabref.scroll-request-tracker');
+  const parent = node => node.parentElement || (node.getRootNode() || {}).host;
   const left = (el, dx, dy) => dy > 0 ? el.scrollHeight - el.clientHeight - el.scrollTop
     : dy < 0 ? el.scrollTop
     : dx > 0 ? el.scrollWidth - el.clientWidth - el.scrollLeft : el.scrollLeft;
@@ -18,8 +20,9 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
   const grown = (state) => (state.dy ? state.target.scrollHeight : state.target.scrollWidth) > state.extent + 1;
   const pool = (state) => grown(state) ? state.added.concat(state.swapped) : state.added;";
 
-pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews) {
+pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews, requestMaxAge) {
   PRELUDE
+  WATCH_REQUESTS
   const scrolls = (el) => {
     if (!el || el.nodeType !== 1) return false;
     const style = win.getComputedStyle(el);
@@ -34,11 +37,11 @@ pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews) {
   };
   let target = anchor;
   if (target) {
-    while (target && !scrolls(target)) target = target.parentElement;
+    while (target && !scrolls(target)) target = parent(target);
     target = target || root;
   } else if (left(root, dx, dy) < 1) {
     target = doc.elementFromPoint(win.innerWidth / 2, win.innerHeight / 2);
-    while (target && !scrolls(target)) target = target.parentElement;
+    while (target && !scrolls(target)) target = parent(target);
     target = target || Array.from(doc.querySelectorAll('body *')).filter(scrolls)
       .sort((a, b) => b.clientHeight * b.clientWidth - a.clientHeight * a.clientWidth)[0] || root;
   } else {
@@ -54,7 +57,49 @@ pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews) {
     return { moved: false, near: true, atEnd: false, hidden };
   }
   const moved = anchor || target !== root || before >= 1 ? shift(target) : false;
-  return { moved, near: false, atEnd: left(target, dx, dy) < 2, hidden };
+  return { moved, near: false, atEnd: left(target, dx, dy) < 2, hidden,
+    pending: win[requests].hasPending() };
+}";
+
+pub(crate) const WATCH_REQUESTS: &str = r"if (!win[requests]) {
+  const pending = new Set();
+  const hasPending = () => {
+    const cutoff = win.performance.now() - requestMaxAge;
+    for (const request of pending) {
+      if (request.started > cutoff) break;
+      pending.delete(request);
+    }
+    return pending.size > 0;
+  };
+  const start = () => {
+    hasPending();
+    const request = { started: win.performance.now() };
+    pending.add(request);
+    return () => pending.delete(request);
+  };
+  const fetch = win.fetch;
+  const send = win.XMLHttpRequest.prototype.send;
+  win.fetch = function(...args) {
+    const response = Reflect.apply(fetch, this, args);
+    const done = start();
+    return response.then(
+      value => { done(); return value; },
+      error => { done(); throw error; }
+    );
+  };
+  win.XMLHttpRequest.prototype.send = function(...args) {
+    const done = start();
+    this.addEventListener('loadend', done, { once: true });
+    try { return Reflect.apply(send, this, args); }
+    catch (error) { this.removeEventListener('loadend', done); done(); throw error; }
+  };
+  const attachShadow = win.Element.prototype.attachShadow;
+  win.Element.prototype.attachShadow = function(...args) {
+    const shadow = Reflect.apply(attachShadow, this, args);
+    if (shadow.mode === 'open') win[key]?.observeShadow?.(shadow);
+    return shadow;
+  };
+  win[requests] = { hasPending };
 }";
 
 pub(crate) const WATCH: &str = r"function() {
@@ -64,20 +109,42 @@ pub(crate) const WATCH: &str = r"function() {
   state.planned = false;
   const el = state.target, dx = state.dx, dy = state.dy;
   Object.assign(state, { added: [], swapped: [], mutations: 0, extent: dy ? el.scrollHeight : el.scrollWidth });
+  const observe = target => state.observer.observe(target, { subtree: true, childList: true, characterData: true });
+  const observeRoots = node => {
+    if (node.shadowRoot) { observe(node.shadowRoot); observeRoots(node.shadowRoot); }
+    for (const child of node.querySelectorAll('*')) {
+      if (child.shadowRoot) { observe(child.shadowRoot); observeRoots(child.shadowRoot); }
+    }
+  };
+  const inside = node => {
+    for (let ancestor = node; ancestor; ancestor = ancestor.getRootNode().host) {
+      if (el.contains(ancestor)) return true;
+    }
+    return false;
+  };
   state.note = (records) => {
     for (const record of records) {
-      if (!el.contains(record.target)) continue;
+      if (!inside(record.target)) continue;
       state.mutations += 1;
       const into = record.removedNodes.length ? state.swapped : state.added;
-      for (const node of record.addedNodes) if (node.nodeType === 1) into.push(node);
+      for (const node of record.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        observeRoots(node);
+        into.push(node);
+      }
     }
   };
   state.observer = new win.MutationObserver(state.note);
-  state.observer.observe(doc, { subtree: true, childList: true, characterData: true });
+  state.observeShadow = shadow => { if (inside(shadow.host)) observe(shadow); };
+  observe(doc);
+  const containingRoot = el.getRootNode();
+  if (containingRoot instanceof win.ShadowRoot) observe(containingRoot);
+  observeRoots(el);
   const before = [el.scrollLeft, el.scrollTop];
+  const started = win.Date.now() / 1000;
   if (el === root) win.scrollBy(dx, dy); else el.scrollBy(dx, dy);
   const moved = el.scrollLeft !== before[0] || el.scrollTop !== before[1];
-  return { moved, atEnd: left(el, dx, dy) < 2 };
+  return { moved, atEnd: left(el, dx, dy) < 2, started };
 }";
 
 pub(crate) const FRAMES: &str = r"function() {
@@ -118,7 +185,7 @@ pub(crate) const READ: &str = r"function(budget, lineChars) {
   delete win[key];
   const added = new Set(pool(state).filter(shown));
   const outermost = (node) => {
-    for (let up = node.parentElement; up; up = up.parentElement) if (added.has(up)) return false;
+    for (let up = parent(node); up; up = parent(up)) if (added.has(up)) return false;
     return true;
   };
   let items = Array.from(added).filter(outermost);
@@ -149,6 +216,7 @@ pub(crate) const READ: &str = r"function(budget, lineChars) {
     last: texts.length ? head(texts[texts.length - 1]) : null,
     lines, more,
     mutations: state.mutations,
+    pending: win[requests].hasPending(),
     grew: grown(state),
     atEnd: left(state.target, state.dx, state.dy) < 2,
   };

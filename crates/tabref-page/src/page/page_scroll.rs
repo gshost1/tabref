@@ -8,11 +8,12 @@
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
-use super::scroll_scripts::{COUNT, FRAMES, PRELUDE, READ, SCROLL, WATCH};
+use super::scroll_scripts::{COUNT, FRAMES, PRELUDE, READ, SCROLL, WATCH, WATCH_REQUESTS};
 use super::scroll_site::{ScrollSite, SiteScript};
 use crate::{CdpConnection, PageSession};
 
 const NEAR_VIEWS: f64 = 1.5;
+const REQUEST_MAX_AGE_MS: u64 = 3_000;
 const LINE_BUDGET: u64 = 600;
 const LINE_CHARS: u64 = 100;
 
@@ -20,14 +21,15 @@ const LINE_CHARS: u64 = 100;
 /// within one and a half views of the end of the content, so it was only
 /// planned and [`watch_scroll`] makes it, whether it is at the very end,
 /// and whether the page says it is hidden. A scroll that could not move
-/// fires no scroll event and changes no intersection, so it sets nothing
-/// loading and is not watched.
+/// fires no scroll event and changes no intersection. It can still see
+/// whether an earlier scroll's requests are pending.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ScrollStep {
     pub(crate) moved: bool,
     pub(crate) near: bool,
     pub(crate) at_end: bool,
     pub(crate) hidden: bool,
+    pub(crate) pending: bool,
 }
 
 /// What the watch saw so far: DOM mutations inside the scrolled target,
@@ -52,6 +54,7 @@ pub(crate) struct ScrollLoaded {
     pub(crate) mutations: u64,
     pub(crate) grew: bool,
     pub(crate) at_end: bool,
+    pub(crate) pending: bool,
 }
 
 fn run(
@@ -61,7 +64,9 @@ fn run(
     (source, arguments): (&str, &[Value]),
     deadline: Deadline,
 ) -> Result<Value, AppError> {
-    let function = source.replace("PRELUDE", PRELUDE);
+    let function = source
+        .replace("PRELUDE", PRELUDE)
+        .replace("WATCH_REQUESTS", WATCH_REQUESTS);
     let script = SiteScript {
         function: &function,
         arguments,
@@ -89,13 +94,19 @@ pub(crate) fn scroll_step(
     delta: (f64, f64),
     deadline: Deadline,
 ) -> Result<ScrollStep, AppError> {
-    let arguments = [json!(delta.0), json!(delta.1), json!(NEAR_VIEWS)];
+    let arguments = [
+        json!(delta.0),
+        json!(delta.1),
+        json!(NEAR_VIEWS),
+        json!(REQUEST_MAX_AGE_MS),
+    ];
     let reply = run(connection, session, site, (SCROLL, &arguments), deadline)?;
     Ok(ScrollStep {
         moved: flag(&reply, "moved"),
         near: flag(&reply, "near"),
         at_end: flag(&reply, "atEnd"),
         hidden: flag(&reply, "hidden"),
+        pending: flag(&reply, "pending"),
     })
 }
 
@@ -106,12 +117,11 @@ pub(crate) fn watch_scroll(
     session: &PageSession,
     site: ScrollSite<'_>,
     deadline: Deadline,
-) -> Result<Option<(bool, bool)>, AppError> {
+) -> Result<Option<(bool, bool, f64)>, AppError> {
     let reply = run(connection, session, site, (WATCH, &[]), deadline)?;
-    if reply.is_null() {
-        return Ok(None);
-    }
-    Ok(Some((flag(&reply, "moved"), flag(&reply, "atEnd"))))
+    Ok(reply["started"]
+        .as_f64()
+        .map(|started| (flag(&reply, "moved"), flag(&reply, "atEnd"), started)))
 }
 
 /// Waits for the next animation frame and two tasks after it, so that
@@ -184,5 +194,6 @@ pub(crate) fn read_loaded(
         mutations: number(&reply, "mutations"),
         grew: flag(&reply, "grew"),
         at_end: flag(&reply, "atEnd"),
+        pending: flag(&reply, "pending"),
     }))
 }

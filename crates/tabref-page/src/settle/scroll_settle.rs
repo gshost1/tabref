@@ -21,6 +21,7 @@ const AFTER_NETWORK: Duration = Duration::from_millis(100);
 const DOM_QUIET: Duration = Duration::from_millis(30);
 const DOM_QUIET_CAP: Duration = Duration::from_millis(300);
 const END_GRACE: Duration = Duration::from_millis(500);
+const ACTIVE_END_GRACE: Duration = Duration::from_millis(800);
 const LOADER_CAP: Duration = Duration::from_millis(1_500);
 const POLL: Duration = Duration::from_millis(40);
 const CLEANUP: Duration = Duration::from_millis(500);
@@ -31,12 +32,12 @@ const CLEANUP_MS: u64 = 500;
 /// returns at once. One that ends within one and a half views of the end
 /// turns network events on first, then scrolls and waits for what it set
 /// loading: one frame and two tasks for `IntersectionObserver` callbacks
-/// and scroll events; same-site document, XHR and fetch requests until
+/// and scroll events; XHR and fetch requests from any origin until
 /// they finish and 50 ms pass without another (until 1.5 s after the
 /// frame), with 100 ms after each for their rows to land; inserted
 /// elements without text yet (a spinner) up to 1.5 s for content to come;
-/// at the very end 500 ms for a loader that starts late (a debounced
-/// scroll handler, a timer); then 30 ms without new elements (at most
+/// at the very end 500 ms for a late loader, extended to 800 ms if it
+/// starts a request; then 30 ms without new elements (at most
 /// 300 ms). All of it stops 2 s after the scroll, so a page that polls or
 /// animates costs at most that, and a DOM that only changes in place (a
 /// clock) extends none of the waits. A tab that draws no frames ran none
@@ -54,6 +55,7 @@ pub fn scroll_and_settle(
             moved: step.moved,
             at_end: step.at_end,
             hidden: step.hidden,
+            loading: step.at_end && step.pending,
             ..ScrollOutcome::default()
         });
     }
@@ -74,7 +76,9 @@ fn watch(
     site: ScrollSite<'_>,
     (cap, deadline): (Deadline, Deadline),
 ) -> Result<ScrollOutcome, AppError> {
-    let Some((moved, at_end)) = watch_scroll(connection, session, site, cap)? else {
+    let started = Instant::now();
+    let Some((moved, at_end, browser_started)) = watch_scroll(connection, session, site, cap)?
+    else {
         return Ok(ScrollOutcome::default());
     };
     let mut outcome = ScrollOutcome {
@@ -82,14 +86,20 @@ fn watch(
         watched: true,
         ..ScrollOutcome::default()
     };
-    let mut tracker = SettleTracker::new("");
+    let mut tracker = SettleTracker::for_scroll(browser_started);
     let framed = match wait_frames(connection, session, site, cap.capped(FRAMES_CAP)) {
         Ok(framed) => framed,
         Err(error) if is_timeout(&error) => false,
         Err(_) => return Ok(unwatched(outcome)),
     };
     if framed {
-        match settle(connection, session, site, (&mut tracker, at_end), cap) {
+        match settle(
+            connection,
+            session,
+            site,
+            (&mut tracker, at_end),
+            (started, cap),
+        ) {
             Err(error) if !is_timeout(&error) => return Ok(unwatched(outcome)),
             _ => {}
         }
@@ -103,7 +113,7 @@ fn watch(
         SettleWait::Network
     );
     let changing = loaded.mutations > 0 && loaded.items == 0 && !loaded.grew;
-    outcome.loading = requests || (loaded.at_end && changing);
+    outcome.loading = requests || loaded.pending || (loaded.at_end && changing);
     outcome.hidden = !framed;
     outcome.at_end = loaded.at_end;
     outcome.items = loaded.items;
@@ -126,11 +136,9 @@ fn settle(
     session: &PageSession,
     site: ScrollSite<'_>,
     (tracker, at_end): (&mut SettleTracker, bool),
-    cap: Deadline,
+    (started, cap): (Instant, Deadline),
 ) -> Result<(), AppError> {
     let id = session.session_id.clone();
-    let started = Instant::now();
-    let grace = if at_end { END_GRACE } else { Duration::ZERO };
     let mut landed = None::<Instant>;
     absorb(connection, &id, tracker);
     loop {
@@ -147,6 +155,13 @@ fn settle(
             return dom_quiet(connection, session, site, cap);
         }
         let waited = started.elapsed();
+        let grace = if at_end && tracker.saw_scroll_request_within(END_GRACE) {
+            ACTIVE_END_GRACE
+        } else if at_end {
+            END_GRACE
+        } else {
+            Duration::ZERO
+        };
         let expecting = (count.inserted > 0 && waited < LOADER_CAP)
             || waited < grace
             || landed.is_some_and(|at| at.elapsed() < AFTER_NETWORK);

@@ -47,16 +47,19 @@ fn undefined_nodes_and_infinities_still_answer() {
 
 #[test]
 fn a_thrown_exception_is_action_failed() {
-    let transport = ScriptedTransport::new().expect(
-        "Runtime.evaluate",
-        json!({ "result": { "type": "object" },
-            "exceptionDetails": { "text": "Uncaught", "exception": { "description": "ReferenceError: x is not defined" } } }),
-    );
+    let transport = ScriptedTransport::new()
+        .expect(
+            "Runtime.evaluate",
+            json!({ "result": { "type": "object" },
+                "exceptionDetails": { "text": "Uncaught", "exception": { "description": "ReferenceError: x is not defined" } } }),
+        )
+        .expect("Runtime.releaseObjectGroup", json!({}));
     let mut connection = CdpConnection::new(transport.boxed());
 
     let error = evaluate(&mut connection, &session(), "x", deadline()).unwrap_err();
 
     assert_eq!(error.code, ErrorCode::ActionFailed);
+    assert_eq!(error.kind(), Some("js_exception"));
     assert_eq!(
         error.platform_detail.as_deref(),
         Some("ReferenceError: x is not defined")
