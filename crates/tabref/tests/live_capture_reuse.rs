@@ -103,7 +103,7 @@ fn find_snap_and_read_reuse_the_capture_of_an_unchanged_page() {
     let read = run(&tabref, &["read", "--section", "More"], &[]);
     assert!(read.stdout.contains("Beta words"), "{}", read.stdout);
     let found_again = run(&tabref, &["find", "Beta"], &[]);
-    assert_eq!(snapshot_id(&found_again), opened);
+    assert_eq!(snapshot_id(&found_again), kept);
     stop(&tabref);
 }
 
