@@ -1,6 +1,7 @@
 # tabref: read and drive Chrome from the shell
 
-Start with `tabref skill && tabref open <url>`. Read the whole output and let commands wait.
+Start with `tabref skill && tabref open <url>`. Read the whole output.
+If no browser is connected, use `tabref open <url> --launch`.
 Downloads, dialogs, logins, Chrome-based apps: `tabref skill more`. Options: `tabref CMD --help`.
 
 ## Reading

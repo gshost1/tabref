@@ -1,6 +1,14 @@
 use super::run;
 
 #[test]
+fn the_guide_explains_how_to_start_chrome_when_needed() {
+    let guide = run(None).text;
+    assert!(guide.contains("If no browser is connected, use `tabref open <url> --launch`."));
+    assert!(!guide.contains("Chrome is already connected"));
+    assert!(!guide.contains("Chrome is connected"));
+}
+
+#[test]
 fn the_guide_stays_short_and_points_to_the_rare_commands() {
     let guide = run(None).text;
     assert!(guide.len() <= 2_300, "{} bytes", guide.len());
