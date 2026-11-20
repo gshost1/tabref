@@ -1,7 +1,7 @@
-use crate::cut_chars;
+use crate::{cut_chars, squash};
 
 const LISTED: usize = 30;
-const LISTED_CHARS: usize = 60;
+pub(super) const LISTED_CHARS: usize = 60;
 const DISABLED_MARK: &str = " (disabled)";
 
 /// One `<option>` of a select as the page has it: its label, its own text,
@@ -59,10 +59,10 @@ fn pick_exactly(options: &[OptionEntry], wanted: &str) -> OptionPick {
     for folded in [false, true] {
         let printed_as: Vec<usize> = matching(options, |option| same(&printed(option), folded));
         let named: Vec<usize> = matching(options, |option| {
-            same(&normal(&option.label), folded) || same(&normal(&option.text), folded)
+            same(&squash(&option.label), folded) || same(&squash(&option.text), folded)
         });
         let valued: Vec<usize> = matching(options, |option| {
-            same(&option.value, folded) || same(&normal(&option.value), folded)
+            same(&option.value, folded) || same(&squash(&option.value), folded)
         });
         let mut found = if printed_as.is_empty() {
             named
@@ -119,9 +119,9 @@ fn exact_pick(options: &[OptionEntry], found: &[usize]) -> OptionPick {
 /// An option as the view prints it, uncut: its label, with its value in
 /// parentheses when the label does not already hold it.
 pub(crate) fn printed(option: &OptionEntry) -> String {
-    let label = normal(&option.label);
+    let label = squash(&option.label);
     let value = option.value.trim();
-    if value.is_empty() || label.to_lowercase().contains(&value.to_lowercase()) {
+    if value.is_empty() || option.label.to_lowercase().contains(&value.to_lowercase()) {
         label
     } else {
         format!("{label} ({value})")
@@ -136,7 +136,7 @@ pub(crate) fn listing(options: &[OptionEntry], shown: &[usize]) -> String {
         .filter_map(|index| options.get(*index))
         .take(LISTED)
         .map(|option| {
-            let mut part = escaped(&cut_chars(&printed(option), LISTED_CHARS));
+            let mut part = escaped(&listed_name(option));
             if option.disabled {
                 part.push_str(DISABLED_MARK);
             }
@@ -153,7 +153,11 @@ pub(crate) fn listing(options: &[OptionEntry], shown: &[usize]) -> String {
 /// An option's printed form as an error names it: `[`, `]` and `|`
 /// escaped as the view escapes them, control characters as `\uXXXX`.
 pub(crate) fn shown(option: &OptionEntry) -> String {
-    escaped(&printed(option))
+    escaped(&listed_name(option))
+}
+
+pub(super) fn listed_name(option: &OptionEntry) -> String {
+    cut_chars(&printed(option), LISTED_CHARS)
 }
 
 fn escaped(text: &str) -> String {
@@ -172,12 +176,12 @@ fn escaped(text: &str) -> String {
 }
 
 fn names(option: &OptionEntry) -> [String; 3] {
-    [normal(&option.label), normal(&option.text), printed(option)]
+    [squash(&option.label), squash(&option.text), printed(option)]
 }
 
 fn cut_form(option: &OptionEntry, low: &str, pair: Option<&(String, String)>) -> bool {
-    let label = normal(&option.label).to_lowercase();
-    let value = normal(&option.value).to_lowercase();
+    let label = squash(&option.label).to_lowercase();
+    let value = squash(&option.value).to_lowercase();
     if let Some((label_part, value_part)) = pair
         && fits(&label, label_part)
         && fits(&value, value_part)
@@ -215,7 +219,7 @@ fn normal(text: &str) -> String {
         }
         out.push(character);
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    squash(&out)
 }
 
 #[cfg(test)]

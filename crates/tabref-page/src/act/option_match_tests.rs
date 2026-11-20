@@ -35,6 +35,8 @@ fn the_printed_form_adds_the_value_only_when_the_label_lacks_it() {
     assert_eq!(printed(&option("Small (S)", "s")), "Small (S)");
     assert_eq!(printed(&option("Choose", "")), "Choose");
     assert_eq!(printed(&option("Red", "red")), "Red");
+    assert_eq!(printed(&option("A  B", "A B")), "A B (A B)");
+    assert_eq!(printed(&option(r"A \[B]", "[B]")), r"A \[B]");
 }
 
 #[test]

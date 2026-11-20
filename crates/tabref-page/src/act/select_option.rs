@@ -2,10 +2,12 @@ use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::element_call::ElementCall;
-use super::option_match::{OptionEntry, OptionPick, listing, pick_option, printed, shown};
+use super::option_match::{
+    LISTED_CHARS, OptionEntry, OptionPick, listed_name, listing, pick_option, shown,
+};
 use super::remote_element::call_on_element;
 use super::select_outcome::SelectOutcome;
-use crate::{CdpConnection, ElementToken, PageSession};
+use crate::{CdpConnection, ElementToken, PageSession, cut_chars};
 
 const DETAILED: usize = 30;
 
@@ -124,8 +126,19 @@ fn refused(options: &[OptionEntry], choice: &str, pick: &OptionPick) -> AppError
         indices
             .iter()
             .take(DETAILED)
-            .map(|index| printed(&options[*index]))
+            .map(|index| listed_name(&options[*index]))
             .collect()
+    };
+    let labels = |indices: &[usize]| -> Vec<String> {
+        indices
+            .iter()
+            .map(|index| cut_chars(options[*index].label.trim(), LISTED_CHARS))
+            .collect()
+    };
+    let legacy_options = match pick {
+        OptionPick::Ambiguous(found) => Some(labels(found)),
+        OptionPick::Disabled(_) => None,
+        _ => Some(labels(&all)),
     };
     let (code, kind, reason, message, matches) = match pick {
         OptionPick::Ambiguous(found) => (
@@ -166,7 +179,8 @@ fn refused(options: &[OptionEntry], choice: &str, pick: &OptionPick) -> AppError
             "kind": kind,
             "reason": reason,
             "matches": matches,
-            "options": named(&all),
+            "options": legacy_options,
+            "all_options": named(&all),
             "options_total": options.len(),
         }))
         .with_disposition(DeliverySemantics::not_delivered())

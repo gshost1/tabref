@@ -58,7 +58,7 @@ fn a_missing_option_lists_the_options_as_printed() {
     );
     assert_eq!(
         error.details.as_ref().unwrap()["options"],
-        json!(["Red (c1)", "Green (c2)", "Grey (c3)"])
+        json!(["Red", "Green", "Grey"])
     );
 }
 
@@ -89,6 +89,7 @@ fn several_options_at_the_best_rank_are_ambiguous() {
     let twins = json!([
         { "label": "Ada A", "text": "Ada A", "value": "1", "disabled": false },
         { "label": "Ada B", "text": "Ada B", "value": "2", "disabled": false },
+        { "label": "Bo C", "text": "Bo C", "value": "3", "disabled": false },
     ]);
     let mut connection = CdpConnection::new(reading(twins).boxed());
     let error =
@@ -98,18 +99,35 @@ fn several_options_at_the_best_rank_are_ambiguous() {
         error.message,
         "'Ada' matches 2 options: Ada A (1) | Ada B (2); name one as listed"
     );
+    let details = error.details.as_ref().unwrap();
+    assert_eq!(details["options"], json!(["Ada A", "Ada B"]));
+    assert_eq!(
+        details["all_options"],
+        json!(["Ada A (1)", "Ada B (2)", "Bo C (3)"])
+    );
+    assert_eq!(details["options_total"], json!(3));
 }
 
 #[test]
 fn a_long_select_lists_thirty_options_in_details_and_says_how_many() {
     let many: Vec<Value> = (0..10_000)
-        .map(|n| json!({ "label": format!("Item {n}"), "text": format!("Item {n}"), "value": format!("i{n}"), "disabled": false }))
+        .map(|n| {
+            let label = format!("Item {n} {}", "字".repeat(70));
+            json!({ "label": label, "text": label, "value": format!("i{n}"), "disabled": false })
+        })
         .collect();
     let mut connection = CdpConnection::new(reading(json!(many)).boxed());
     let error =
         select_option(&mut connection, &session(), &token(4), "Blue", deadline()).unwrap_err();
     let details = error.details.as_ref().unwrap();
-    assert_eq!(details["options"].as_array().unwrap().len(), 30);
+    let all = details["all_options"].as_array().unwrap();
+    assert_eq!(all.len(), 30);
+    assert_eq!(all[0].as_str().unwrap().chars().count(), 60);
+    assert_eq!(details["options"][0].as_str().unwrap().chars().count(), 60);
     assert_eq!(details["options_total"], json!(10_000));
-    assert!(error.message.len() < 1_000, "{}", error.message.len());
+    assert!(
+        error.message.ends_with("… and 9970 more"),
+        "{}",
+        error.message
+    );
 }
