@@ -172,6 +172,51 @@ fn the_state_directory_is_refused_as_a_download_folder() {
     assert!(!inside.exists());
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn a_missing_profile_is_refused_through_its_resolved_path() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site("downloads-profile-alias");
+    let outside = scratch("downloads-profile-alias");
+    let real_var = outside.0.canonicalize().unwrap().join("private/var");
+    std::fs::create_dir_all(&real_var).unwrap();
+    let var = outside.0.join("var");
+    std::os::unix::fs::symlink(&real_var, &var).unwrap();
+    #[cfg(target_os = "linux")]
+    let (env, relative) = ("XDG_CONFIG_HOME", "google-chrome");
+    #[cfg(target_os = "macos")]
+    let (env, relative) = ("HOME", "Library/Application Support/Google/Chrome");
+    let profile = real_var.join("home").join(relative).join("Default");
+    let port = tabref.browser.port.to_string();
+    let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
+        .args(["--cdp", &port, "--timeout", "30000"])
+        .args([
+            "open",
+            "--download-dir",
+            profile.to_str().unwrap(),
+            &format!("{base}/"),
+        ])
+        .env("TABREF_HOME", &tabref.home)
+        .env(env, var.join("home"))
+        .env("TABREF_NO_DAEMON", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let saved = tabref.home.join(format!("download-dir-{port}"));
+    assert!(
+        !output.status.success()
+            && stderr.starts_with("error INVALID_ARGS: ")
+            && stderr.contains("profile directory")
+            && !real_var.join("home").exists()
+            && !saved.exists(),
+        "created profile: {}, saved setting: {}, stderr: {stderr}",
+        profile.exists(),
+        saved.exists(),
+    );
+}
+
 #[test]
 fn a_browsers_own_profile_directory_is_refused_as_a_download_folder() {
     if !live() {
