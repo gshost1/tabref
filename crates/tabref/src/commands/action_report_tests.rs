@@ -3,7 +3,9 @@ use tabref_page::TextChange;
 
 use std::time::{Duration, Instant};
 
-use super::super::action_report_changes::{change_data, counted, step_change, within_budget};
+use super::super::action_report_changes::{
+    change_data, counted, reload_head, step_change, within_budget,
+};
 use super::{NOTHING_READ, NOTHING_SEEN, dialog_line, dialog_lines, nothing_seen};
 
 #[test]
@@ -141,6 +143,20 @@ fn a_repeated_line_says_how_many_times_it_showed() {
             ],
             "distinct_changes_omitted": 0
         })
+    );
+}
+
+#[test]
+fn the_reload_preview_reports_only_counted_additions() {
+    let changes = [
+        TextChange::Removed("Old draft".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Try again".into()),
+    ];
+    assert_eq!(
+        reload_head(&counted(&changes)),
+        ["+ Required ×2", "+ Try again"]
     );
 }
 

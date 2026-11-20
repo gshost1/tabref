@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
-use super::action_report_changes::{change_data, counted, step_change, within_budget};
+use super::action_report_changes::{change_data, counted, reload_head, step_change, within_budget};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
@@ -78,9 +78,10 @@ pub(crate) fn step_report(
         }
         if effects.settled.navigated {
             line.push_str(&format!(" {}", quote_text(&page.title)));
-        }
-        let leaves = effects.settled.navigated && effects.url_before != page.url;
-        if !leaves && let Some(change) = step_change(&page.changes) {
+            if effects.url_before == page.url {
+                line.push_str("; page reloaded");
+            }
+        } else if let Some(change) = step_change(&page.changes) {
             line.push_str(&format!("; {change}"));
         }
         if let Some(note) = text_check_note(page) {
@@ -130,11 +131,17 @@ fn effect_block(
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
     let changes = counted(&page.changes);
-    lines.extend(within_budget(&changes));
+    if effects.settled.navigated {
+        lines.extend(reload_head(&changes));
+    } else {
+        lines.extend(within_budget(&changes));
+    }
     merge(&mut data, change_data(&changes));
     lines.extend(text_check_note(page));
     if effects.settled.navigated {
-        lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
+        let report = current_page_view(session)?;
+        lines.push(report.text);
+        merge(&mut data, json!({ "page": report.data }));
     } else if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
         let mut appeared = Vec::new();

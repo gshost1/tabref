@@ -5,10 +5,12 @@ use serde_json::{Value, json};
 use tabref_page::TextChange;
 
 const CHANGE_BUDGET: usize = 600;
+const RELOAD_BUDGET: usize = 200;
 const MIN_ROOM: usize = 60;
 const ELLIPSIS: &str = " …";
 const JSON_CHANGE_LIMIT: usize = 50;
 
+#[derive(Clone, Copy)]
 pub(super) struct CountedChange<'a> {
     pub(super) change: &'a TextChange,
     pub(super) count: usize,
@@ -60,7 +62,34 @@ pub(super) fn change_data(changes: &[CountedChange<'_>]) -> Value {
 /// Show the text lines that fit the byte budget. A cut keeps the repeat
 /// count, and a rewritten line is shown whole or counted as omitted.
 pub(super) fn within_budget(changes: &[CountedChange<'_>]) -> Vec<String> {
-    let mut room = CHANGE_BUDGET;
+    let mut shown = preview(changes, CHANGE_BUDGET);
+    if shown.len() < changes.len() {
+        shown.push(format!(
+            "+{} more: tabref snap",
+            changes.len() - shown.len()
+        ));
+    }
+    shown
+}
+
+/// A reload's preview shows only added lines. JSON still includes other changes.
+pub(super) fn reload_head(changes: &[CountedChange<'_>]) -> Vec<String> {
+    let added: Vec<_> = changes
+        .iter()
+        .copied()
+        .filter(|entry| matches!(entry.change, TextChange::Added(_)))
+        .collect();
+    let mut shown = preview(&added, RELOAD_BUDGET);
+    if shown.len() < added.len() {
+        shown.push(format!(
+            "+{} more added lines, in the view below",
+            added.len() - shown.len()
+        ));
+    }
+    shown
+}
+
+fn preview(changes: &[CountedChange<'_>], mut room: usize) -> Vec<String> {
     let mut shown = Vec::new();
     for change in changes {
         let text = change.change.to_string();
@@ -75,12 +104,6 @@ pub(super) fn within_budget(changes: &[CountedChange<'_>]) -> Vec<String> {
             shown.push(format!("{text}{suffix}"));
         }
         break;
-    }
-    if shown.len() < changes.len() {
-        shown.push(format!(
-            "+{} more: tabref snap",
-            changes.len() - shown.len()
-        ));
     }
     shown
 }
