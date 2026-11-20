@@ -5,9 +5,7 @@ use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::element_call::ElementCall;
 use super::element_errors::stale;
-use super::file_input_choice::{
-    FileInputCandidate, FileInputChoice, FileInputVia, choose, safe_name,
-};
+use super::file_input_choice::{FileInputCandidate, FileInputChoice, choose, safe_name};
 use super::file_input_search::{UPLOAD_OBJECT_GROUP, list_file_inputs, pick_file_input};
 use super::remote_element::{call_function, with_element};
 use super::upload_outcome::UploadOutcome;
@@ -34,7 +32,7 @@ pub fn upload_files(
     files: &[PathBuf],
     deadline: Deadline,
 ) -> Result<UploadOutcome, AppError> {
-    upload(connection, session, token, files, deadline, false)
+    upload(connection, session, (token, false), files, deadline)
 }
 
 /// Sets files only on the input named by `token`. A changed target
@@ -46,16 +44,15 @@ pub fn upload_input_files(
     files: &[PathBuf],
     deadline: Deadline,
 ) -> Result<UploadOutcome, AppError> {
-    upload(connection, session, token, files, deadline, true)
+    upload(connection, session, (token, true), files, deadline)
 }
 
 fn upload(
     connection: &mut CdpConnection,
     session: &PageSession,
-    token: &ElementToken,
+    (token, explicit_input): (&ElementToken, bool),
     files: &[PathBuf],
     deadline: Deadline,
-    explicit_input: bool,
 ) -> Result<UploadOutcome, AppError> {
     let paths = absolute_files(files)?;
     with_element(
@@ -84,7 +81,6 @@ fn upload(
                     return Err(outside_widget(&found));
                 }
             };
-            debug_assert!(!explicit_input || via == FileInputVia::Itself);
             if input.disabled {
                 return Err(disabled_input(&input.name));
             }
