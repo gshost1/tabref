@@ -16,6 +16,10 @@ const DEFAULT_LOCATIONS: &[(&str, &str)] = &[
     ("Chromium", "Chromium"),
     ("Microsoft Edge", "Microsoft Edge"),
     ("Brave", "BraveSoftware/Brave-Browser"),
+    ("Arc", "Arc/User Data"),
+    ("Vivaldi", "Vivaldi"),
+    ("Opera", "com.operasoftware.Opera"),
+    ("ego lite", "Citro Labs/ego lite"),
 ];
 
 #[cfg(target_os = "linux")]
@@ -26,6 +30,8 @@ const DEFAULT_LOCATIONS: &[(&str, &str)] = &[
     ("Chromium", "chromium"),
     ("Microsoft Edge", "microsoft-edge"),
     ("Brave", "BraveSoftware/Brave-Browser"),
+    ("Vivaldi", "vivaldi"),
+    ("Opera", "opera"),
 ];
 
 #[cfg(target_os = "windows")]
@@ -35,6 +41,7 @@ const DEFAULT_LOCATIONS: &[(&str, &str)] = &[
     ("Chromium", "Chromium/User Data"),
     ("Microsoft Edge", "Microsoft/Edge/User Data"),
     ("Brave", "BraveSoftware/Brave-Browser/User Data"),
+    ("Vivaldi", "Vivaldi/User Data"),
 ];
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]

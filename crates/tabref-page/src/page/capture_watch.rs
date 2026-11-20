@@ -17,6 +17,7 @@
 //! and same-origin frames.
 
 use serde_json::{Value, json};
+use tabref_cdp::is_timeout;
 use tabref_core::{AppError, Deadline};
 
 use super::evaluate::evaluate_quietly;
@@ -187,7 +188,8 @@ pub fn arm_capture_watch(
 
 /// What the page says about `watch` now: `same` when nothing it watches
 /// changed, else why not (`gone`, `mutated`, `blind`, `roots`, `focus`,
-/// `state`), or `failed` when the page could not be asked.
+/// `state`), `timed_out` when the check exceeded its deadline, or
+/// `failed` when the page could not be asked for another reason.
 pub fn check_capture_watch(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -196,6 +198,7 @@ pub fn check_capture_watch(
 ) -> String {
     match evaluate_quietly(connection, session, &script(CHECK, &watch.token), deadline) {
         Ok(Value::String(verdict)) => verdict,
+        Err(error) if is_timeout(&error) => "timed_out".to_owned(),
         Ok(_) | Err(_) => "failed".to_owned(),
     }
 }

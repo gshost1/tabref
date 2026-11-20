@@ -100,7 +100,8 @@ impl Session {
     }
 
     /// The kept capture of the current tab, when it may stand for the page
-    /// as it is now. A capture found stale is forgotten.
+    /// as it is now. A capture found stale is forgotten. If the check
+    /// times out, this command reads fresh and the next one can check again.
     pub(crate) fn reusable_capture(&mut self) -> Option<Arc<CapturedSnapshot>> {
         let cache = self.captures.clone()?;
         let page = self.page().ok()?;
@@ -110,9 +111,13 @@ impl Session {
         let fresh = kept.taken.elapsed() < MAX_AGE
             && latest.as_deref() == Some(kept.captured.snapshot_id.as_str())
             && page_actions(self.store()) == kept.actions;
-        let deadline = self.deadline().capped(WATCH_WAIT);
-        if fresh && check_capture_watch(self.connection(), &page, &kept.watch, deadline) == "same" {
-            return Some(kept.captured);
+        if fresh {
+            let deadline = self.deadline().capped(WATCH_WAIT);
+            match check_capture_watch(self.connection(), &page, &kept.watch, deadline).as_str() {
+                "same" => return Some(kept.captured),
+                "timed_out" => return None,
+                _ => {}
+            }
         }
         cache.forget(&key);
         None
