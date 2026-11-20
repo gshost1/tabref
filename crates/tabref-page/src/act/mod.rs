@@ -36,7 +36,6 @@ pub(crate) mod read;
 pub(crate) mod remote_element;
 pub(crate) mod screenshot;
 pub(crate) mod scroll;
-pub(crate) mod scroll_by;
 pub(crate) mod select_option;
 pub(crate) mod select_outcome;
 pub(crate) mod text_change;

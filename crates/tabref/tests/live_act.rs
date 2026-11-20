@@ -142,6 +142,53 @@ fn a_modal_shows_its_new_controls_and_a_batch_fills_it() {
 }
 
 #[test]
+fn long_fills_preview_both_ends_and_keep_full_json_values() {
+    if !live() {
+        return;
+    }
+    let previous = format!("old start {} old end", "x".repeat(5_500));
+    let requested = format!("new start {} new end", "é".repeat(5_500));
+    let page = format!(
+        "<!doctype html><meta charset=utf-8><label>Notes <textarea>{previous}</textarea></label>\
+         <label>Limited <textarea maxlength=4>seed</textarea></label>"
+    );
+    let port = serve(&[("/", &page)]);
+    let tabref = harness("fill-preview");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+
+    let filled = tabref.ok(&["fill", "Notes", &requested]);
+    for fragment in ["old start", "old end", "new start", "new end", "…"] {
+        assert!(filled.stdout.contains(fragment), "{}", filled.stdout);
+    }
+    let length = format!("({} chars)", requested.chars().count());
+    assert_eq!(
+        filled.stdout.matches(&length).count(),
+        2,
+        "{}",
+        filled.stdout
+    );
+    assert!(filled.stdout.len() < 400, "{}", filled.stdout);
+
+    let batch = tabref.ok(&["do", "fill Notes short"]);
+    assert!(batch.stdout.contains(&length), "{}", batch.stdout);
+    assert!(batch.stdout.contains(r#"-> "short""#), "{}", batch.stdout);
+
+    let json = tabref.ok(&["--json", "fill", "Notes", &requested]).json();
+    assert_eq!(json["data"]["previous"], "short");
+    assert_eq!(json["data"]["observed"], requested);
+    assert_eq!(json["data"]["verified"], true);
+
+    let limited = tabref.ok(&["fill", "Limited", &requested]);
+    assert!(
+        limited.stdout.contains(r#"(asked for "new start"#)
+            && limited.stdout.contains(&length)
+            && limited.stdout.len() < 250,
+        "{}",
+        limited.stdout
+    );
+}
+
+#[test]
 fn dates_numbers_and_options_take_natural_values_and_read_back() {
     if !live() {
         return;

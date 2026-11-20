@@ -55,6 +55,29 @@ fn images_and_beacons_do_not_hold_the_settle() {
 }
 
 #[test]
+fn only_requests_started_during_the_grace_extend_the_end_wait() {
+    let now = Instant::now();
+    let grace = Duration::from_millis(500);
+    let mut tracker = SettleTracker::for_scroll(100.0);
+    let request = |id: &str, kind: &str, at: f64| {
+        event(
+            "Network.requestWillBeSent",
+            json!({ "requestId": id, "type": kind, "wallTime": at }),
+        )
+    };
+    tracker.absorb(&request("old", "XHR", 99.9), now);
+    tracker.absorb(&request("image", "Image", 100.1), now);
+    assert!(!tracker.saw_scroll_request_within(grace));
+    assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Done);
+
+    tracker.absorb(&request("late", "Fetch", 100.6), now);
+    assert!(!tracker.saw_scroll_request_within(grace));
+    assert_eq!(tracker.next_wait(now, QUIET), SettleWait::Network);
+    tracker.absorb(&request("in-grace", "XHR", 100.4), now);
+    assert!(tracker.saw_scroll_request_within(grace));
+}
+
+#[test]
 fn an_iframe_navigation_is_not_the_tab_navigating() {
     let now = Instant::now();
     let mut tracker = SettleTracker::new("F");

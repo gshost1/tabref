@@ -60,23 +60,27 @@ fn cut(text: &str, limit: usize) -> String {
 /// become `\n`, `\r` and `\t`, other control characters `\uXXXX`, and
 /// bidirectional marks are dropped.
 pub(crate) fn quote_text(text: &str) -> String {
-    let mut quoted = String::with_capacity(text.len() + 2);
-    quoted.push('"');
+    format!("\"{}\"", escape_line(text, true))
+}
+
+/// `text` on one line as [`quote_text`] writes it, without the quotes and,
+/// unless `quoted`, without escaping `"` and `\`.
+pub(crate) fn escape_line(text: &str, quoted: bool) -> String {
+    let mut line = String::with_capacity(text.len());
     for character in text.chars().filter(|c| !is_bidirectional_control(*c)) {
         match character {
-            '"' => quoted.push_str("\\\""),
-            '\\' => quoted.push_str("\\\\"),
-            '\n' => quoted.push_str("\\n"),
-            '\r' => quoted.push_str("\\r"),
-            '\t' => quoted.push_str("\\t"),
+            '"' if quoted => line.push_str("\\\""),
+            '\\' if quoted => line.push_str("\\\\"),
+            '\n' => line.push_str("\\n"),
+            '\r' => line.push_str("\\r"),
+            '\t' => line.push_str("\\t"),
             c if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') => {
-                let _ = write!(quoted, "\\u{:04x}", u32::from(c));
+                let _ = write!(line, "\\u{:04x}", u32::from(c));
             }
-            c => quoted.push(c),
+            c => line.push(c),
         }
     }
-    quoted.push('"');
-    quoted
+    line
 }
 
 fn is_bidirectional_control(character: char) -> bool {

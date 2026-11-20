@@ -20,13 +20,10 @@ pub(crate) const BODY_GRACE: Duration = Duration::from_millis(200);
 /// The page events seen since an action, folded into what is still
 /// outstanding: a main-frame navigation that has not committed or reached
 /// `DOMContentLoaded`, and document, XHR and fetch requests that a document
-/// of this page sent to its own site and that are still in flight (a
-/// same-site iframe's save counts). Requests to other sites (ads,
-/// analytics), and those from documents with no site of their own such as
-/// `about:blank` ad slots, never hold the settle: they can run for seconds
-/// and say nothing about what the action changed. A navigation's document
-/// request always counts. A request whose reply has a known length counts
-/// as finished once that many bytes arrived, even before Chrome reports it.
+/// of this page sent to its own site and that are still in flight. A
+/// navigation's document request always counts. Scroll settling tracks XHR
+/// and fetch requests from any origin. When all the promised response bytes
+/// arrive, the request gets a bounded grace period to finish and render.
 #[derive(Debug)]
 pub(crate) struct SettleTracker {
     main_frame: String,
@@ -37,7 +34,9 @@ pub(crate) struct SettleTracker {
     pending: HashSet<String>,
     bodies: HashMap<String, ResponseBytes>,
     arrived: HashMap<String, Instant>,
+    first_scroll_request: Option<f64>,
     last_activity: Option<Instant>,
+    scroll_started: Option<f64>,
 }
 
 impl SettleTracker {
@@ -51,7 +50,17 @@ impl SettleTracker {
             pending: HashSet::new(),
             bodies: HashMap::new(),
             arrived: HashMap::new(),
+            first_scroll_request: None,
             last_activity: None,
+            scroll_started: None,
+        }
+    }
+
+    /// Scroll loaders can fetch from an API on a different origin.
+    pub(crate) fn for_scroll(browser_started: f64) -> Self {
+        Self {
+            scroll_started: Some(browser_started),
+            ..Self::new("")
         }
     }
 
@@ -104,7 +113,24 @@ impl SettleTracker {
             }
             "Network.requestWillBeSent" => {
                 let kind = params.get("type").and_then(Value::as_str);
-                if kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params) {
+                let tracked = if let Some(started) = self.scroll_started {
+                    let sent = params["wallTime"].as_f64();
+                    let Some(sent) = sent.filter(|at| *at >= started) else {
+                        return;
+                    };
+                    if !matches!(kind, Some("XHR" | "Fetch")) {
+                        return;
+                    }
+                    let elapsed = sent - started;
+                    self.first_scroll_request = Some(
+                        self.first_scroll_request
+                            .map_or(elapsed, |first| first.min(elapsed)),
+                    );
+                    true
+                } else {
+                    kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params)
+                };
+                if tracked {
                     self.pending.insert(request_id(params));
                     self.last_activity = Some(now);
                 }
@@ -196,6 +222,11 @@ impl SettleTracker {
 
     pub(crate) fn saw_network(&self) -> bool {
         self.last_activity.is_some()
+    }
+
+    pub(crate) fn saw_scroll_request_within(&self, grace: Duration) -> bool {
+        self.first_scroll_request
+            .is_some_and(|elapsed| elapsed <= grace.as_secs_f64())
     }
 }
 

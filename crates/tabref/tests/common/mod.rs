@@ -2,6 +2,7 @@
 
 pub mod exports;
 pub mod focus_page;
+pub mod lazy_site;
 #[cfg(unix)]
 pub mod own_chrome;
 
