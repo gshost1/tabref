@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
+use tabref_page::TextChange;
 
 use super::acted::Acted;
 use super::download_lines::{download_json, download_line};
@@ -14,6 +15,7 @@ use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
 
 const CHANGE_BUDGET: usize = 600;
+const RELOAD_BUDGET: usize = 200;
 const NOTHING_SEEN: &str = " (no visible change)";
 const NEW_SHOWN: usize = 8;
 const NEW_LINE_CHARS: usize = 80;
@@ -21,7 +23,8 @@ const NEW_LINE_CHARS: usize = 80;
 /// An action as a single command prints it: `clicked "Save"`, then what it
 /// set off, capped near 150 tokens: dialogs, the new address, the page's
 /// changed lines, the controls that appeared with their refs, or, when it
-/// led to another page, a snapshot of that page.
+/// led to another page, a snapshot of that page. A same-address reload
+/// shows its added lines and a new view with fresh refs.
 pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome, AppError> {
     let mut first = format!("{} {}", past(acted.verb), acted.summary);
     if nothing_seen(&acted) {
@@ -127,10 +130,16 @@ fn effect_block(
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
     let changes: Vec<String> = page.changes.iter().map(ToString::to_string).collect();
-    lines.extend(within_budget(&changes));
+    lines.extend(if effects.settled.navigated {
+        reload_head(&page.changes)
+    } else {
+        within_budget(&changes)
+    });
     merge(&mut data, json!({ "changes": changes }));
     if effects.settled.navigated {
-        lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
+        let report = current_page_view(session)?;
+        lines.push(report.text);
+        merge(&mut data, json!({ "page": report.data }));
     } else if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
         let mut appeared = Vec::new();
@@ -173,6 +182,38 @@ fn nothing_seen(acted: &Acted) -> bool {
             .page
             .as_ref()
             .is_some_and(|page| page.mutations == Some(0) && page.changes.is_empty())
+}
+
+/// The added lines shown before the refreshed view. Leave removed lines in
+/// the JSON changes, since they belong to the previous page.
+fn reload_head(changes: &[TextChange]) -> Vec<String> {
+    let added: Vec<&TextChange> = changes
+        .iter()
+        .filter(|change| matches!(change, TextChange::Added(_)))
+        .collect();
+    let mut lines = Vec::new();
+    let mut remaining = RELOAD_BUDGET;
+    for change in &added {
+        let line = change.to_string();
+        if line.len() < remaining {
+            remaining -= line.len() + 1;
+            lines.push(line);
+        } else {
+            if remaining >= 60 {
+                let mut end = remaining - "…\n".len();
+                while !line.is_char_boundary(end) {
+                    end -= 1;
+                }
+                lines.push(format!("{}…", &line[..end]));
+            }
+            break;
+        }
+    }
+    if lines.len() < added.len() {
+        let more = added.len() - lines.len();
+        lines.push(format!("+{more} more added lines, in the view below"));
+    }
+    lines
 }
 
 fn within_budget(changes: &[String]) -> Vec<String> {
