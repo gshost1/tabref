@@ -96,7 +96,7 @@ fn upload_to(page_path: &str, html: &'static str, css: &str) -> Result<String, A
     let held = held_files(&mut connection, &page);
     std::fs::remove_file(&file).unwrap();
     let outcome = result.map(|uploaded| {
-        assert!(uploaded.verified, "{uploaded:?}");
+        assert!(uploaded.page_reports_requested_files, "{uploaded:?}");
         uploaded.input
     });
     if outcome.is_err() {

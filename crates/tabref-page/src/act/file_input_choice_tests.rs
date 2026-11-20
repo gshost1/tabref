@@ -5,6 +5,7 @@ fn input(index: usize, name: &str, depth: Option<u32>) -> FileInputCandidate {
     FileInputCandidate {
         index,
         name: name.to_owned(),
+        selector: None,
         hidden: true,
         multiple: false,
         disabled: false,
@@ -30,7 +31,7 @@ fn the_target_itself_wins_over_anything_nearer() {
     labelled.labelled = true;
     let candidates = [labelled, own, input(2, "input#near", Some(1))];
     assert_eq!(
-        chosen(choose(&candidates, Some(4))),
+        chosen(choose(&candidates, Some(4), false)),
         (1, FileInputVia::Itself)
     );
 }
@@ -41,7 +42,7 @@ fn a_labelled_input_wins_over_the_nearest_one() {
     labelled.labelled = true;
     let candidates = [input(0, "input#near", Some(1)), labelled];
     assert_eq!(
-        chosen(choose(&candidates, Some(5))),
+        chosen(choose(&candidates, Some(5), false)),
         (1, FileInputVia::Label)
     );
 }
@@ -53,17 +54,21 @@ fn the_nearest_ancestor_with_one_input_decides() {
         input(1, "input#avatar", Some(4)),
     ];
     assert_eq!(
-        chosen(choose(&candidates, Some(4))),
+        chosen(choose(&candidates, Some(4), false)),
         (0, FileInputVia::Nearest)
     );
 }
 
 #[test]
-fn one_input_found_only_at_the_page_body_is_the_only_one_on_the_page() {
+fn a_body_appended_input_can_serve_a_target_in_a_form() {
     let candidates = [input(0, "input.dz-hidden-input", Some(3))];
     assert_eq!(
-        chosen(choose(&candidates, Some(3))),
+        chosen(choose(&candidates, Some(3), true)),
         (0, FileInputVia::OnlyOnPage)
+    );
+    assert_eq!(
+        choose(&candidates, Some(3), false),
+        FileInputChoice::OutsideWidget(vec![&candidates[0]])
     );
 }
 
@@ -73,7 +78,7 @@ fn several_inputs_equally_near_are_refused_with_all_of_them() {
         input(0, "input.dz-hidden-input", Some(3)),
         input(1, "input#avatar", Some(3)),
     ];
-    match choose(&candidates, Some(3)) {
+    match choose(&candidates, Some(3), true) {
         FileInputChoice::Ambiguous(found) => {
             let names: Vec<&str> = found.iter().map(|one| one.name.as_str()).collect();
             assert_eq!(names, ["input.dz-hidden-input", "input#avatar"]);
@@ -84,7 +89,7 @@ fn several_inputs_equally_near_are_refused_with_all_of_them() {
 
 #[test]
 fn no_candidate_is_none() {
-    assert_eq!(choose(&[], Some(3)), FileInputChoice::None);
+    assert_eq!(choose(&[], Some(3), false), FileInputChoice::None);
 }
 
 #[test]
@@ -93,7 +98,7 @@ fn a_nearest_input_across_a_form_or_widget_is_fenced_off() {
     other.crosses = true;
     let candidates = [other, input(1, "input#far", Some(4))];
     assert_eq!(
-        choose(&candidates, Some(4)),
+        choose(&candidates, Some(4), false),
         FileInputChoice::Fenced(&candidates[0])
     );
 }
@@ -104,7 +109,7 @@ fn the_target_or_its_label_is_never_fenced_off() {
     own.itself = true;
     own.crosses = true;
     assert_eq!(
-        chosen(choose(std::slice::from_ref(&own), Some(3))),
+        chosen(choose(std::slice::from_ref(&own), Some(3), false)),
         (0, FileInputVia::Itself)
     );
 }

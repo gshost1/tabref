@@ -35,7 +35,7 @@ fn files_are_set_on_the_input_and_read_back() {
             "Runtime.callFunctionOn",
             json!({ "result": { "type": "object", "value": [name] } }),
         )
-        .expect("Runtime.releaseObject", json!({}))
+        .expect("Runtime.releaseObjectGroup", json!({}))
         .expect("Runtime.releaseObject", json!({}));
     let sent = transport.sent_log();
     let mut connection = CdpConnection::new(transport.boxed());
@@ -50,7 +50,7 @@ fn files_are_set_on_the_input_and_read_back() {
     .unwrap();
     std::fs::remove_file(&file).unwrap();
 
-    assert!(outcome.verified);
+    assert!(outcome.page_reports_requested_files);
     assert_eq!(outcome.input, "input#file");
     assert_eq!(outcome.via, FileInputVia::Itself);
     let sent = sent.lock().unwrap();
@@ -59,6 +59,10 @@ fn files_are_set_on_the_input_and_read_back() {
         .find(|request| request["method"] == "DOM.setFileInputFiles")
         .unwrap();
     assert_eq!(set["params"]["objectId"], "I");
+    assert!(sent.iter().any(|request| {
+        request["method"] == "Runtime.releaseObjectGroup"
+            && request["params"]["objectGroup"] == "tabref-upload"
+    }));
     assert!(
         set["params"]["files"][0]
             .as_str()
@@ -170,7 +174,7 @@ fn failed_set(message: &str) -> tabref_core::AppError {
             json!({ "result": { "type": "object", "objectId": "I" } }),
         )
         .expect_error("DOM.setFileInputFiles", -32000, message)
-        .expect("Runtime.releaseObject", json!({}))
+        .expect("Runtime.releaseObjectGroup", json!({}))
         .expect("Runtime.releaseObject", json!({}));
     let mut connection = CdpConnection::new(transport.boxed());
     let error = upload_files(

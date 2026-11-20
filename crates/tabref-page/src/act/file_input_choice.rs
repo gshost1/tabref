@@ -14,6 +14,8 @@ pub(crate) struct FileInputCandidate {
     #[serde(deserialize_with = "page_name")]
     pub(crate) name: String,
     #[serde(default)]
+    pub(crate) selector: Option<String>,
+    #[serde(default)]
     pub(crate) hidden: bool,
     #[serde(default)]
     pub(crate) multiple: bool,
@@ -59,6 +61,14 @@ pub enum FileInputVia {
 }
 
 impl FileInputVia {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Itself | Self::Label => "target",
+            Self::Nearest => "nearest",
+            Self::OnlyOnPage => "only",
+        }
+    }
+
     pub fn describe(self) -> &'static str {
         match self {
             Self::Itself => "the target itself",
@@ -77,17 +87,19 @@ pub(crate) enum FileInputChoice<'a> {
     None,
     Ambiguous(Vec<&'a FileInputCandidate>),
     Fenced(&'a FileInputCandidate),
+    OutsideWidget(Vec<&'a FileInputCandidate>),
 }
 
 /// Picks the input in order: the target itself, the input its label
 /// controls, then the file inputs under the nearest ancestor that holds
 /// any. One there is used; several there are refused, and so is one that
 /// crosses into another form or a shadow root the target is not in. An
-/// ancestor that is the whole document makes the one input found the only
-/// one on the page.
+/// ancestor that is the whole document allows the only input only when
+/// the target is in a form, for body-appended drop zone inputs.
 pub(crate) fn choose(
     candidates: &[FileInputCandidate],
     document_depth: Option<u32>,
+    has_form: bool,
 ) -> FileInputChoice<'_> {
     if let Some(found) = candidates.iter().find(|candidate| candidate.itself) {
         return FileInputChoice::Chosen(found, FileInputVia::Itself);
@@ -106,10 +118,14 @@ pub(crate) fn choose(
         .iter()
         .filter(|candidate| candidate.depth == Some(nearest))
         .collect();
+    let at_document = document_depth.is_some_and(|depth| nearest >= depth);
+    if at_document && !has_form {
+        return FileInputChoice::OutsideWidget(at);
+    }
     match at.as_slice() {
         [only] if only.crosses => FileInputChoice::Fenced(only),
         [only] => {
-            let via = if document_depth.is_some_and(|depth| nearest >= depth) {
+            let via = if at_document {
                 FileInputVia::OnlyOnPage
             } else {
                 FileInputVia::Nearest

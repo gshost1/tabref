@@ -39,7 +39,7 @@ const NONE: &str = r##"<!doctype html><html><head><title>None</title></head><bod
 <a href="#" id="pick">select files…</a></body></html>"##;
 
 const ONLY: &str = r##"<!doctype html><html><head><title>Only</title></head><body>
-<a href="#" id="pick">select files…</a>
+<form><a href="#" id="pick">select files…</a></form>
 <script>
 const input = document.createElement('input');
 input.type = 'file';
@@ -64,7 +64,7 @@ fn a_drop_zone_link_label_and_form_each_reach_their_own_file_input() {
 
     let link = token_of(&mut connection, &page, "#pick");
     let dropped = upload_files(&mut connection, &page, &link, &both, deadline()).unwrap();
-    assert!(dropped.verified, "{dropped:?}");
+    assert!(dropped.page_reports_requested_files, "{dropped:?}");
     assert_eq!(
         files_of(&mut connection, &page, ".dz-hidden-input"),
         vec![name_of(&first), name_of(&second)]
@@ -73,7 +73,7 @@ fn a_drop_zone_link_label_and_form_each_reach_their_own_file_input() {
 
     let save = token_of(&mut connection, &page, "#save");
     let saved = upload_files(&mut connection, &page, &save, &both[..1], deadline()).unwrap();
-    assert!(saved.verified, "{saved:?}");
+    assert!(saved.page_reports_requested_files, "{saved:?}");
     assert_eq!(
         files_of(&mut connection, &page, "#avatar"),
         vec![name_of(&first)]
@@ -138,7 +138,7 @@ fn the_only_file_input_is_used_and_a_page_without_one_says_so() {
         deadline(),
     )
     .unwrap();
-    assert!(uploaded.verified, "{uploaded:?}");
+    assert!(uploaded.page_reports_requested_files, "{uploaded:?}");
     assert_eq!(
         files_of(&mut connection, &page, ".dz-hidden-input"),
         vec![name_of(&file)]

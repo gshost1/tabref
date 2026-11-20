@@ -5,8 +5,10 @@ use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::element_call::ElementCall;
 use super::element_errors::stale;
-use super::file_input_choice::{FileInputCandidate, FileInputChoice, choose};
-use super::file_input_search::{list_file_inputs, pick_file_input};
+use super::file_input_choice::{
+    FileInputCandidate, FileInputChoice, FileInputVia, choose, safe_name,
+};
+use super::file_input_search::{UPLOAD_OBJECT_GROUP, list_file_inputs, pick_file_input};
 use super::remote_element::{call_function, with_element};
 use super::upload_outcome::UploadOutcome;
 use crate::{CdpConnection, ElementToken, PageSession};
@@ -21,8 +23,8 @@ const READ_FILES: &str = r"function() {
 /// would, then reads back the names it holds. No native file dialog opens.
 /// A target that is not a file input stands for the one it means: the
 /// input its label controls, else the nearest file input around it (a
-/// drop zone's hidden input in the same form), else the only one on the
-/// page. A path that is not an existing file, several files for a
+/// drop zone's hidden input in the same form), with a page-wide fallback
+/// only for a target in a form. A path that is not an existing file, several files for a
 /// single-file input, no file input, or several equally near are refused
 /// before anything is set.
 pub fn upload_files(
@@ -32,6 +34,29 @@ pub fn upload_files(
     files: &[PathBuf],
     deadline: Deadline,
 ) -> Result<UploadOutcome, AppError> {
+    upload(connection, session, token, files, deadline, false)
+}
+
+/// Sets files only on the input named by `token`. A changed target
+/// cannot send files to a neighboring input.
+pub fn upload_input_files(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    token: &ElementToken,
+    files: &[PathBuf],
+    deadline: Deadline,
+) -> Result<UploadOutcome, AppError> {
+    upload(connection, session, token, files, deadline, true)
+}
+
+fn upload(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    token: &ElementToken,
+    files: &[PathBuf],
+    deadline: Deadline,
+    explicit_input: bool,
+) -> Result<UploadOutcome, AppError> {
     let paths = absolute_files(files)?;
     with_element(
         connection,
@@ -40,7 +65,13 @@ pub fn upload_files(
         deadline,
         |connection, object| {
             let inputs = list_file_inputs(connection, session, object, deadline)?;
-            let (input, via) = match choose(&inputs.candidates, inputs.top) {
+            if explicit_input && !inputs.candidates.iter().any(|input| input.itself) {
+                return Err(stale(
+                    token,
+                    "the selected element is no longer a file input",
+                ));
+            }
+            let (input, via) = match choose(&inputs.candidates, inputs.top, inputs.has_form) {
                 FileInputChoice::Chosen(input, via) => (input.clone(), via),
                 FileInputChoice::None => return Err(no_file_input(token.backend_node_id)),
                 FileInputChoice::Ambiguous(found) => {
@@ -49,7 +80,11 @@ pub fn upload_files(
                 FileInputChoice::Fenced(found) => {
                     return Err(fenced_file_input(token.backend_node_id, found));
                 }
+                FileInputChoice::OutsideWidget(found) => {
+                    return Err(outside_widget(&found));
+                }
             };
+            debug_assert!(!explicit_input || via == FileInputVia::Itself);
             if input.disabled {
                 return Err(disabled_input(&input.name));
             }
@@ -67,37 +102,59 @@ pub fn upload_files(
                 object,
                 (&inputs, input.index),
                 deadline,
-            )?
-            .ok_or_else(|| {
-                stale(
-                    token,
-                    "the page's file inputs changed between the search and the upload",
-                )
-            })?;
-            let names = set_and_read(connection, session, &picked, &paths, deadline)
-                .map_err(|error| input_error(error, &input.name));
+            )
+            .and_then(|picked| {
+                picked.ok_or_else(|| {
+                    stale(
+                        token,
+                        "the page's file inputs changed between the search and the upload",
+                    )
+                })
+            });
+            let names = picked.and_then(|picked| {
+                set_and_read(connection, session, &picked, &paths, deadline)
+                    .map_err(|error| input_error(error, &input.name))
+            });
             let _ = connection.call(
-                "Runtime.releaseObject",
-                json!({ "objectId": picked }),
+                "Runtime.releaseObjectGroup",
+                json!({ "objectGroup": UPLOAD_OBJECT_GROUP }),
                 Some(&session.session_id),
                 deadline,
             );
             let names = names?;
-            let verified = names.len() == paths.len()
+            let page_reports_requested_files = names.len() == paths.len()
                 && paths.iter().zip(&names).all(|(path, name)| {
                     Path::new(path)
                         .file_name()
                         .is_some_and(|file| file.to_string_lossy() == name.as_str())
                 });
             Ok(UploadOutcome {
-                files: names,
-                verified,
+                files: names.iter().map(|name| display_file_name(name)).collect(),
+                page_reports_requested_files,
                 input: input.name,
                 hidden: input.hidden,
                 via,
             })
         },
     )
+}
+
+/// Keep page-supplied names on one printable line, including when a page
+/// substitutes control characters or Unicode formatting marks for a name.
+fn display_file_name(name: &str) -> String {
+    let mut chars = name.chars();
+    let mut text = String::new();
+    for character in chars.by_ref().take(120) {
+        if character.is_ascii_graphic() || character == ' ' {
+            text.push(character);
+        } else {
+            text.extend(character.escape_default());
+        }
+    }
+    if chars.next().is_some() {
+        text.push_str("...");
+    }
+    text
 }
 
 fn set_and_read(
@@ -193,6 +250,32 @@ fn fenced_file_input(backend_node_id: i64, found: &FileInputCandidate) -> AppErr
     )
     .with_suggestion("Upload to a control inside the form or drop zone that holds the input you mean")
     .with_details(json!({ "kind": "ambiguous_file_input", "inputs": [found.name] }))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
+fn outside_widget(found: &[&FileInputCandidate]) -> AppError {
+    let names: Vec<&str> = found.iter().map(|input| input.name.as_str()).collect();
+    let selectors: Vec<String> = found
+        .iter()
+        .filter_map(|input| input.selector.as_deref())
+        .filter(|selector| *selector == safe_name(selector))
+        .map(|selector| format!("css={selector}"))
+        .collect();
+    let mut hint = "Target the intended file input or a control inside its widget".to_owned();
+    if !selectors.is_empty() {
+        hint.push_str(&format!(". Explicit targets: {}", selectors.join(", ")));
+    }
+    AppError::new(
+        ErrorCode::AmbiguousTarget,
+        format!(
+            "No file input shares the target's widget. Other inputs: {}",
+            names.join(", ")
+        ),
+    )
+    .with_suggestion(hint)
+    .with_details(
+        json!({ "kind": "ambiguous_file_input", "inputs": names, "css_targets": selectors }),
+    )
     .with_disposition(DeliverySemantics::not_delivered())
 }
 

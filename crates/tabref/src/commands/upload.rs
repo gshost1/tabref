@@ -2,10 +2,12 @@ use std::path::PathBuf;
 
 use serde_json::json;
 use tabref_core::{AppError, ErrorCode};
-use tabref_page::{FileInputVia, LocateIntent, UploadOutcome, upload_files};
+use tabref_page::{FileInputVia, LocateIntent, UploadOutcome, upload_files, upload_input_files};
 
 use super::act_target::resolve_target;
 use super::target_spec::{TargetSpec, looks_like_css};
+#[path = "upload_css.rs"]
+mod css;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 
@@ -18,32 +20,41 @@ pub(crate) fn run(
     files: &[PathBuf],
 ) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
-    let explain = |error: AppError| css_explained(error, target);
-    let spec = TargetSpec::from_arg(target).map_err(explain)?;
-    let target = resolve_target(session, &spec, LocateIntent::Click, deadline).map_err(explain)?;
-    let uploaded = upload_files(
-        session.connection(),
-        &target.session,
-        &target.token,
-        files,
-        deadline,
-    )?;
-    let text = summary(&uploaded, &target.label);
+    let (uploaded, label) = if let Some(selector) = target.trim().strip_prefix("css=") {
+        let (page, token) = css::resolve(session, selector, deadline)?;
+        let uploaded = upload_input_files(session.connection(), &page, &token, files, deadline)?;
+        (uploaded, format!("{target:?}"))
+    } else {
+        let explain = |error: AppError| css_explained(error, target);
+        let spec = TargetSpec::from_arg(target).map_err(explain)?;
+        let target =
+            resolve_target(session, &spec, LocateIntent::Click, deadline).map_err(explain)?;
+        let uploaded = upload_files(
+            session.connection(),
+            &target.session,
+            &target.token,
+            files,
+            deadline,
+        )?;
+        (uploaded, target.label)
+    };
+    let text = summary(&uploaded, &label);
     Ok(Outcome::new(
         text,
         json!({
             "action": "upload",
-            "target": target.label,
+            "target": label,
             "input": uploaded.input,
             "input_hidden": uploaded.hidden,
+            "via": uploaded.via.as_str(),
             "files": uploaded.files,
-            "verified": uploaded.verified,
+            "page_reports_requested_files": uploaded.page_reports_requested_files,
         }),
     ))
 }
 
 fn summary(uploaded: &UploadOutcome, label: &str) -> String {
-    let mut text = format!("uploaded {} to {label}", uploaded.files.join(", "));
+    let mut text = format!("set files on {label}");
     if uploaded.via != FileInputVia::Itself {
         let hidden = if uploaded.hidden { "hidden " } else { "" };
         text.push_str(&format!(
@@ -52,8 +63,13 @@ fn summary(uploaded: &UploadOutcome, label: &str) -> String {
             uploaded.via.describe()
         ));
     }
-    if !uploaded.verified {
-        text.push_str(" (the input does not show them)");
+    if uploaded.files.is_empty() {
+        text.push_str(" (page reports no files)");
+    } else {
+        text.push_str(&format!(" (page reports: {})", uploaded.files.join(", ")));
+    }
+    if !uploaded.page_reports_requested_files {
+        text.push_str(" (page report differs from request)");
     }
     text
 }
@@ -68,7 +84,7 @@ fn css_explained(error: AppError, target: &str) -> AppError {
     }
     AppError {
         message: format!(
-            "{target:?} reads as a CSS selector, and targets are refs or visible names, not CSS"
+            "{target:?} reads as a CSS selector. Use a ref or visible name, or prefix an explicit file input selector with css="
         ),
         suggestion: Some(
             "Name the visible control (a drop zone's link or button works: upload finds the file input behind it), or use a ref from 'tabref snap'"

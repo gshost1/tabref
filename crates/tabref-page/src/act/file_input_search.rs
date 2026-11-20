@@ -29,7 +29,7 @@ const SEARCH: &str = r"function(mode, index, expected) {
   for (let node = this; node; node = up(node)) chain.push(node);
   const place = new Map(chain.map((node, at) => [node, at]));
   const doc = this.ownerDocument || document;
-  const top = doc.body || doc.documentElement;
+  const top = place.has(doc.body) ? doc.body : doc.documentElement;
   const inputs = [];
   const under = (root) => {
     for (const el of root.querySelectorAll('*')) {
@@ -82,17 +82,29 @@ const SEARCH: &str = r"function(mode, index, expected) {
     crosses: crosses(el),
   }));
   const at = place.has(top) ? place.get(top) : null;
-  const key = JSON.stringify([at, candidates]);
+  const hasForm = targetForm !== null;
+  const key = JSON.stringify([at, hasForm, candidates]);
   if (mode === 'pick') return key === expected ? inputs[index] || null : null;
-  candidates.forEach((candidate, at) => { candidate.hidden = hiddenOf(inputs[at]); });
-  return { top: at, key, candidates };
+  candidates.forEach((candidate, at) => {
+    const el = inputs[at];
+    candidate.hidden = hiddenOf(el);
+    if (doc.defaultView !== doc.defaultView.top || el.getRootNode() !== doc) return;
+    try {
+      const matches = doc.querySelectorAll(candidate.name);
+      if (matches.length === 1 && matches[0] === el) candidate.selector = candidate.name;
+    } catch {}
+  });
+  return { top: at, hasForm, key, candidates };
 }";
+
+pub(crate) const UPLOAD_OBJECT_GROUP: &str = "tabref-upload";
 
 /// The file inputs the target can reach, the depth of the page body above
 /// it, and the key "pick" checks the page against.
 pub(crate) struct FileInputs {
     pub(crate) candidates: Vec<FileInputCandidate>,
     pub(crate) top: Option<u32>,
+    pub(crate) has_form: bool,
     pub(crate) key: String,
 }
 
@@ -131,6 +143,10 @@ pub(crate) fn list_file_inputs(
     Ok(FileInputs {
         candidates,
         top,
+        has_form: listed
+            .get("hasForm")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         key,
     })
 }
@@ -153,6 +169,7 @@ pub(crate) fn pick_file_input(
             "arguments": [{ "value": "pick" }, { "value": index }, { "value": inputs.key }],
             "returnByValue": false,
             "awaitPromise": false,
+            "objectGroup": UPLOAD_OBJECT_GROUP,
         }),
         Some(&session.session_id),
         deadline,
