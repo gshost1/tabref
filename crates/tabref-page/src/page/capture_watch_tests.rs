@@ -34,6 +34,19 @@ fn the_token_is_quoted_and_every_placeholder_filled() {
         assert!(filled.contains(r#""s1-'x\"""#), "{filled}");
         assert!(!filled.contains("KEY_AND_SCAN"));
         assert!(!filled.contains("TOKEN"));
+        assert!(!filled.contains("IDLE_MS"));
         assert!(filled.contains("Symbol.for('tabref.capture-watch')"));
     }
+}
+
+#[test]
+fn the_watch_is_armed_once_the_page_is_idle_or_the_wait_ran_out() {
+    let filled = script(ARM, "s1");
+    assert!(filled.starts_with("await new Promise"), "{filled}");
+    assert!(filled.contains("requestIdleCallback"), "{filled}");
+    assert!(filled.contains("{ timeout: 50 }"), "{filled}");
+    assert!(
+        filled.contains("if (document.visibilityState === 'hidden') arm();"),
+        "{filled}"
+    );
 }

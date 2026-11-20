@@ -8,9 +8,10 @@
 //! every in-process command that is not a read writes a new page-actions
 //! stamp to the ref store, which a kept capture must still match, so an
 //! in-process hover between two daemon reads is never missed. The page
-//! scripts that arm and check the watch get a combined budget of 19 ms: a
-//! page whose main thread is held (an open dialog, a long task) is not kept or
-//! reused, and the command goes on as without the cache. At most
+//! script that checks the watch gets [`WATCH_WAIT`], and the one that arms
+//! it [`ARM_WAIT`], which leaves room for its wait for an idle main thread:
+//! a page whose main thread is held (an open dialog, a long task) is not
+//! kept or reused, and the command goes on as without the cache. At most
 //! [`MAX_KEPT`] tabs keep one.
 #![cfg_attr(not(unix), allow(dead_code))]
 
@@ -20,15 +21,17 @@ use std::time::{Duration, Instant};
 
 use tabref_cdp::PageSession;
 use tabref_core::{RefStore, new_snapshot_id};
-use tabref_page::{CaptureWatch, arm_capture_watch, check_capture_watch, has_closed_shadow_root};
+use tabref_page::{
+    CaptureWatch, IDLE_WAIT_MS, arm_capture_watch, check_capture_watch, has_closed_shadow_root,
+};
 
 use super::Session;
 use super::captured_snapshot::CapturedSnapshot;
 use super::ref_target::latest_snapshot_of;
 
 const MAX_AGE: Duration = Duration::from_secs(5);
-const ARM_WAIT: Duration = Duration::from_millis(11);
 const WATCH_WAIT: Duration = Duration::from_millis(8);
+const ARM_WAIT: Duration = Duration::from_millis(IDLE_WAIT_MS + 11);
 const MAX_KEPT: usize = 4;
 const PAGE_ACTIONS: &str = "page-actions";
 
