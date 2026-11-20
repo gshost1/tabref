@@ -122,7 +122,7 @@ fn label_matches(label: &str, node: &AccessibilityNode) -> bool {
         return false;
     };
     if node.role == "link" {
-        return label == &name
+        return label == name
             || label
                 .rsplit_once(" -> ")
                 .is_some_and(|(label, _)| normalize(label) == name);
