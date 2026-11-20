@@ -29,6 +29,21 @@ pub fn squash(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Maximum number of characters in a shortened control label, after escaping.
+pub const CONTROL_NAME_LIMIT: usize = 100;
+
+/// A label as it appears inside a bracketed control token.
+pub fn escape_control_label(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in squash(text).chars() {
+        if matches!(character, '[' | ']' | '|') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
 const BOX_TAGS: &[&str] = &[
     "BR", "P", "DIV", "LI", "TD", "TH", "TR", "DT", "DD", "H1", "H2", "H3", "H4", "H5", "H6",
     "SECTION", "ARTICLE", "OPTION",

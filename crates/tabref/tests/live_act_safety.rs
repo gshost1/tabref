@@ -32,6 +32,18 @@ const TABLE: &str = r#"<!doctype html><title>Stock</title>
 <tr><td>Plate</td><td>12.50 <button onclick="out.textContent='edited Plate'">Edit</button></td></tr>
 </table><p id=out>Nothing</p>"#;
 
+const ROW_MARKUP: &str = r#"<!doctype html><title>Stock</title>
+<table><tr><th>Product</th><th>Variant</th><th>Price</th><th>Action</th></tr>
+<tr><td><input type=checkbox checked aria-label="Select Mug"></td><td>Mug</td><td><button disabled>Unavailable</button></td>
+    <td><button onclick="out.textContent='edited checked'">Edit</button></td></tr>
+<tr><td>Fields</td><td><input aria-label="Code" value="A ] | [ B"></td><td><select aria-label="Size"><option>S</option><option>M</option></select></td>
+    <td><button onclick="out.textContent='edited fields'">Edit</button></td></tr>
+<tr><td>Long</td><td><button aria-label="Long name for a row button that includes characters past the renderer limit and should match the complete accessibility name">Info</button></td>
+    <td><button onclick="out.textContent='edited long'">Edit</button></td></tr>
+<tr><td>Mug | 9.50</td><td><button onclick="out.textContent='edited one cell'">Edit</button></td></tr>
+<tr><td>Mug</td><td>9.50</td><td><button onclick="out.textContent='edited two cells'">Edit</button></td></tr>
+</table><p id=out>Nothing</p>"#;
+
 fn site() -> (Harness, String) {
     let port = serve(&[("/shop", SHOP), ("/danger", DANGER), ("/done", DONE)]);
     (harness("act-safety"), format!("http://127.0.0.1:{port}"))
@@ -140,6 +152,58 @@ fn copied_rows_skip_empty_cells_and_match_text_alongside_controls() {
         let edited = tabref.ok(&["js", "document.getElementById('out').textContent"]);
         assert_eq!(edited.stdout.trim(), expected);
     }
+}
+
+#[test]
+fn copied_rows_keep_control_names_when_the_tokens_include_details() {
+    if !live() {
+        return;
+    }
+    let tabref = open_row_markup();
+    for (fragment, expected) in [
+        ("checkbox Select Mug (checked)", "edited checked"),
+        ("options: S | M", "edited fields"),
+        ("Long name for a row button", "edited long"),
+    ] {
+        let row = printed_row(&tabref, |line| line.contains(fragment));
+        click_copied_row(&tabref, &row, expected);
+    }
+}
+
+#[test]
+fn copying_rows_distinguishes_a_literal_pipe_from_a_cell_separator() {
+    if !live() {
+        return;
+    }
+    let tabref = open_row_markup();
+    let literal = printed_row(&tabref, |line| line.starts_with(r"Mug \| 9.50 | "));
+    let separator = printed_row(&tabref, |line| line.starts_with("Mug | 9.50 | "));
+    click_copied_row(&tabref, &literal, "edited one cell");
+    click_copied_row(&tabref, &separator, "edited two cells");
+}
+
+fn open_row_markup() -> common::Harness {
+    let port = serve(&[("/stock", ROW_MARKUP)]);
+    let tabref = harness("row-markup");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/stock")]);
+    tabref
+}
+
+fn printed_row(tabref: &common::Harness, matches: impl Fn(&str) -> bool) -> String {
+    let snap = tabref.ok(&["snap"]);
+    snap.stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| matches(line))
+        .unwrap_or_else(|| panic!("{}", snap.stdout))
+        .to_owned()
+}
+
+fn click_copied_row(tabref: &common::Harness, row: &str, expected: &str) {
+    let batch = format!(r#"click "Edit" in '{}'"#, row);
+    tabref.ok(&["do", &batch]);
+    let result = tabref.ok(&["js", "document.getElementById('out').textContent"]);
+    assert_eq!(result.stdout.trim(), expected);
 }
 
 #[test]
