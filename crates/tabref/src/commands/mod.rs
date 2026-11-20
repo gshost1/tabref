@@ -88,6 +88,7 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
 /// part of the report took are added to it (or to its error), those from
 /// another tab marked so, and a result says when no dialog used the answer.
 pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, AppError> {
+    let started_headless_profile = session.take_headless_profile_launch();
     let outcome = dispatch(session, &cli.command);
     let unused = session.connection().take_dialog_choice();
     let left = dialog_report::navigation_dialogs(session, None);
@@ -97,6 +98,9 @@ pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, 
         Err(error) => return Err(dialog_report::error_with_dialogs(error, &left)),
     };
     dialog_report::after_report(&mut outcome, &left);
+    if started_headless_profile {
+        outcome.push_line("note: headless browser (add --headed to see it)");
+    }
     if let Some(unused) = unused {
         outcome.push_line(&unused_note(&unused));
         action_report::set(&mut outcome.data, "dialog_unused", serde_json::json!(true));

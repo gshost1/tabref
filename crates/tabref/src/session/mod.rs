@@ -64,6 +64,7 @@ pub(crate) struct Session {
     warning: Option<String>,
     choice: Option<String>,
     captures: Option<Arc<CaptureCache>>,
+    started_headless_profile: bool,
 }
 
 impl Session {
@@ -99,7 +100,12 @@ impl Session {
             warning: browser.warning,
             choice,
             captures: None,
+            started_headless_profile: browser.started_headless_profile,
         })
+    }
+
+    pub(crate) fn take_headless_profile_launch(&mut self) -> bool {
+        std::mem::take(&mut self.started_headless_profile)
     }
 
     pub(crate) fn deadline(&self) -> Deadline {
