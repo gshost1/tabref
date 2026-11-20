@@ -122,7 +122,7 @@ pub(crate) fn connect_user_chrome(
     Ok(ConnectedBrowser {
         endpoint,
         connection,
-        warning: Some(format!("in your {} (logged in)", record.name)),
+        warning: Some(format!("your logged-in {}", record.name)),
         choice: None,
     })
 }
