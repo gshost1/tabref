@@ -235,6 +235,42 @@ fn kept_snapshot(tabref: &Harness) -> Run {
 }
 
 #[test]
+fn a_read_with_a_slow_watch_check_keeps_the_capture_for_the_next_read() {
+    if !live() {
+        return;
+    }
+    let tabref = common::harness("reuse-slow-check");
+    open(&tabref, STILL);
+    for _ in 0..5 {
+        let kept = kept_snapshot(&tabref);
+        direct_page_command(
+            &tabref,
+            "Runtime.evaluate",
+            json!({
+                "expression": r#"(() => {
+                const check = Element.prototype.checkVisibility;
+                Element.prototype.checkVisibility = function(options) {
+                    Element.prototype.checkVisibility = check;
+                    const until = performance.now() + 60;
+                    while (performance.now() < until) {}
+                    return check.call(this, options);
+                };
+            })()"#
+            }),
+        );
+        let read = run(&tabref, &["read", "--section", "More"], &[]);
+        assert!(read.stdout.contains("Beta words"), "{}", read.stdout);
+        let found = run(&tabref, &["find", "needle"], &[]);
+        if snapshot_id(&found) == snapshot_id(&kept) {
+            stop(&tabref);
+            return;
+        }
+    }
+    stop(&tabref);
+    panic!("no read with a timed-out check kept its capture for the following find");
+}
+
+#[test]
 fn css_hover_and_stylesheet_edits_invalidate_a_kept_view() {
     if !live() {
         return;

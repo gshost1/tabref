@@ -38,6 +38,7 @@ impl Session {
             unreadable_frames: snapshot.unreadable_frames.len(),
             skipped_frames: snapshot.skipped_frames,
             dom_captures: snapshot.dom_captures,
+            main_dom: Default::default(),
         });
         self.keep(&page, &captured, watch);
         Ok(captured)

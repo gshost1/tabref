@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use serde_json::Value;
 use tabref_core::AccessibilityNode;
-use tabref_page::{PageInfo, SkippedFrame};
+use tabref_page::{DomTree, PageInfo, SkippedFrame, parse_capture};
 
 /// A snapshot read and saved: its id, the tree with refs allocated, the
 /// page's address and title, how many refs it holds, how many frames could
@@ -20,4 +21,13 @@ pub(crate) struct CapturedSnapshot {
     pub(crate) unreadable_frames: usize,
     pub(crate) skipped_frames: Vec<SkippedFrame>,
     pub(crate) dom_captures: HashMap<String, Value>,
+    pub(super) main_dom: OnceLock<Vec<DomTree>>,
+}
+
+impl CapturedSnapshot {
+    /// Parsed documents of the snapshot's main target.
+    pub(crate) fn main_dom(&self, target: &str) -> Option<&[DomTree]> {
+        let raw = self.dom_captures.get(target)?;
+        Some(self.main_dom.get_or_init(|| parse_capture(raw, target)))
+    }
 }

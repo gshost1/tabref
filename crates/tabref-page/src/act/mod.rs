@@ -31,6 +31,7 @@ pub(crate) mod input_value_text;
 pub(crate) mod key_definition;
 pub(crate) mod key_press;
 pub(crate) mod key_stroke;
+pub(crate) mod option_match;
 pub(crate) mod page_changes;
 pub(crate) mod page_mark;
 pub(crate) mod press_point;

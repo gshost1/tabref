@@ -1,7 +1,10 @@
 pub(crate) mod block_renderer;
 pub(crate) mod block_titles;
+pub(crate) mod bot_check;
 pub(crate) mod budget;
 pub(crate) mod control_text;
+pub(crate) mod cut_marker;
+pub(crate) mod cut_outline;
 pub(crate) mod cut_report;
 pub(crate) mod cut_stats;
 pub(crate) mod detail;

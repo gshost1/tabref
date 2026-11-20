@@ -81,8 +81,11 @@ fn a_frame_that_grows_past_the_budget_is_unchecked_instead_of_removed() {
     assert_eq!(data["data"]["unchecked_text_blocks"], 1, "{data}");
     let changes = data["data"]["changes"].as_array().unwrap();
     assert_eq!(changes.len(), 1, "{data}");
-    assert!(
-        changes[0].as_str().unwrap().contains("reconciled"),
+    let line = changes[0].as_str().unwrap();
+    assert!(line.contains("reconciled"), "{data}");
+    assert_eq!(
+        data["data"]["change_counts"],
+        serde_json::json!([{ "line": line, "count": 1 }]),
         "{data}"
     );
 }
