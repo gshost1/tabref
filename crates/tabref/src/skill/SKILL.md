@@ -2,7 +2,9 @@
 
 Start with `tabref skill && tabref open <url>`. Read the whole output.
 If no browser is connected, use `tabref open <url> --launch`.
-Downloads, dialogs, logins, Chrome-based apps: `tabref skill more`. Options: `tabref CMD --help`.
+Commands wait for the page. Don't add sleeps.
+See `tabref skill more` for waits, `connect` to your own Chrome, downloads, dialogs, logins, and Chrome-based apps.
+Options: `tabref CMD --help`.
 
 ## Reading
 One line per block; `#` lines are headings. Controls show their ref: `[e5 button Save]`,
@@ -10,13 +12,14 @@ One line per block; `#` lines are headings. Controls show their ref: `[e5 button
 `[e9 select Size = "M" options: S | M | L]`. Lists say `N items:`, tables `table N rows:`,
 repeats `(1/3)`: count with these across the whole page, not the first block. A cut ends with the command for the rest
 (`tabref snap --rows 21-`); run it before answering about it. `tabref find TEXT` searches all text,
-hidden too; `tabref read` prints the main text. A `dialog` line at the top: click one of its buttons (decline cookies).
+hidden too; `tabref read` prints the main text and `tabref read --section "<heading>"` reads one section.
+A `dialog` line at the top: click one of its buttons (decline cookies).
 
 ## Acting
 `click T`, `fill T VALUE`, `type T TEXT` (adds), `select T LABEL|VALUE`, `check T`, `uncheck T`,
 `press KEY [T]`, `focus T`, `hover T`, `scroll down|T`, `double-click T`, `upload T FILE`.
 T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
-`"Edit" in "<row text>"`, `"Reply" after "<text>"`; names survive a reload, refs do not.
+`"Edit" in "<row text>"`, `"Reply" after "<text>"`.
 Dates and times take plain values (`2027-07-31`, `14:30`). Each action prints what it changed (new address,
 `"67.00" -> "62.00"`, new rows and controls): read that instead of taking a snapshot.
 
@@ -25,6 +28,7 @@ Put known steps in one `tabref do`. It stops at the first failing step and repor
 
     tabref do <<'EOF'
     for name price in Cap 12.00 Mug 9.50
+      open /admin/products
       click "Edit" in "{name}"
       fill "Price" {price}
       click "Save"
