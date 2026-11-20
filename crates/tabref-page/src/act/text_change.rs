@@ -7,7 +7,7 @@ const MIDDLE_CHARS: usize = 60;
 
 /// One line of a page's rendered text that an action changed: rewritten in
 /// place, added or removed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TextChange {
     Changed { before: String, after: String },
     Added(String),
