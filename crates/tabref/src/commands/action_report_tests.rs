@@ -1,7 +1,17 @@
+use std::time::{Duration, Instant};
+
+use serde_json::json;
+use tabref_page::TextChange;
+
+use super::super::action_report_changes::{
+    change_data, counted, reload_head, step_change, within_budget,
+};
+use super::{NOTHING_READ, NOTHING_SEEN, dialog_line, dialog_lines, nothing_seen};
+
 #[test]
 fn reorder_preview_fits_whole_cjk_rows_and_reports_omissions() {
     let rows: Vec<_> = (1..=8)
-        .map(|n| format!("{n} {}", "界".repeat(85)))
+        .map(|n| format!("{n} {}", "界".repeat(82)))
         .collect();
     let changes = [
         TextChange::Reordered {
@@ -30,16 +40,6 @@ fn reorder_preview_fits_whole_cjk_rows_and_reports_omissions() {
         serde_json::json!({ "above": "Header", "rows": 2, "total": 8, "table": true })
     );
 }
-
-use serde_json::json;
-use tabref_page::TextChange;
-
-use std::time::{Duration, Instant};
-
-use super::super::action_report_changes::{
-    change_data, counted, reload_head, step_change, within_budget,
-};
-use super::{NOTHING_READ, NOTHING_SEEN, dialog_line, dialog_lines, nothing_seen};
 
 #[test]
 fn a_quiet_action_selects_the_unread_frame_note() {

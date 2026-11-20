@@ -1,3 +1,7 @@
+use super::{Cells, cells_of};
+use crate::act::text_change::TextChange;
+use crate::act::text_diff::{diff_lines, diff_page, text_lines};
+
 #[test]
 fn a_middle_exceeding_the_diff_matrix_limit_uses_ordinary_changes() {
     let mut before = vec!["Header".into()];
@@ -13,10 +17,6 @@ fn a_middle_exceeding_the_diff_matrix_limit_uses_ordinary_changes() {
             .all(|change| !matches!(change, TextChange::Reordered { .. }))
     );
 }
-
-use super::{Cells, cells_of};
-use crate::act::text_change::TextChange;
-use crate::act::text_diff::{diff_lines, diff_page, text_lines};
 
 fn rows(names: &[&str]) -> Vec<String> {
     let mut all = vec!["Shipments".to_owned(), "Tracking Weight".to_owned()];

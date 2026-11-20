@@ -96,12 +96,12 @@ fn sorting_a_table_prints_the_rows_it_now_starts_with() {
     assert!(out.contains("Undo sort"), "{out}");
     assert!(
         out.lines()
-            .any(|line| line.starts_with("new ") && line.contains("button Close")),
+            .any(|line| line.starts_with("new ") && line.ends_with("button \"Close\"")),
         "{out}"
     );
     assert!(
         out.lines()
-            .any(|line| line.starts_with("new ") && line.contains("button OK")),
+            .any(|line| line.starts_with("new ") && line.ends_with("button \"OK\"")),
         "{out}"
     );
     assert!(
