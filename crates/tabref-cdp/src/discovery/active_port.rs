@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::Path;
 
 use tabref_core::{AppError, DeliverySemantics, ErrorCode};
@@ -20,17 +20,95 @@ pub struct ActivePort {
 /// deletes it breaks every later client of the same browser.
 pub fn read_active_port(user_data_dir: &Path) -> Result<ActivePort, AppError> {
     let path = user_data_dir.join(ACTIVE_PORT_FILE);
-    let file = File::open(&path).map_err(|error| missing(&path, &error.to_string()))?;
-    let mut text = String::new();
-    file.take(MAX_FILE_BYTES)
-        .read_to_string(&mut text)
-        .map_err(|error| malformed(&path, &error.to_string()))?;
+    let file =
+        open_active_port(user_data_dir).map_err(|error| missing(&path, &error.to_string()))?;
+    let text = read_text(file).map_err(|error| malformed(&path, &error.to_string()))?;
     parse_active_port(&text).map_err(|error| {
         error.with_details(serde_json::json!({
             "kind": "cdp_active_port_malformed",
             "path": path.display().to_string(),
         }))
     })
+}
+
+/// Opens the profile's ordinary port file without following a link.
+pub(crate) fn open_active_port(profile: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags, fstat, open, openat};
+        let dir = open(
+            profile,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        let owner = fstat(&dir)?.st_uid;
+        if owner != rustix::process::geteuid().as_raw() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the profile directory belongs to another user",
+            ));
+        }
+        let file = openat(
+            dir,
+            ACTIVE_PORT_FILE,
+            OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        ordinary_file(file.into())
+    }
+    #[cfg(not(unix))]
+    {
+        #[cfg(windows)]
+        {
+            let metadata = std::fs::symlink_metadata(profile)?;
+            if !metadata.is_dir() || super::windows_profile_owner::is_reparse_point(&metadata) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "the profile directory is not an ordinary directory",
+                ));
+            }
+        }
+        let path = profile.join(ACTIVE_PORT_FILE);
+        if !std::fs::symlink_metadata(&path)?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "DevToolsActivePort is not a regular file",
+            ));
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+            options.custom_flags(OPEN_REPARSE_POINT);
+        }
+        ordinary_file(options.open(path)?)
+    }
+}
+
+fn ordinary_file(file: File) -> io::Result<File> {
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "DevToolsActivePort is not a regular file",
+        ));
+    }
+    #[cfg(windows)]
+    if super::windows_profile_owner::is_reparse_point(&metadata) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "DevToolsActivePort is a reparse point",
+        ));
+    }
+    Ok(file)
+}
+
+pub(crate) fn read_text(file: File) -> io::Result<String> {
+    let mut text = String::new();
+    file.take(MAX_FILE_BYTES).read_to_string(&mut text)?;
+    Ok(text)
 }
 
 /// Parses the two-line `DevToolsActivePort` format.
