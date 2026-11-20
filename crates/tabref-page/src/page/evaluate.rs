@@ -51,21 +51,17 @@ fn evaluate_settled(
         session_id,
         deadline,
     )?;
-    if let Some(exception) = reply.get("exceptionDetails") {
-        let in_promise = exception["text"]
-            .as_str()
-            .is_some_and(|text| text.starts_with("Uncaught (in promise)"));
-        return Err(if in_promise {
-            rejected(exception)
-        } else {
-            thrown(exception)
-        });
-    }
-    let result = reply.get_mut("result").map_or(Value::Null, Value::take);
-    let Some(object_id) = result.get("objectId").and_then(Value::as_str) else {
-        return Ok(plain(result));
+    let outcome = if let Some(exception) = reply.get("exceptionDetails") {
+        Err(evaluation_error(
+            connection, session_id, expression, exception, deadline,
+        ))
+    } else {
+        let result = reply.get_mut("result").map_or(Value::Null, Value::take);
+        let Some(object_id) = result.get("objectId").and_then(Value::as_str) else {
+            return Ok(plain(result));
+        };
+        object_value(connection, session, &result, object_id, deadline)
     };
-    let outcome = object_value(connection, session, &result, object_id, deadline);
     let release = Deadline::after(RELEASE_MS).unwrap_or(deadline);
     let _ = connection.call(
         "Runtime.releaseObjectGroup",
@@ -74,6 +70,75 @@ fn evaluate_settled(
         release,
     );
     outcome
+}
+
+fn evaluation_error(
+    connection: &mut CdpConnection,
+    session_id: Option<&str>,
+    expression: &str,
+    exception: &Value,
+    deadline: Deadline,
+) -> AppError {
+    let text = exception["text"].as_str().unwrap_or_default();
+    let in_promise = text.starts_with("Uncaught (in promise)")
+        || (expression.contains("await")
+            && exception
+                .pointer("/exception/className")
+                .and_then(Value::as_str)
+                != Some("SyntaxError")
+            && requires_top_level_await(connection, session_id, expression, deadline));
+    if in_promise {
+        rejected(exception)
+    } else {
+        thrown(exception)
+    }
+}
+
+/// Chrome's REPL reports a rejected implicit async evaluation as
+/// "Uncaught", also used for synchronous throws. Check whether the source
+/// requires REPL-mode await syntax by compiling it as an ordinary script.
+/// This never runs the expression a second time.
+fn requires_top_level_await(
+    connection: &mut CdpConnection,
+    session_id: Option<&str>,
+    expression: &str,
+    deadline: Deadline,
+) -> bool {
+    if connection
+        .call("Runtime.enable", json!({}), session_id, deadline)
+        .is_err()
+    {
+        return false;
+    }
+    let Ok(compiled) = connection.call(
+        "Runtime.compileScript",
+        json!({ "expression": expression, "sourceURL": "", "persistScript": false }),
+        session_id,
+        deadline,
+    ) else {
+        return false;
+    };
+    let error = &compiled["exceptionDetails"];
+    let description = error
+        .pointer("/exception/description")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if description.starts_with("SyntaxError: await is only valid") {
+        return true;
+    }
+    // Chrome points at the 'await' token for a top-level for-await loop.
+    description.starts_with("SyntaxError: Unexpected reserved word")
+        && error["lineNumber"]
+            .as_u64()
+            .zip(error["columnNumber"].as_u64())
+            .is_some_and(|(line, column)| {
+                expression.lines().nth(line as usize).is_some_and(|line| {
+                    line.encode_utf16()
+                        .skip(column as usize)
+                        .take(5)
+                        .eq("await".encode_utf16())
+                })
+            })
 }
 
 /// The value of the object a script returned: what a promise settles to,
