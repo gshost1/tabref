@@ -7,7 +7,7 @@ env:
 jobs:
   reconnect:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,8 +19,10 @@ jobs:
           git checkout --detach 784adba1cbeb355b3ca02a233a784dd0e92edf7b
           cargo build --locked -p tabref
           Copy-Item target/debug/tabref.exe "$env:RUNNER_TEMP/before.exe"
-          git checkout --detach $current
+          git checkout --detach b110612
           cargo build --locked -p tabref
-      - name: Measure Windows reconnects to the loopback CDP fixture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git checkout --detach $current
+      - name: Time successful reconnects to one Chrome instance
         timeout-minutes: 3
-        run: cargo test --locked -p tabref-cdp --test windows_reconnect_timing -- --nocapture
+        run: python -u scripts/time-windows-reconnect.py
