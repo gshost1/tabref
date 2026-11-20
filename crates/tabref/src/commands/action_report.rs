@@ -86,6 +86,10 @@ pub(crate) fn step_report(
                 line.push_str(&format!(" (+{} more)", page.changes.len() - 1));
             }
         }
+        if let Some(note) = text_check_note(page) {
+            line.push_str(&format!("; {note}"));
+        }
+        merge(&mut data, text_check_data(page));
     }
     merge(&mut data, json!({ "navigated": effects.settled.navigated }));
     Ok((line, data))
@@ -118,6 +122,7 @@ fn effect_block(
         return Ok((lines, data));
     };
     merge(&mut data, json!({ "url": page.url, "title": page.title }));
+    merge(&mut data, text_check_data(page));
     if effects.settled.navigated && effects.url_before != page.url {
         let report = current_page_view(session)?;
         lines.push(report.text);
@@ -130,6 +135,7 @@ fn effect_block(
     let changes: Vec<String> = page.changes.iter().map(ToString::to_string).collect();
     lines.extend(within_budget(&changes));
     merge(&mut data, json!({ "changes": changes }));
+    lines.extend(text_check_note(page));
     if effects.settled.navigated {
         lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
     } else if page.changed_anything() || effects.settled.same_document {
@@ -149,6 +155,19 @@ fn effect_block(
         merge(&mut data, json!({ "new": appeared }));
     }
     Ok((lines, data))
+}
+
+fn text_check_data(page: &tabref_page::PageChanges) -> Value {
+    json!({
+        "unread_frames": page.unread_frames,
+        "unchecked_text_blocks": page.unchecked_text_blocks,
+    })
+}
+
+fn text_check_note(page: &tabref_page::PageChanges) -> Option<String> {
+    let count = page.unchecked_text_blocks;
+    (count > 0 && u64::try_from(count).ok() != Some(page.unread_frames))
+        .then(|| format!("Text blocks not checked: {count}"))
 }
 
 /// Reports no visible change after a click, key press, hover or focus when

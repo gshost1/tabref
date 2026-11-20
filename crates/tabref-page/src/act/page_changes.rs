@@ -12,6 +12,9 @@ pub struct PageChanges {
     pub title: String,
     pub mutations: Option<u64>,
     pub unread_frames: u64,
+    /// Text blocks skipped in either scan, including the main document
+    /// when it exceeded its separate limit.
+    pub unchecked_text_blocks: usize,
     pub changes: Vec<TextChange>,
 }
 

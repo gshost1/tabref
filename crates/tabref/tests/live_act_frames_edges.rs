@@ -62,6 +62,32 @@ fn a_frame_never_costs_the_main_documents_diff_on_a_large_page() {
 }
 
 #[test]
+fn a_frame_that_grows_past_the_budget_is_unchecked_instead_of_removed() {
+    if !live() {
+        return;
+    }
+    let page = r#"<!doctype html><title>Ledger</title><p id=state>Status idle</p>
+<button onclick="state.textContent = 'Status reconciled'; notes.contentDocument.querySelector('pre').append('Z'.repeat(60000))">Reconcile</button>
+<iframe id=notes src="/notes" title="Notes" style="width:600px;height:200px"></iframe>"#;
+    let frame = format!(
+        "<!doctype html><title>Notes</title><pre>Frame contents\n{}</pre>",
+        "X".repeat(150_000)
+    );
+    let port = serve(&[("/ledger", page), ("/notes", &frame)]);
+    let tabref = harness("frame-grows");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/ledger")]);
+    let data = tabref.ok(&["--json", "click", "Reconcile"]).json();
+    assert_eq!(data["data"]["unread_frames"], 0, "{data}");
+    assert_eq!(data["data"]["unchecked_text_blocks"], 1, "{data}");
+    let changes = data["data"]["changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 1, "{data}");
+    assert!(
+        changes[0].as_str().unwrap().contains("Status reconciled"),
+        "{data}"
+    );
+}
+
+#[test]
 fn control_characters_in_page_text_are_escaped_not_printed() {
     if !live() {
         return;
