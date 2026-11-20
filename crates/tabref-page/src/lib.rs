@@ -70,7 +70,8 @@ pub use outline::ref_label::RefLabel;
 pub use outline::select_option::SelectOption;
 pub use outline::text_match::TextMatch;
 pub use outline::text_runs::{
-    CONTROL_NAME_LIMIT, collapse_run, cut_chars, escape_control_label, squash, subtree_text,
+    CONTROL_NAME_LIMIT, CONTROL_VALUE_LIMIT, collapse_run, cut_chars, escape_control_label,
+    escape_line, squash, subtree_text,
 };
 pub use outline::text_search::search_text;
 pub use outline::url_resolve::{origin_of, resolve_href, short_href};

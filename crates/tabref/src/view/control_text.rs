@@ -1,12 +1,13 @@
 use std::fmt::Write as _;
 
-use tabref_page::{CONTROL_NAME_LIMIT, Control, cut_chars, short_href, squash};
+use tabref_page::{
+    CONTROL_NAME_LIMIT, CONTROL_VALUE_LIMIT, Control, cut_chars, short_href, squash,
+};
 
 use super::escape::{escape_href, escape_in_token};
 use super::node_line::quote_text;
 use super::view_options::ViewOptions;
 
-const VALUE_LIMIT: usize = 80;
 const HREF_LIMIT: usize = 120;
 const CROSS_SITE_LIMIT: usize = 80;
 const OPTION_LIMIT: usize = 20;
@@ -55,7 +56,7 @@ pub(crate) fn control_token(
         .value
         .as_deref()
         .filter(|_| shows_value(control))
-        .map(|value| limited(value.to_owned(), VALUE_LIMIT));
+        .map(|value| limited(value.to_owned(), CONTROL_VALUE_LIMIT));
     let role = role_word(control);
     if !(control.is_link() && control.href.is_some()) {
         out.push_str(role);
