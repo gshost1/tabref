@@ -1,7 +1,28 @@
-use tabref_core::ErrorCode;
+use tabref_core::{Deadline, ErrorCode};
 
 use super::parse_version_body;
 use crate::EndpointSource;
+
+#[test]
+fn an_expired_deadline_before_connect_does_not_suggest_a_websocket_url() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let error = super::endpoint_from_address(address, Deadline::after(0).unwrap()).unwrap_err();
+    assert_eq!(error.kind(), Some("cdp_timeout"));
+    assert!(
+        !error
+            .suggestion
+            .as_deref()
+            .unwrap_or_default()
+            .contains("ws://"),
+        "{error:?}",
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+    );
+}
 
 #[test]
 fn a_loopback_debugger_url_on_the_same_port_is_accepted() {
