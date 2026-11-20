@@ -5,11 +5,10 @@ use super::cut_stats::CutStats;
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
 
-/// The view's last line: its size, and when anything was left out, every
-/// kind of cut with the command that shows it: lines past the budget,
-/// sections left as headings, rows past the window, chrome, and lines cut
-/// short (each of those also carries its own marker), and frames the
-/// snapshot could not read in time, whose controls have no refs.
+/// The view's last line lists its size and what was left out. A budget
+/// cut points to `--from` at the first omitted line, including when it
+/// falls inside a section. Other hints cover omitted rows and navigation,
+/// shortened lines, and frames the snapshot could not read in time.
 pub(crate) fn footer_line(
     report: &CutReport,
     stats: &CutStats,
