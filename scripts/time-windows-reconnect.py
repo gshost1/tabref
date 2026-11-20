@@ -6,13 +6,16 @@ import time
 
 
 def command(binary, *args):
-    result = subprocess.run(
-        [binary, *args], stdin=subprocess.DEVNULL, capture_output=True, text=True,
-        timeout=40, check=False,
-    )
+    output = Path(os.environ["RUNNER_TEMP"]) / f"{binary.name}-{time.time_ns()}.log"
+    with output.open("wb") as log:
+        result = subprocess.run(
+            [binary, *args], stdin=subprocess.DEVNULL, stdout=log,
+            stderr=subprocess.STDOUT, timeout=40, check=False,
+        )
+    response = output.read_text(encoding="utf-8", errors="replace")
     if result.returncode:
-        raise RuntimeError(f"{binary.name} {args}: {result.stdout} {result.stderr}")
-    return result.stdout
+        raise RuntimeError(f"{binary.name} {args}: {response}")
+    return response
 
 
 def main():
@@ -28,6 +31,7 @@ def main():
 
     print("Launching Chrome", flush=True)
     command(before, "--timeout", "30000", "open", "about:blank", "--launch")
+    print("Chrome launched, measuring tabs", flush=True)
     try:
         samples = {before: [], after: []}
         for trial in range(13):
@@ -40,6 +44,7 @@ def main():
                     raise RuntimeError(f"{binary.name} did not list the expected tab: {output}")
                 if trial >= 2:
                     samples[binary].append(elapsed)
+            print(f"Completed paired trial {trial + 1}", flush=True)
         for binary, times in samples.items():
             print(
                 f"{binary.name}: n={len(times)} min={min(times):.2f}ms "
