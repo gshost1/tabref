@@ -59,6 +59,7 @@ pub(crate) struct Session {
     scope: CommandScope,
     warning: Option<String>,
     choice: Option<String>,
+    started_headless_profile: bool,
 }
 
 impl Session {
@@ -93,7 +94,12 @@ impl Session {
             scope,
             warning: browser.warning,
             choice,
+            started_headless_profile: browser.started_headless_profile,
         })
+    }
+
+    pub(crate) fn take_headless_profile_launch(&mut self) -> bool {
+        std::mem::take(&mut self.started_headless_profile)
     }
 
     pub(crate) fn deadline(&self) -> Deadline {
