@@ -19,6 +19,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use common::{Harness, Run, live, serve};
+use serde_json::json;
+use tabref_cdp::{attach_to_target, connect, list_page_targets};
+use tabref_core::Deadline;
 
 const STILL: &str = r#"<!doctype html><html><head><title>Still</title></head><body>
 <h1>Guide</h1><p>Alpha needle text.</p><label>Name <input id="n" value="x"></label>
@@ -256,5 +259,115 @@ fn a_hidden_tab_arms_the_watch_without_waiting_for_idle() {
         snapshot_id(&snapped),
         "the hidden tab's capture was not kept (snap took {took:?})"
     );
+    stop(&tabref);
+}
+
+fn direct_page_command(tabref: &Harness, method: &str, params: serde_json::Value) {
+    let deadline = Deadline::after(5_000).unwrap();
+    let mut connection = connect(&tabref.browser.endpoint().unwrap(), deadline).unwrap();
+    let pages = list_page_targets(&mut connection, deadline).unwrap();
+    let page = pages
+        .iter()
+        .find(|page| page.url.starts_with("http:"))
+        .unwrap();
+    let page = attach_to_target(&mut connection, &page.target_id, deadline).unwrap();
+    let reply = connection
+        .call(method, params, Some(&page.session_id), deadline)
+        .unwrap();
+    assert!(reply.get("exceptionDetails").is_none(), "{reply}");
+}
+
+#[test]
+fn css_hover_and_stylesheet_edits_invalidate_a_kept_view() {
+    if !live() {
+        return;
+    }
+    let tabref = common::harness("reuse-css");
+    let opened = open(
+        &tabref,
+        r#"<!doctype html><meta charset=utf-8><style>
+body { margin: 0 }
+#trigger { display: block; width: 100px; height: 60px }
+#trigger:not(:hover) + #menu, #toast { visibility: hidden }
+</style><button id=trigger>Menu</button><a id=menu href=#settings>Settings entry</a>
+<p id=toast>New notification</p>"#,
+    );
+    assert!(
+        !opened.stdout.contains("Settings entry"),
+        "{}",
+        opened.stdout
+    );
+    direct_page_command(
+        &tabref,
+        "Input.dispatchMouseEvent",
+        json!({"type": "mouseMoved", "x": 20, "y": 20}),
+    );
+    let revealed = run(&tabref, &["snap"], &[]);
+    assert_ne!(snapshot_id(&opened), snapshot_id(&revealed));
+    assert!(
+        revealed.stdout.contains("Settings entry"),
+        "{}",
+        revealed.stdout
+    );
+    direct_page_command(
+        &tabref,
+        "Runtime.evaluate",
+        json!({"expression": "document.styleSheets[0].insertRule('#toast { visibility: visible }', 3)"}),
+    );
+    let toast = run(&tabref, &["snap"], &[]);
+    assert_ne!(snapshot_id(&revealed), snapshot_id(&toast));
+    assert!(
+        toast.stdout.contains("New notification"),
+        "{}",
+        toast.stdout
+    );
+    stop(&tabref);
+}
+
+#[test]
+fn a_late_closed_shadow_root_is_not_replayed() {
+    if !live() {
+        return;
+    }
+    let tabref = common::harness("reuse-late-closed");
+    let opened = open(
+        &tabref,
+        "<!doctype html><h1>Open page</h1><div id=host></div>",
+    );
+    direct_page_command(
+        &tabref,
+        "Runtime.evaluate",
+        json!({
+            "expression": "document.getElementById('host').attachShadow({mode: 'closed'}).innerHTML = '<p>Late closed panel</p>'"
+        }),
+    );
+    let changed = run(&tabref, &["snap"], &[]);
+    assert_ne!(snapshot_id(&opened), snapshot_id(&changed));
+    assert!(
+        changed.stdout.contains("Late closed panel"),
+        "{}",
+        changed.stdout
+    );
+    stop(&tabref);
+}
+
+#[test]
+fn an_oversized_page_is_never_kept() {
+    if !live() {
+        return;
+    }
+    let tabref = common::harness("reuse-oversized");
+    let html = format!(
+        "<!doctype html><h1>Large page</h1>{}",
+        "<span>Row</span>".repeat(1_200)
+    );
+    let port = serve(&[("/", &html)]);
+    let opened = run(
+        &tabref,
+        &["open", &format!("http://127.0.0.1:{port}/")],
+        &[],
+    );
+    let changed = run(&tabref, &["snap"], &[]);
+    assert_ne!(snapshot_id(&opened), snapshot_id(&changed));
     stop(&tabref);
 }
