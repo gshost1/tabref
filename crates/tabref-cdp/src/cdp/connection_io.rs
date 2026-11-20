@@ -20,6 +20,7 @@ const ATTACHED: &str = "Target.attachedToTarget";
 const DIALOG_OPENING: &str = "Page.javascriptDialogOpening";
 const RAW_SCAN_MIN: usize = 64 * 1024;
 const CANCEL_SLICE: Duration = Duration::from_millis(50);
+const CLEANUP_SLICE: Duration = Duration::from_millis(20);
 
 impl CdpConnection {
     pub(super) fn read_one(&mut self, deadline: Deadline) -> Result<(), AppError> {
@@ -42,6 +43,14 @@ impl CdpConnection {
         }
         match Incoming::parse(text) {
             Some(Incoming::Reply { id, body }) => {
+                if let Some(session_id) = self.replies.take_late_script_session(id) {
+                    if let Some(identifier) =
+                        body.pointer("/result/identifier").and_then(Value::as_str)
+                    {
+                        self.remove_late_script(&session_id, identifier, deadline)?;
+                    }
+                    return Ok(None);
+                }
                 if let Some(waiter) = self.replies.waiter(id).cloned() {
                     let mut outcome = reply_result(&waiter.method, body);
                     if waiter.raw && outcome.is_ok() {
@@ -57,6 +66,9 @@ impl CdpConnection {
                 Ok(None)
             }
             Some(Incoming::UnreadableReply { id }) => {
+                if self.replies.take_late_script_session(id).is_some() {
+                    self.health.closed = true;
+                }
                 if let Some(method) = self.replies.waiter(id).map(|waiter| waiter.method.clone()) {
                     self.replies.settle(id, Err(reply_unreadable(&method)));
                 }
@@ -75,6 +87,31 @@ impl CdpConnection {
             }
             Some(Incoming::Unrecognized) => Ok(None),
             None => Err(transport_failed("receive", "unparseable DevTools frame")),
+        }
+    }
+
+    /// Send cleanup without the cancelled caller's guard and without
+    /// awaiting a reply while routing an unrelated command's frames.
+    fn remove_late_script(
+        &mut self,
+        session_id: &str,
+        identifier: &str,
+        deadline: Deadline,
+    ) -> Result<(), AppError> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let request = json!({
+            "id": id,
+            "method": "Page.removeScriptToEvaluateOnNewDocument",
+            "params": { "identifier": identifier },
+            "sessionId": session_id,
+        });
+        match self.send_text(&request.to_string(), deadline.capped(CLEANUP_SLICE)) {
+            Err(error) if is_timeout(&error) => {
+                self.health.closed = true;
+                Ok(())
+            }
+            sent => sent,
         }
     }
 
