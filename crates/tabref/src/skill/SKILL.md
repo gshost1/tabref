@@ -1,8 +1,7 @@
 # tabref: read and drive Chrome from the shell
 
-Start with `tabref skill && tabref open <url>`; Chrome is connected. Output is sized to read whole
-(no grep or head) and commands wait for the page (never sleep). Downloads, waits, JS dialogs, logins,
-the user's own Chrome, Chrome-based apps: `tabref skill more`. Options: `tabref CMD --help`.
+Start with `tabref skill && tabref open <url>`. Read the whole output and let commands wait.
+Downloads, dialogs, logins, Chrome-based apps: `tabref skill more`. Options: `tabref CMD --help`.
 
 ## Reading
 One line per block; `#` lines are headings. Controls show their ref: `[e5 button Save]`,
@@ -21,8 +20,7 @@ Dates and times take plain values (`2027-07-31`, `14:30`). Each action prints wh
 `"67.00" -> "62.00"`, new rows and controls): read that instead of taking a snapshot.
 
 ## Many steps: one call
-Put every step you already know, such as a whole form and its submit, in one `tabref do`.
-It stops at the first failing step; the last step prints the full change.
+Put known steps in one `tabref do`. It stops at the first failing step and reports what the last step changed.
 
     tabref do <<'EOF'
     for name price in Cap 12.00 Mug 9.50
@@ -37,3 +35,6 @@ Steps: any action but `upload`, `open URL`, `expect text|gone|url X`,
 To load more of a list, repeat `scroll down` in a `for` loop (`for n in 1 2 3 4 5 6`), then `find`:
 each scroll waits for what it loads. `tabref js "EXPR"` returns a page value as JSON.
 Tabs: `tabref tabs`, `tabref tab N`, `tabref open --new-tab URL`.
+
+## Errors
+`ELEMENT_NOT_FOUND`: check close names. `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`. `STALE_REF`: use the fresh ref.

@@ -63,3 +63,15 @@ fn the_guide_keeps_the_forms_a_model_copies() {
     let body = example.split("\n    end").next().unwrap_or_default();
     assert!(body.contains("click \"Save\""), "{body}");
 }
+
+#[test]
+fn the_guide_keeps_error_recovery_hints() {
+    let guide = run(None).text;
+    for hint in [
+        "`ELEMENT_NOT_FOUND`: check close names.",
+        "`AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`.",
+        "`STALE_REF`: use the fresh ref.",
+    ] {
+        assert!(guide.contains(hint), "{hint}");
+    }
+}
