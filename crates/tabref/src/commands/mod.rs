@@ -198,6 +198,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             rows,
             full,
             from,
+            to,
         } => snap::run(
             session,
             &ViewRequest {
@@ -206,6 +207,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
                 root: root.clone(),
                 rows: rows.clone(),
                 from: *from,
+                to: *to,
                 section: None,
             },
         ),
@@ -234,6 +236,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             section,
             rows,
             from,
+            to,
             ..
         } => read::run(
             session,
@@ -241,6 +244,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
                 root: target.clone(),
                 rows: rows.clone(),
                 from: *from,
+                to: *to,
                 section: section.clone(),
                 ..ViewRequest::default()
             },

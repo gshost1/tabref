@@ -15,12 +15,12 @@ use crate::view::view_route::ViewRoute;
 use crate::view::view_scope::ViewScope;
 use crate::view::view_subject::ViewSubject;
 
-struct Dom {
+pub(super) struct Dom {
     tree: DomTree,
 }
 
 impl Dom {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let mut dom = Dom {
             tree: DomTree {
                 target_id: "T1".into(),
@@ -46,7 +46,7 @@ impl Dom {
         dom
     }
 
-    fn el(
+    pub(super) fn el(
         &mut self,
         parent: usize,
         tag: &str,
@@ -61,7 +61,7 @@ impl Dom {
         )
     }
 
-    fn text(&mut self, parent: usize, text: &str, shown: bool) -> usize {
+    pub(super) fn text(&mut self, parent: usize, text: &str, shown: bool) -> usize {
         self.push(
             Some(parent),
             NodeKind::Text(text.into()),
@@ -116,7 +116,7 @@ fn label(n: u32, role: &str, name: &str) -> RefLabel {
     }
 }
 
-fn input(dom: Dom, refs: HashMap<(String, i64), RefLabel>) -> OutlineInput {
+pub(super) fn input(dom: Dom, refs: HashMap<(String, i64), RefLabel>) -> OutlineInput {
     OutlineInput {
         trees: vec![dom.tree],
         frames: HashMap::new(),
@@ -141,7 +141,7 @@ fn render(dom: Dom, refs: HashMap<(String, i64), RefLabel>, options: &ViewOption
         .text
 }
 
-fn snap() -> ViewOptions {
+pub(super) fn snap() -> ViewOptions {
     ViewOptions {
         refs: RefStyle::Short,
         ..ViewOptions::snap("http://site.test/page", false, RowWindow::default())

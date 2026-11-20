@@ -22,6 +22,8 @@ logged-in Chrome and its sessions); `tabref connect --off` stops.
 Apps built on Chrome (Electron, reached with `--cdp PORT`): `open`, `open --new-tab` and `close` are refused,
 as the windows are the app; read and act with snap, click and fill (js to read).
 
+A slice of a long view: `tabref snap --from 1 --to 40` prints lines 1-40 (`read` takes both too).
+
 Screenshots: `tabref screenshot [T] [--out FILE]` saves a PNG of the page, or of element T, and prints its path.
 
 Waits: `tabref wait --text X`, `--gone X`, `--url TEXT` (the address contains it), `--idle`,

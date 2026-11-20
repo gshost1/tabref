@@ -6,9 +6,9 @@ use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
 
 /// The view's last line lists its size and what was left out. A budget
-/// cut points to `--from` at the first omitted line, including when it
-/// falls inside a section. Other hints cover omitted rows and navigation,
-/// shortened lines, and frames the snapshot could not read in time.
+/// cut or `--to` points to `--from` at the first omitted line. Other
+/// hints cover omitted rows and navigation, shortened lines, and
+/// frames the snapshot could not read in time.
 pub(crate) fn footer_line(
     report: &CutReport,
     stats: &CutStats,
@@ -27,7 +27,12 @@ pub(crate) fn footer_line(
     let mut more = Vec::new();
     if let Some(from) = report.budget_from {
         cut.push(format!("lines {from}- over the budget"));
-        more.push(route.starting_at(from, full));
+    }
+    if let Some(next) = report.after_to {
+        cut.push(format!("lines {next}- after --to"));
+    }
+    if let Some(next) = report.budget_from.or(report.after_to) {
+        more.push(route.starting_at(next, full));
     }
     if report.sections.count > 0 {
         if report.sections.listed < report.sections.count {
