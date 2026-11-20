@@ -64,9 +64,32 @@ fn the_probe_of_a_port_that_changed_hands_sends_nothing() {
 
 #[test]
 fn the_probe_of_a_port_still_held_reads_its_endpoint() {
+    let (port, endpoint) = probe_held_port("held", |port| {
+        format!("{{\"webSocketDebuggerUrl\":\"ws://127.0.0.1:{port}/devtools/browser/x\"}}")
+    });
+    assert_eq!(endpoint.unwrap().port(), port);
+}
+
+#[test]
+fn the_probe_of_a_port_still_held_suggests_a_websocket_for_an_invalid_reply() {
+    let (port, endpoint) = probe_held_port("invalid", |_| "{}".to_owned());
+    let error = endpoint.unwrap_err();
+    assert_eq!(error.kind(), Some("cdp_endpoint_invalid"));
+    assert!(
+        error
+            .suggestion
+            .unwrap()
+            .contains(&format!("--cdp ws://127.0.0.1:{port}"))
+    );
+}
+
+fn probe_held_port(
+    name: &str,
+    body: impl FnOnce(u16) -> String,
+) -> (u16, Result<crate::BrowserEndpoint, tabref_core::AppError>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
-    let json = format!("{{\"webSocketDebuggerUrl\":\"ws://127.0.0.1:{port}/devtools/browser/x\"}}");
+    let json = body(port);
     let answer = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         let mut request = [0_u8; 1024];
@@ -77,7 +100,7 @@ fn the_probe_of_a_port_still_held_reads_its_endpoint() {
         );
         stream.write_all(response.as_bytes()).unwrap();
     });
-    let root = fake_proc("held", port, 1);
+    let root = fake_proc(name, port, 1);
     let held = HeldPort {
         port,
         inodes: BTreeSet::from([1]),
@@ -88,5 +111,5 @@ fn the_probe_of_a_port_still_held_reads_its_endpoint() {
 
     let _ = std::fs::remove_dir_all(&root);
     answer.join().unwrap();
-    assert_eq!(endpoint.unwrap().port(), port);
+    (port, endpoint)
 }
