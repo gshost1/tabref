@@ -129,9 +129,18 @@ fn a_repeated_line_says_how_many_times_it_showed() {
         TextChange::Added("Required".into()),
         TextChange::Added("Saved".into()),
     ];
+    let counts = counted(&changes);
+    assert_eq!(within_budget(&counts), vec!["+ Required ×2", "+ Saved"]);
     assert_eq!(
-        within_budget(&counted(&changes)),
-        vec!["+ Required ×2", "+ Saved"]
+        change_data(&counts),
+        json!({
+            "changes": ["+ Required ×2", "+ Saved"],
+            "change_counts": [
+                { "line": "+ Required", "count": 2 },
+                { "line": "+ Saved", "count": 1 }
+            ],
+            "distinct_changes_omitted": 0
+        })
     );
 }
 
@@ -182,6 +191,24 @@ fn the_first_change_keeps_to_the_budget_too() {
 }
 
 #[test]
+fn a_rewritten_line_that_does_not_fit_keeps_its_marker_intact() {
+    let added = TextChange::Added("x".repeat(399));
+    let rewrite = TextChange::Changed {
+        before: "字".repeat(50),
+        after: "語".repeat(50),
+    };
+    let changes = [added.clone(), rewrite.clone()];
+    assert_eq!(
+        within_budget(&counted(&changes)),
+        vec![added.to_string(), "+1 more: tabref snap".to_owned()]
+    );
+    assert_eq!(
+        within_budget(&counted(std::slice::from_ref(&rewrite))),
+        vec![rewrite.to_string()]
+    );
+}
+
+#[test]
 fn thousands_of_changes_keep_first_seen_order_under_a_time_bound() {
     let mut changes: Vec<_> = (0..12_000)
         .map(|index| TextChange::Added(format!("Item number {index:05}")))
@@ -200,9 +227,11 @@ fn thousands_of_changes_keep_first_seen_order_under_a_time_bound() {
     assert_eq!(counts[11_999].change, &changes[11_999]);
     let json = change_data(&counts);
     assert_eq!(json["changes"].as_array().unwrap().len(), 50);
-    assert_eq!(json["changes_omitted"], 11_950);
+    assert_eq!(json["change_counts"].as_array().unwrap().len(), 50);
+    assert_eq!(json["distinct_changes_omitted"], 11_950);
+    assert_eq!(json["changes"][34], "+ Item number 00034 ×2");
     assert_eq!(
-        json["changes"][34],
+        json["change_counts"][34],
         json!({ "line": "+ Item number 00034", "count": 2 })
     );
 }

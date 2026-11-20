@@ -42,16 +42,23 @@ pub(super) fn counted(changes: &[TextChange]) -> Vec<CountedChange<'_>> {
 }
 
 pub(super) fn change_data(changes: &[CountedChange<'_>]) -> Value {
-    let entries: Vec<_> = changes
-        .iter()
-        .take(JSON_CHANGE_LIMIT)
-        .map(|entry| json!({ "line": entry.change.to_string(), "count": entry.count }))
-        .collect();
-    json!({ "changes_omitted": changes.len() - entries.len(), "changes": entries })
+    let limit = changes.len().min(JSON_CHANGE_LIMIT);
+    let mut lines = Vec::with_capacity(limit);
+    let mut counts = Vec::with_capacity(limit);
+    for change in &changes[..limit] {
+        let line = change.change.to_string();
+        lines.push(format!("{line}{}", change.suffix()));
+        counts.push(json!({ "line": line, "count": change.count }));
+    }
+    json!({
+        "changes": lines,
+        "change_counts": counts,
+        "distinct_changes_omitted": changes.len() - limit,
+    })
 }
 
-/// Show the text lines that fit the byte budget, keeping the repeat
-/// count when the text of the last line is cut.
+/// Show the text lines that fit the byte budget. A cut keeps the repeat
+/// count, and a rewritten line is shown whole or counted as omitted.
 pub(super) fn within_budget(changes: &[CountedChange<'_>]) -> Vec<String> {
     let mut room = CHANGE_BUDGET;
     let mut shown = Vec::new();
@@ -63,7 +70,7 @@ pub(super) fn within_budget(changes: &[CountedChange<'_>]) -> Vec<String> {
             shown.push(format!("{text}{suffix}"));
             continue;
         }
-        if room >= MIN_ROOM {
+        if room >= MIN_ROOM && !matches!(change.change, TextChange::Changed { .. }) {
             let text = cut_to_bytes(&text, room - suffix.len());
             shown.push(format!("{text}{suffix}"));
         }

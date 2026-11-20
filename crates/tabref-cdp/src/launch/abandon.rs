@@ -99,7 +99,11 @@ fn is_own_directory(path: &Path) -> bool {
         use std::os::unix::fs::MetadataExt;
         meta.uid() == rustix::process::geteuid().as_raw()
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        crate::discovery::windows_profile_owner::is_own_directory(path)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         true
     }
