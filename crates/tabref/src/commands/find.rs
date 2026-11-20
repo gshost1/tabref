@@ -30,6 +30,8 @@ pub(crate) struct Found {
 /// prints each match with its section, the control in or near it and how
 /// to show it when hidden. Frames the DOM capture did not read are searched
 /// in the snapshot instead. Plain text never errors; no match is a result.
+/// In the daemon, the last capture stands for the page when the page has
+/// provably not changed since.
 pub(crate) fn run(
     session: &mut Session,
     text: &str,
@@ -57,7 +59,7 @@ pub(crate) fn search(
     keep: usize,
     tree_matches: bool,
 ) -> Result<Found, AppError> {
-    let captured = session.capture()?;
+    let captured = session.current_capture()?;
     let url = captured.info.url.clone();
     let mut found = if role.is_some() {
         snapshot_find(&captured.tree, &url, text, role, keep)
