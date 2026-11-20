@@ -140,3 +140,43 @@ fn close_browser_on_a_profile_keeps_what_the_page_stored() {
         read.stderr
     );
 }
+
+#[test]
+fn rewriting_devtools_active_port_refuses_close_and_keeps_live_chrome_running() {
+    if !live() {
+        return;
+    }
+    let home = harness_home("close-live-mismatch");
+    let config = home.with_extension("config");
+    let profiles = harness_home("close-live-mismatch-dir");
+    let _dirs = Dirs {
+        homes: vec![home.clone(), profiles.clone()],
+    };
+    let profile = profiles.join("work");
+    let launched = profile_home::launch_on(&home, &config, &profile);
+    assert!(launched.ok, "{}{}", launched.stdout, launched.stderr);
+    let pid = launched_pid(&home).unwrap();
+    let active_port = profile.join("DevToolsActivePort");
+    let original = std::fs::read_to_string(&active_port).unwrap();
+    let port = original.lines().next().unwrap();
+    std::fs::write(
+        &active_port,
+        format!("{port}\n/devtools/browser/another-run\n"),
+    )
+    .unwrap();
+    let refused = tabref(&home, &config, &["--json", "close", "--browser"], true);
+    assert!(!refused.ok, "{}", refused.stdout);
+    assert_eq!(
+        refused.json()["error"]["details"]["kind"],
+        "cdp_launch_unverified"
+    );
+    assert_eq!(launched_pid(&home), Some(pid));
+
+    std::fs::write(&active_port, original).unwrap();
+    let tabs = tabref(&home, &config, &["--json", "tabs"], true);
+    assert!(tabs.ok, "{}{}", tabs.stdout, tabs.stderr);
+    assert_eq!(launched_pid(&home), Some(pid));
+    let closed = tabref(&home, &config, &["--json", "close", "--browser"], true);
+    assert!(closed.ok, "{}{}", closed.stdout, closed.stderr);
+    assert_eq!(closed.json()["data"]["graceful"], true);
+}

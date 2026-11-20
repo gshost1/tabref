@@ -8,14 +8,14 @@ use std::process::Command;
 use std::time::Duration;
 
 #[test]
-fn a_missing_version_route_suggests_a_direct_websocket_url_in_text() {
-    let (run, _) = tabs_against("404 Not Found", "", false);
+fn a_port_that_closes_without_http_suggests_a_direct_websocket_url_in_text() {
+    let (run, _) = tabs_against("", false);
     assert!(run.stderr.contains("/json/version"), "{}", run.stderr);
 }
 
 #[test]
 fn a_version_response_without_a_debugger_url_suggests_one_in_json() {
-    let (run, hint) = tabs_against("200 OK", "{}", true);
+    let (run, hint) = tabs_against("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", true);
     let value = run.json();
     let error = &value["error"];
     assert_eq!(error["details"]["kind"], "cdp_endpoint_invalid");
@@ -23,7 +23,7 @@ fn a_version_response_without_a_debugger_url_suggests_one_in_json() {
     assert!(error["suggestion"].as_str().unwrap().contains(&hint));
 }
 
-fn tabs_against(status: &'static str, body: &'static str, json: bool) -> (common::Run, String) {
+fn tabs_against(reply: &'static str, json: bool) -> (common::Run, String) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
@@ -38,12 +38,7 @@ fn tabs_against(status: &'static str, body: &'static str, json: bool) -> (common
                 break;
             }
         }
-        write!(
-            stream,
-            "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n{body}",
-            body.len()
-        )
-        .unwrap();
+        stream.write_all(reply.as_bytes()).unwrap();
         request
     });
 
