@@ -84,3 +84,29 @@ fn plain_text_with_no_match_is_an_empty_result() {
         (Vec::new(), 0)
     );
 }
+
+#[test]
+fn a_visible_pane_inside_a_hidden_layer_is_not_hidden() {
+    let mut dom = TestDom::new();
+    let layer = dom.element(2, "div", &[], Some("block"));
+    dom.hide(layer);
+    let pane = dom.element(layer, "div", &[], Some("block"));
+    dom.text(pane, "Subject of the draft", true);
+    let (found, total) = search_text(&input(dom), "subject of", 20);
+    assert_eq!(total, 1);
+    assert!(!found[0].hidden);
+    assert_eq!(found[0].expander, None);
+}
+
+#[test]
+fn text_whose_own_element_is_not_visible_is_hidden() {
+    let mut dom = TestDom::new();
+    let layer = dom.element(2, "div", &[], Some("block"));
+    let pane = dom.element(layer, "div", &[], Some("block"));
+    dom.hide(pane);
+    let text = dom.text(pane, "Subject of the draft", true);
+    dom.hide(text);
+    let (found, total) = search_text(&input(dom), "subject of", 20);
+    assert_eq!(total, 1);
+    assert!(found[0].hidden);
+}

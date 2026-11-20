@@ -61,3 +61,23 @@ fn a_missing_file_is_a_structured_error() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn the_port_file_and_profile_directory_cannot_be_symbolic_links() {
+    let dir = scratch_dir("active-port-links");
+    let profile = dir.join("profile");
+    std::fs::create_dir(&profile).unwrap();
+    let real = profile.join("regular-file");
+    std::fs::write(&real, "41234\n/devtools/browser/abc\n").unwrap();
+    let port_file = profile.join("DevToolsActivePort");
+    std::os::unix::fs::symlink(&real, &port_file).unwrap();
+    assert!(read_active_port(&profile).is_err());
+
+    std::fs::rename(&real, &port_file).unwrap();
+    let link = dir.join("profile-link");
+    std::os::unix::fs::symlink(&profile, &link).unwrap();
+    assert!(read_active_port(&link).is_err());
+    assert!(read_active_port(&profile).is_ok());
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -17,3 +17,5 @@ pub(crate) mod profile_lock;
 pub(crate) mod user_browser;
 pub(crate) mod user_data_dir;
 pub(crate) mod websocket_url;
+#[cfg(windows)]
+pub(crate) mod windows_profile_owner;
