@@ -20,7 +20,7 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
   const grown = (state) => (state.dy ? state.target.scrollHeight : state.target.scrollWidth) > state.extent + 1;
   const pool = (state) => grown(state) ? state.added.concat(state.swapped) : state.added;";
 
-pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews) {
+pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews, requestMaxAge) {
   PRELUDE
   WATCH_REQUESTS
   const scrolls = (el) => {
@@ -58,29 +58,48 @@ pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews) {
   }
   const moved = anchor || target !== root || before >= 1 ? shift(target) : false;
   return { moved, near: false, atEnd: left(target, dx, dy) < 2, hidden,
-    pending: Boolean(win[requests]?.pending) };
+    pending: win[requests].hasPending() };
 }";
 
 pub(crate) const WATCH_REQUESTS: &str = r"if (!win[requests]) {
-  const tracker = { pending: 0 };
+  const pending = new Set();
+  const hasPending = () => {
+    const cutoff = win.performance.now() - requestMaxAge;
+    for (const request of pending) {
+      if (request.started > cutoff) break;
+      pending.delete(request);
+    }
+    return pending.size > 0;
+  };
+  const start = () => {
+    hasPending();
+    const request = { started: win.performance.now() };
+    pending.add(request);
+    return () => pending.delete(request);
+  };
   const fetch = win.fetch;
   const send = win.XMLHttpRequest.prototype.send;
   win.fetch = function(...args) {
     const response = Reflect.apply(fetch, this, args);
-    tracker.pending += 1;
+    const done = start();
     return response.then(
-      value => { tracker.pending -= 1; return value; },
-      error => { tracker.pending -= 1; throw error; }
+      value => { done(); return value; },
+      error => { done(); throw error; }
     );
   };
   win.XMLHttpRequest.prototype.send = function(...args) {
-    const done = () => { tracker.pending -= 1; };
+    const done = start();
     this.addEventListener('loadend', done, { once: true });
-    tracker.pending += 1;
     try { return Reflect.apply(send, this, args); }
     catch (error) { this.removeEventListener('loadend', done); done(); throw error; }
   };
-  win[requests] = tracker;
+  const attachShadow = win.Element.prototype.attachShadow;
+  win.Element.prototype.attachShadow = function(...args) {
+    const shadow = Reflect.apply(attachShadow, this, args);
+    if (shadow.mode === 'open') win[key]?.observeShadow?.(shadow);
+    return shadow;
+  };
+  win[requests] = { hasPending };
 }";
 
 pub(crate) const WATCH: &str = r"function() {
@@ -116,12 +135,16 @@ pub(crate) const WATCH: &str = r"function() {
     }
   };
   state.observer = new win.MutationObserver(state.note);
+  state.observeShadow = shadow => { if (inside(shadow.host)) observe(shadow); };
   observe(doc);
+  const containingRoot = el.getRootNode();
+  if (containingRoot instanceof win.ShadowRoot) observe(containingRoot);
   observeRoots(el);
   const before = [el.scrollLeft, el.scrollTop];
+  const started = (win.performance.timeOrigin + win.performance.now()) / 1000;
   if (el === root) win.scrollBy(dx, dy); else el.scrollBy(dx, dy);
   const moved = el.scrollLeft !== before[0] || el.scrollTop !== before[1];
-  return { moved, atEnd: left(el, dx, dy) < 2 };
+  return { moved, atEnd: left(el, dx, dy) < 2, started };
 }";
 
 pub(crate) const FRAMES: &str = r"function() {
@@ -193,7 +216,7 @@ pub(crate) const READ: &str = r"function(budget, lineChars) {
     last: texts.length ? head(texts[texts.length - 1]) : null,
     lines, more,
     mutations: state.mutations,
-    pending: Boolean(win[requests]?.pending),
+    pending: win[requests].hasPending(),
     grew: grown(state),
     atEnd: left(state.target, state.dx, state.dy) < 2,
   };

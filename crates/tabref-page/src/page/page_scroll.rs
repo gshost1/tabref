@@ -13,6 +13,7 @@ use super::scroll_site::{ScrollSite, SiteScript};
 use crate::{CdpConnection, PageSession};
 
 const NEAR_VIEWS: f64 = 1.5;
+const REQUEST_MAX_AGE_MS: u64 = 3_000;
 const LINE_BUDGET: u64 = 600;
 const LINE_CHARS: u64 = 100;
 
@@ -93,7 +94,12 @@ pub(crate) fn scroll_step(
     delta: (f64, f64),
     deadline: Deadline,
 ) -> Result<ScrollStep, AppError> {
-    let arguments = [json!(delta.0), json!(delta.1), json!(NEAR_VIEWS)];
+    let arguments = [
+        json!(delta.0),
+        json!(delta.1),
+        json!(NEAR_VIEWS),
+        json!(REQUEST_MAX_AGE_MS),
+    ];
     let reply = run(connection, session, site, (SCROLL, &arguments), deadline)?;
     Ok(ScrollStep {
         moved: flag(&reply, "moved"),
@@ -111,12 +117,11 @@ pub(crate) fn watch_scroll(
     session: &PageSession,
     site: ScrollSite<'_>,
     deadline: Deadline,
-) -> Result<Option<(bool, bool)>, AppError> {
+) -> Result<Option<(bool, bool, f64)>, AppError> {
     let reply = run(connection, session, site, (WATCH, &[]), deadline)?;
-    if reply.is_null() {
-        return Ok(None);
-    }
-    Ok(Some((flag(&reply, "moved"), flag(&reply, "atEnd"))))
+    Ok(reply["started"]
+        .as_f64()
+        .map(|started| (flag(&reply, "moved"), flag(&reply, "atEnd"), started)))
 }
 
 /// Waits for the next animation frame and two tasks after it, so that

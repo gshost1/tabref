@@ -76,7 +76,9 @@ fn watch(
     site: ScrollSite<'_>,
     (cap, deadline): (Deadline, Deadline),
 ) -> Result<ScrollOutcome, AppError> {
-    let Some((moved, at_end)) = watch_scroll(connection, session, site, cap)? else {
+    let started = Instant::now();
+    let Some((moved, at_end, browser_started)) = watch_scroll(connection, session, site, cap)?
+    else {
         return Ok(ScrollOutcome::default());
     };
     let mut outcome = ScrollOutcome {
@@ -84,14 +86,20 @@ fn watch(
         watched: true,
         ..ScrollOutcome::default()
     };
-    let mut tracker = SettleTracker::for_scroll();
+    let mut tracker = SettleTracker::for_scroll(browser_started);
     let framed = match wait_frames(connection, session, site, cap.capped(FRAMES_CAP)) {
         Ok(framed) => framed,
         Err(error) if is_timeout(&error) => false,
         Err(_) => return Ok(unwatched(outcome)),
     };
     if framed {
-        match settle(connection, session, site, (&mut tracker, at_end), cap) {
+        match settle(
+            connection,
+            session,
+            site,
+            (&mut tracker, at_end),
+            (started, cap),
+        ) {
             Err(error) if !is_timeout(&error) => return Ok(unwatched(outcome)),
             _ => {}
         }
@@ -128,10 +136,9 @@ fn settle(
     session: &PageSession,
     site: ScrollSite<'_>,
     (tracker, at_end): (&mut SettleTracker, bool),
-    cap: Deadline,
+    (started, cap): (Instant, Deadline),
 ) -> Result<(), AppError> {
     let id = session.session_id.clone();
-    let started = Instant::now();
     let mut landed = None::<Instant>;
     absorb(connection, &id, tracker);
     loop {
@@ -148,7 +155,7 @@ fn settle(
             return dom_quiet(connection, session, site, cap);
         }
         let waited = started.elapsed();
-        let grace = if at_end && tracker.saw_request_by(started + END_GRACE) {
+        let grace = if at_end && tracker.saw_scroll_request_within(END_GRACE) {
             ACTIVE_END_GRACE
         } else if at_end {
             END_GRACE

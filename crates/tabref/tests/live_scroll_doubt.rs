@@ -9,6 +9,8 @@
 
 mod common;
 
+use std::time::Duration;
+
 use common::lazy_site::{lazy_site, rows};
 use common::{Harness, Run, harness, live};
 
@@ -177,6 +179,74 @@ new IntersectionObserver(seen => {
         run.stdout
     );
     assert!(run.stdout.contains("Shadow entry"), "{}", run.stdout);
+}
+
+#[test]
+fn a_scroller_inside_a_shadow_root_reports_existing_and_late_shadow_rows() {
+    if !live() {
+        return;
+    }
+    let page = r#"<!doctype html><title>Shadow scroller</title><div id=feed></div>
+<script>
+const root = document.getElementById('feed').attachShadow({mode: 'open'});
+root.innerHTML = '<style>#scroller{height:240px;overflow:auto} li{height:40px}</style>'
+  + '<div id=scroller><ol id=rows>ROWS</ol><div id=late></div><button>Scroll marker</button></div>';
+const scroller = root.getElementById('scroller');
+scroller.addEventListener('scroll', () => {
+  setTimeout(() => {
+    root.getElementById('rows').insertAdjacentHTML('beforeend', '<li>Existing shadow row</li>');
+    const late = root.getElementById('late').attachShadow({mode:'open'});
+    late.innerHTML = '<p>Late shadow row</p>';
+  }, 75);
+}, {once:true});
+</script>"#
+        .replace("ROWS", &rows("li", "Entry", 30));
+    let base = lazy_site(vec![("/scroller", page)]);
+    let tabref = harness("scroll-shadow-scroller");
+    tabref.ok(&["open", &format!("{base}/scroller")]);
+    let run = tabref.ok(&["scroll", "down", "Scroll marker", "--px", "20000"]);
+    assert!(
+        first_line(&run).contains("2 new items loaded"),
+        "{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.contains("+ Existing shadow row"),
+        "{}",
+        run.stdout
+    );
+    assert!(run.stdout.contains("+ Late shadow row"), "{}", run.stdout);
+}
+
+#[test]
+fn a_long_poll_stops_counting_as_loading_at_the_bottom() {
+    if !live() {
+        return;
+    }
+    let page = r#"<!doctype html><title>Long poll</title><style>li{height:40px}</style>
+<ol>ROWS</ol>
+<script>
+function startPoll() {
+  window.poll = new XMLHttpRequest();
+  poll.open('GET', '/entries?delay=60000');
+  poll.send();
+}
+</script>"#
+        .replace("ROWS", &rows("li", "Entry", 30));
+    let base = lazy_site(vec![("/long-poll", page)]);
+    let tabref = harness("scroll-long-poll");
+    tabref.ok(&["open", &format!("{base}/long-poll")]);
+    tabref.ok(&["scroll", "down", "--px", "20000"]);
+    tabref.ok(&["js", "startPoll(); 1"]);
+
+    let pending = tabref.ok(&["--json", "scroll", "down"]).json();
+    assert_eq!(pending["data"]["loading"], true, "{pending}");
+    std::thread::sleep(Duration::from_millis(3_100));
+    let settled = tabref.ok(&["--json", "scroll", "down"]).json();
+    assert_eq!(settled["data"]["loading"], false, "{settled}");
+    assert_eq!(settled["data"]["at_end"], true, "{settled}");
+    let poll = tabref.ok(&["js", "poll.readyState"]).stdout;
+    assert_eq!(poll.trim(), "1", "{poll}");
 }
 
 #[test]
