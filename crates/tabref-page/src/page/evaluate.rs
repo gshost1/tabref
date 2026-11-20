@@ -98,6 +98,7 @@ fn evaluation_error(
 /// "Uncaught", also used for synchronous throws. Check whether the source
 /// requires REPL-mode await syntax by compiling it as an ordinary script.
 /// This never runs the expression a second time.
+/// For a top-level for-await loop Chrome points at the await token.
 fn requires_top_level_await(
     connection: &mut CdpConnection,
     session_id: Option<&str>,
@@ -126,7 +127,6 @@ fn requires_top_level_await(
     if description.starts_with("SyntaxError: await is only valid") {
         return true;
     }
-    // Chrome points at the 'await' token for a top-level for-await loop.
     description.starts_with("SyntaxError: Unexpected reserved word")
         && error["lineNumber"]
             .as_u64()
