@@ -4,13 +4,14 @@ use std::time::Duration;
 
 use tabref_cdp::{
     BrowserEndpoint, EndpointSpec, HeldPort, LaunchOptions, LaunchedBrowser, ListenerVerdict,
-    ProcessView, abandon_launch, check_listener, connect, connect_held, endpoint_from_held,
-    is_chrome_family, launch_chrome, launched_alive,
+    abandon_launch, check_active_port, check_listener, connect, connect_held, endpoint_from_held,
+    is_chrome_family, launch_chrome, read_launch_active_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 
 use super::connected_browser::ConnectedBrowser;
 use super::endpoint_refusal::{named_warning, unverified_port};
+use super::launch_check::{LaunchCheck, launched_check, managed_launch_check};
 use super::launch_profile::{
     normalize, prepare_profile, requested_profile, running_on_profile, same_dir,
 };
@@ -37,7 +38,9 @@ const REFUSALS: [&str; 2] = ["cdp_endpoint_changed", "cdp_endpoint_mismatch"];
 ///   opt-in no profile of the user is read;
 /// - the browser a previous `open --launch` started, while its port is held
 ///   by a process running that launch's profile (Linux), or while that very
-///   process still runs (pid and start time; Windows: the profile's lock);
+///   process still runs (pid and start time; Windows: the profile's lock),
+///   and its profile's `DevToolsActivePort` still names that port and run
+///   (see `launch_check`);
 /// - a Chrome of this user on port 9222, checked to own the port before
 ///   anything is sent to it (Linux only; elsewhere the port must be named);
 ///   anything else there is refused with kind `cdp_endpoint_unverified`;
@@ -70,7 +73,7 @@ pub(crate) fn connect_browser(
     }
     let profile = requested_profile(options).map(normalize).transpose()?;
     let profile = profile.as_deref();
-    if let Some(found) = launched_browser(store, profile, deadline)? {
+    if let Some(found) = launched_browser(store, profile, deadline, options.launch.is_some())? {
         return Ok(found);
     }
     if profile.is_none() {
@@ -99,6 +102,7 @@ fn named_browser(spec: &str, deadline: Deadline) -> Result<ConnectedBrowser, App
         connection,
         warning,
         choice: None,
+        started_headless_profile: false,
     })
 }
 
@@ -113,6 +117,7 @@ fn launched_browser(
     store: &RefStore,
     profile: Option<&Path>,
     deadline: Deadline,
+    managing: bool,
 ) -> Result<Option<ConnectedBrowser>, AppError> {
     let Some(text) = read_launched(store) else {
         return Ok(None);
@@ -128,13 +133,19 @@ fn launched_browser(
         forget_launched(store);
         return Ok(None);
     };
-    let Some(held) = launched_check(&record) else {
-        forget_launched(store);
-        return Ok(None);
+    let check = if managing {
+        managed_launch_check(&record)
+    } else {
+        launched_check(&record)
     };
-    let connected = match &held {
-        Some(held) => connect_held(&endpoint, held, deadline),
-        None => connect(&endpoint, deadline),
+    let connected = match check {
+        LaunchCheck::Held(held) => connect_held(&endpoint, &held, deadline),
+        LaunchCheck::Alive => connect(&endpoint, deadline),
+        LaunchCheck::Unverified(error) => return Err(error),
+        LaunchCheck::Gone => {
+            forget_launched(store);
+            return Ok(None);
+        }
     };
     match connected {
         Ok(connection) => Ok(Some(ConnectedBrowser {
@@ -142,6 +153,7 @@ fn launched_browser(
             connection,
             warning: None,
             choice: Some(format!("launched:{text}")),
+            started_headless_profile: false,
         })),
         Err(error) if browser_is_gone(&error, process_alive(record.pid)) => {
             forget_launched(store);
@@ -152,28 +164,6 @@ fn launched_browser(
         )),
         Err(error) => Err(error),
     }
-}
-
-/// Whether the launch record may be used, before anything is sent to its
-/// port: `Some(Some(held))` when its port is held by a process running its
-/// profile; `Some(None)` when ownership cannot be checked but that very
-/// browser process still runs (same pid and start time); `None` when the
-/// browser is gone, its port is free, or something else holds it.
-pub(crate) fn launched_check(record: &LaunchedBrowser) -> Option<Option<HeldPort>> {
-    match check_listener(record.port, &launched_from(&record.profile_dir)) {
-        ListenerVerdict::Trusted(held) => Some(Some(held)),
-        ListenerVerdict::Nothing | ListenerVerdict::Untrusted { .. } => None,
-        ListenerVerdict::Unknown | ListenerVerdict::CantCheck(_) => {
-            (launched_alive(record) == Some(true)).then_some(None)
-        }
-    }
-}
-
-/// Whether a process runs the browser `open --launch` started with
-/// `profile_dir`, as its command line names that profile.
-pub(crate) fn launched_from(profile_dir: &Path) -> impl Fn(&ProcessView) -> bool + use<> {
-    let flag = format!("--user-data-dir={}", profile_dir.display());
-    move |process: &ProcessView| process.args().contains(&flag)
 }
 
 /// Whether a failed connection to a launched browser means it is gone: the
@@ -209,6 +199,7 @@ fn default_port(
             connection,
             warning: None,
             choice: None,
+            started_headless_profile: false,
         }),
     )
 }
@@ -261,18 +252,23 @@ fn start_browser(
         .profile_dir
         .as_deref()
         .and_then(|profile| running_on_profile(profile, !launch.headed));
-    let (endpoint, connection, text) = match running {
+    let (endpoint, connection, text, started_headless_profile) = match running {
         Some(adopted) => {
+            check_active_port(&adopted, read_launch_active_port(&adopted))?;
             let endpoint = adopted.endpoint()?;
             let connection = connect(&endpoint, deadline)?;
-            (endpoint, connection, save_launched(store, &adopted)?)
+            (endpoint, connection, save_launched(store, &adopted)?, false)
         }
         None => {
             let started = launch_chrome(&launch, deadline)?;
+            if let Err(error) = check_active_port(&started, read_launch_active_port(&started)) {
+                return Err(abandon(store, &started, error));
+            }
+            let headless_profile = started.headless && launch.profile_dir.is_some();
             let text = save_launched(store, &started);
             match (text, started.endpoint()) {
                 (Ok(text), Ok(endpoint)) => match connect(&endpoint, deadline) {
-                    Ok(connection) => (endpoint, connection, text),
+                    Ok(connection) => (endpoint, connection, text, headless_profile),
                     Err(error) => return Err(abandon(store, &started, error)),
                 },
                 (Err(error), _) | (_, Err(error)) => return Err(abandon(store, &started, error)),
@@ -284,6 +280,7 @@ fn start_browser(
         connection,
         warning: None,
         choice: Some(format!("launched:{text}")),
+        started_headless_profile,
     })
 }
 

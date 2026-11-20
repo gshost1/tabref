@@ -16,7 +16,7 @@ serde_json.workspace  = true
 tungstenite.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
+rustix = { version = "1.1", default-features = false, features = ["std", "process", "fs"] }
 
 [dev-dependencies]
 tabref-cdp = { path = ".", features = ["scripted"] }

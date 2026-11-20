@@ -18,6 +18,43 @@ use profile_home::{Dirs, launch_on, launched_pid, stop_browser, tabref};
 const PAGE: &str = "<!doctype html><title>Keep</title><h1>Keep</h1>";
 
 #[test]
+fn a_new_headless_profile_launch_reports_its_mode_once() {
+    if !live() {
+        return;
+    }
+    let notice = "note: headless browser (add --headed to see it)";
+    for in_process in [true, false] {
+        let home = harness_home("headless-profile");
+        let config = harness_home("headless-config");
+        let profile = harness_home("headless-browser");
+        let _dirs = Dirs {
+            homes: vec![home.clone(), config.clone(), profile.clone()],
+        };
+        let args = [
+            "open",
+            "about:blank",
+            "--launch",
+            "--profile",
+            profile.to_str().unwrap(),
+        ];
+        let started = tabref(&home, &config, &args, in_process);
+        assert!(started.ok, "{}", started.stderr);
+        assert_eq!(
+            started
+                .stdout
+                .lines()
+                .filter(|line| *line == notice)
+                .count(),
+            1
+        );
+
+        let reused = tabref(&home, &config, &args, in_process);
+        assert!(reused.ok, "{}", reused.stderr);
+        assert!(!reused.stdout.contains(notice), "{}", reused.stdout);
+    }
+}
+
+#[test]
 fn spellings_that_dodge_the_refusals_are_refused_too() {
     let home = harness_home("profile-dodge");
     let config = harness_home("profile-dodge-config");
@@ -223,6 +260,40 @@ fn a_profile_keeps_its_data_and_its_running_browser_is_reused() {
         read.stdout,
         read.stderr
     );
+}
+
+#[test]
+fn a_profile_relaunches_after_daemon_stop_with_a_stale_port_file() {
+    if !live() {
+        return;
+    }
+    let home = harness_home("profile-restart");
+    let profile = harness_home("profile-restart-dir");
+    let _dirs = Dirs {
+        homes: vec![home.clone(), profile.clone()],
+    };
+    let config = home.join("config");
+    let profile = profile.join("work");
+    let port_file = profile.join("DevToolsActivePort");
+    let launch = [
+        "open",
+        "about:blank",
+        "--launch",
+        "--profile",
+        profile.to_str().unwrap(),
+    ];
+
+    let first = tabref(&home, &config, &launch, false);
+    assert!(first.ok, "{}{}", first.stdout, first.stderr);
+    let first_port = std::fs::read(&port_file).unwrap();
+    stop_browser(launched_pid(&home).unwrap());
+    std::fs::write(&port_file, &first_port).unwrap();
+
+    let stopped = tabref(&home, &config, &["daemon", "stop"], false);
+    assert!(stopped.ok, "{}{}", stopped.stdout, stopped.stderr);
+    let restarted = tabref(&home, &config, &launch, false);
+    assert!(restarted.ok, "{}{}", restarted.stdout, restarted.stderr);
+    assert_ne!(std::fs::read(port_file).unwrap(), first_port);
 }
 
 #[test]

@@ -13,6 +13,7 @@ use super::launch_options::LaunchOptions;
 use super::launched_browser::LaunchedBrowser;
 use super::process_start::process_start;
 use super::profile_use::ProfileUse;
+use crate::discovery::active_port::{open_active_port, read_text};
 use crate::{
     ActivePort, ListenerVerdict, ProcessView, check_listener, is_chrome_family, read_active_port,
 };
@@ -96,9 +97,9 @@ pub fn launch_chrome(
 /// and on Unix its inode), so a launch can tell the file its browser writes
 /// from one an earlier browser on the profile left; `None` without a file.
 pub(crate) fn port_file_print(profile_dir: &Path) -> Option<String> {
-    let path = profile_dir.join("DevToolsActivePort");
-    let metadata = std::fs::metadata(&path).ok()?;
-    let contents = std::fs::read_to_string(&path).unwrap_or_default();
+    let file = open_active_port(profile_dir).ok()?;
+    let metadata = file.metadata().ok()?;
+    let contents = read_text(file).unwrap_or_default();
     #[cfg(unix)]
     let inode = std::os::unix::fs::MetadataExt::ino(&metadata);
     #[cfg(not(unix))]
