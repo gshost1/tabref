@@ -121,7 +121,7 @@ const ARM: &str = r"(() => {
     Object.defineProperty(prototype, method, { ...descriptor, value: wrapped });
     restore.push(() => {
       if (Object.getOwnPropertyDescriptor(prototype, method)?.value === wrapped) {
-        Object.defineProperty(prototype, method, descriptor);
+        try { Object.defineProperty(prototype, method, descriptor); } catch {}
       }
     });
   };
