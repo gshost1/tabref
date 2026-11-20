@@ -4,13 +4,18 @@
 //! checkbox's `indeterminate`, focus inside a same-origin frame), a `js`
 //! run, and an in-process command between two daemon ones all make the
 //! next `find` or `snap` capture again. A page whose main thread is held
-//! when the watch is armed is not kept.
+//! when the watch is armed is not kept, and page work already queued when
+//! a capture starts runs before the watch is armed, so it neither goes
+//! unseen nor spoils the kept capture. A hidden tab, whose idle callbacks
+//! a browser may hold back, arms at once.
 //! Opt-in: `TABREF_LIVE=1 cargo test -p tabref --test live_capture_reuse_more`.
 
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
+#[path = "live_capture_reuse_more/queued_work.rs"]
+mod queued_work;
 
 use std::process::Command;
 use std::time::Duration;
