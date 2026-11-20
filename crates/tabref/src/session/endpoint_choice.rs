@@ -4,14 +4,14 @@ use std::time::Duration;
 
 use tabref_cdp::{
     BrowserEndpoint, EndpointSpec, HeldPort, LaunchOptions, LaunchedBrowser, ListenerVerdict,
-    abandon_launch, check_listener, connect, connect_held, endpoint_from_held, is_chrome_family,
-    launch_chrome,
+    abandon_launch, check_active_port, check_listener, connect, connect_held, endpoint_from_held,
+    is_chrome_family, launch_chrome, read_launch_active_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 
 use super::connected_browser::ConnectedBrowser;
 use super::endpoint_refusal::{named_warning, unverified_port};
-use super::launch_check::{LaunchCheck, launched_check};
+use super::launch_check::{LaunchCheck, launched_check, managed_launch_check};
 use super::launch_profile::{
     normalize, prepare_profile, requested_profile, running_on_profile, same_dir,
 };
@@ -73,7 +73,7 @@ pub(crate) fn connect_browser(
     }
     let profile = requested_profile(options).map(normalize).transpose()?;
     let profile = profile.as_deref();
-    if let Some(found) = launched_browser(store, profile, deadline)? {
+    if let Some(found) = launched_browser(store, profile, deadline, options.launch.is_some())? {
         return Ok(found);
     }
     if profile.is_none() {
@@ -116,6 +116,7 @@ fn launched_browser(
     store: &RefStore,
     profile: Option<&Path>,
     deadline: Deadline,
+    managing: bool,
 ) -> Result<Option<ConnectedBrowser>, AppError> {
     let Some(text) = read_launched(store) else {
         return Ok(None);
@@ -131,7 +132,12 @@ fn launched_browser(
         forget_launched(store);
         return Ok(None);
     };
-    let connected = match launched_check(&record) {
+    let check = if managing {
+        managed_launch_check(&record)
+    } else {
+        launched_check(&record)
+    };
+    let connected = match check {
         LaunchCheck::Held(held) => connect_held(&endpoint, &held, deadline),
         LaunchCheck::Alive => connect(&endpoint, deadline),
         LaunchCheck::Unverified(error) => return Err(error),
@@ -245,12 +251,16 @@ fn start_browser(
         .and_then(|profile| running_on_profile(profile, !launch.headed));
     let (endpoint, connection, text) = match running {
         Some(adopted) => {
+            check_active_port(&adopted, read_launch_active_port(&adopted))?;
             let endpoint = adopted.endpoint()?;
             let connection = connect(&endpoint, deadline)?;
             (endpoint, connection, save_launched(store, &adopted)?)
         }
         None => {
             let started = launch_chrome(&launch, deadline)?;
+            if let Err(error) = check_active_port(&started, read_launch_active_port(&started)) {
+                return Err(abandon(store, &started, error));
+            }
             let text = save_launched(store, &started);
             match (text, started.endpoint()) {
                 (Ok(text), Ok(endpoint)) => match connect(&endpoint, deadline) {

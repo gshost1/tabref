@@ -24,7 +24,7 @@ use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 use crate::cli::Cli;
 use crate::daemon::control::stop_endpoint_less;
 use crate::output::outcome::Outcome;
-use crate::session::launch_check::{LaunchCheck, launched_check};
+use crate::session::launch_check::{LaunchCheck, managed_launch_check};
 use crate::session::launch_record::{forget_launched, load_launched, lock_launched, read_launched};
 
 const CLOSE_BUDGET: Duration = Duration::from_secs(5);
@@ -118,7 +118,7 @@ fn not_closed(record: &LaunchedBrowser) -> AppError {
 
 /// Sends `Browser.close` when the record's port is still its browser's.
 fn ask_to_close(record: &LaunchedBrowser, deadline: Deadline) -> Result<bool, AppError> {
-    let check = launched_check(record);
+    let check = managed_launch_check(record);
     let endpoint = record.endpoint()?;
     let connection = match check {
         LaunchCheck::Held(held) => connect_held(&endpoint, &held, deadline),

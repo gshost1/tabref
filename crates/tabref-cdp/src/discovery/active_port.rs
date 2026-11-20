@@ -58,6 +58,16 @@ pub(crate) fn open_active_port(profile: &Path) -> io::Result<File> {
     }
     #[cfg(not(unix))]
     {
+        #[cfg(windows)]
+        {
+            let metadata = std::fs::symlink_metadata(profile)?;
+            if !metadata.is_dir() || super::windows_profile_owner::is_reparse_point(&metadata) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "the profile directory is not an ordinary directory",
+                ));
+            }
+        }
         let path = profile.join(ACTIVE_PORT_FILE);
         if !std::fs::symlink_metadata(&path)?.is_file() {
             return Err(io::Error::new(

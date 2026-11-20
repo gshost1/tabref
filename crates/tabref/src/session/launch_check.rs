@@ -11,7 +11,7 @@ use std::path::Path;
 
 use tabref_cdp::{
     ActivePort, HeldPort, LaunchedBrowser, ListenerVerdict, ProcessView, check_active_port,
-    check_listener, launched_alive, read_launch_active_port,
+    check_listener, launched_alive, read_active_port, read_launch_active_port,
 };
 use tabref_core::AppError;
 
@@ -39,11 +39,24 @@ impl LaunchCheck {
 
 /// [`decide`] for this machine.
 pub(crate) fn launched_check(record: &LaunchedBrowser) -> LaunchCheck {
+    check_with(record, || read_active_port(&record.profile_dir))
+}
+
+/// Launch and close also verify the Windows directory owner, which
+/// requires starting PowerShell.
+pub(crate) fn managed_launch_check(record: &LaunchedBrowser) -> LaunchCheck {
+    check_with(record, || read_launch_active_port(record))
+}
+
+fn check_with(
+    record: &LaunchedBrowser,
+    read: impl Fn() -> Result<ActivePort, AppError>,
+) -> LaunchCheck {
     decide(
         record,
         check_listener(record.port, &launched_from(&record.profile_dir)),
         &|| launched_alive(record),
-        &|| read_launch_active_port(record),
+        &read,
     )
 }
 
