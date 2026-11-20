@@ -59,10 +59,22 @@ pub(crate) fn near_anchors(
     candidates: &[usize],
     anchors: &[usize],
     nth: Option<usize>,
+    pasted_row: bool,
 ) -> Option<Vec<usize>> {
     let mut picks = Vec::new();
     for &anchor in anchors {
-        let inside = holder_matches(nodes, candidates, anchor)?;
+        let inside = if pasted_row {
+            candidates
+                .iter()
+                .copied()
+                .filter(|&candidate| within(nodes, anchor, candidate))
+                .collect()
+        } else {
+            holder_matches(nodes, candidates, anchor)?
+        };
+        if inside.is_empty() {
+            return None;
+        }
         let chosen = match nth {
             Some(n) => vec![*inside.get(n - 1)?],
             None => nearest(nodes, anchor, &inside),
@@ -127,8 +139,7 @@ fn holder_matches(
             let own = own_record(nodes, at, came_from, &inside);
             return (!own.is_empty()).then_some(own);
         }
-        let role = nodes[at].node.role.as_str();
-        if role == "row" || (at != anchor && HOLDS_BUT_ENDS.contains(&role)) {
+        if at != anchor && HOLDS_BUT_ENDS.contains(&nodes[at].node.role.as_str()) {
             return None;
         }
         let parent = nodes[at].parent?;

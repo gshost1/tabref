@@ -1,65 +1,76 @@
-//! Matches the cells of a pasted table row against one live AX row.
+//! Matches the printed cells of a pasted table row against one live AX row.
 
 use tabref_core::{AccessibilityNode, RefId, is_ref_able};
 
-use super::indexed_node::{IndexedNode, index_tree};
+use super::indexed_node::IndexedNode;
 use super::name_match::normalize;
 use super::role_words::role_word;
+use crate::squash;
 
-/// Treat two or more pipe-separated fields as consecutive cells. A
-/// displayed control is matched by role and name within its cell. The
-/// copied ref is only markup and never used to resolve an element.
+/// Fields start at the first visible cell. The view drops blank cells
+/// and joins the remaining cells with pipes. A copied ref is markup,
+/// so a control is identified by its displayed label in the live cell.
 pub(super) fn row_anchors(nodes: &[IndexedNode<'_>], scope: &str) -> Vec<usize> {
     if !scope.contains(" | ") {
         return Vec::new();
     }
-    let fields: Vec<_> = scope.split(" | ").map(Field::parse).collect();
+    let fields = fields(scope);
+    if fields.len() < 2 || fields.iter().any(Vec::is_empty) {
+        return Vec::new();
+    }
     nodes
         .iter()
         .enumerate()
         .filter(|(_, entry)| entry.node.role == "row")
         .filter(|(_, entry)| {
-            let cells: Vec<_> = entry
+            let mut cells = entry
                 .node
                 .children
                 .iter()
                 .filter(|node| node.role == "cell")
-                .collect();
-            cells.windows(fields.len()).any(|cells| {
-                fields
-                    .iter()
-                    .zip(cells)
-                    .all(|(field, cell)| field.matches(cell))
-            })
+                .map(Cell::new)
+                .filter(|cell| !cell.text.is_empty() || !cell.controls.is_empty());
+            fields
+                .iter()
+                .all(|parts| cells.next().is_some_and(|cell| cell.matches(parts)))
         })
         .map(|(index, _)| index)
         .collect()
 }
 
-enum Field {
+enum Part {
     Text(String),
-    Controls(Vec<String>),
+    Control(String),
 }
 
-impl Field {
-    fn parse(field: &str) -> Self {
-        let mut rest = field.trim();
-        let mut controls = Vec::new();
-        while let Some((control, tail)) = take_control(rest) {
-            controls.push(control);
-            rest = tail.trim_start();
+fn fields(scope: &str) -> Vec<Vec<Part>> {
+    let mut fields = Vec::new();
+    let mut field = Vec::new();
+    let mut start = 0;
+    for (at, ch) in scope.char_indices() {
+        if at < start || scope[..at].ends_with('\\') {
+            continue;
         }
-        if !controls.is_empty() && rest.is_empty() {
-            return Self::Controls(controls);
+        if ch == '['
+            && let Some((label, tail)) = take_control(&scope[at..])
+        {
+            push_text(&mut field, &scope[start..at]);
+            field.push(Part::Control(label));
+            start = scope.len() - tail.len();
+        } else if ch == '|' && scope[..at].ends_with(' ') && scope[at + 1..].starts_with(' ') {
+            push_text(&mut field, &scope[start..at]);
+            fields.push(std::mem::take(&mut field));
+            start = at + 1;
         }
-        Self::Text(unescape(field))
     }
+    push_text(&mut field, &scope[start..]);
+    fields.push(field);
+    fields
+}
 
-    fn matches(&self, cell: &AccessibilityNode) -> bool {
-        match self {
-            Self::Text(text) => *text == normalize(&cell_text(cell)),
-            Self::Controls(labels) => labels_match(labels, cell),
-        }
+fn push_text(parts: &mut Vec<Part>, text: &str) {
+    if !text.trim().is_empty() {
+        parts.push(Part::Text(unescape(text.trim())));
     }
 }
 
@@ -78,8 +89,12 @@ fn take_control(input: &str) -> Option<(String, &str)> {
         }
     };
     let (reference, label) = body[..close].split_once(' ')?;
-    (is_short_ref(reference) || RefId::looks_like_ref(reference))
-        .then(|| (unescape(&label.replace("\\|", "|")), &body[close + 1..]))
+    (is_short_ref(reference) || RefId::looks_like_ref(reference)).then(|| {
+        (
+            normalize(&unescape(&label.replace("\\|", "|"))),
+            &body[close + 1..],
+        )
+    })
 }
 
 fn is_short_ref(text: &str) -> bool {
@@ -89,7 +104,44 @@ fn is_short_ref(text: &str) -> bool {
 }
 
 fn unescape(text: &str) -> String {
-    normalize(&text.replace("\\[", "[").replace("\\]", "]"))
+    text.replace("\\[", "[").replace("\\]", "]")
+}
+
+struct Cell<'a> {
+    text: String,
+    controls: Vec<&'a AccessibilityNode>,
+}
+
+impl<'a> Cell<'a> {
+    fn new(node: &'a AccessibilityNode) -> Self {
+        let mut controls = Vec::new();
+        collect_controls(node, &mut controls);
+        Self {
+            text: squash(&cell_text(node)).to_lowercase(),
+            controls,
+        }
+    }
+
+    fn matches(&self, parts: &[Part]) -> bool {
+        let mut controls = self.controls.iter();
+        let mut text = Vec::new();
+        for part in parts {
+            match part {
+                Part::Text(run) => text.push(run.as_str()),
+                Part::Control(label) => {
+                    let Some(node) = controls.next() else {
+                        return false;
+                    };
+                    let name = node.display_name().unwrap_or_default();
+                    if !label_matches(label, node, name) {
+                        return false;
+                    }
+                    text.push(name);
+                }
+            }
+        }
+        controls.next().is_none() && self.text == squash(&text.join(" ")).to_lowercase()
+    }
 }
 
 fn cell_text(node: &AccessibilityNode) -> String {
@@ -103,31 +155,24 @@ fn cell_text(node: &AccessibilityNode) -> String {
         .join(" ")
 }
 
-fn labels_match(labels: &[String], cell: &AccessibilityNode) -> bool {
-    let nodes = index_tree(cell);
-    let mut controls = nodes
-        .iter()
-        .skip(1)
-        .map(|entry| entry.node)
-        .filter(|node| is_ref_able(node) && node.identity.retained_object.is_some());
-    labels.iter().all(|label| {
-        controls
-            .next()
-            .is_some_and(|node| label_matches(label, node))
-    }) && controls.next().is_none()
+fn collect_controls<'a>(node: &'a AccessibilityNode, controls: &mut Vec<&'a AccessibilityNode>) {
+    for child in &node.children {
+        if is_ref_able(child) && child.identity.retained_object.is_some() {
+            controls.push(child);
+        } else {
+            collect_controls(child, controls);
+        }
+    }
 }
 
-fn label_matches(label: &str, node: &AccessibilityNode) -> bool {
-    let Some(name) = node.display_name().map(normalize) else {
-        return false;
-    };
+fn label_matches(label: &str, node: &AccessibilityNode, name: &str) -> bool {
+    let name = normalize(name);
     if node.role == "link" {
         return label == name
             || label
                 .rsplit_once(" -> ")
                 .is_some_and(|(label, _)| normalize(label) == name);
     }
-    label.split_once(' ').is_some_and(|(role, label)| {
-        role_word(role).is_some_and(|roles| roles.contains(&node.role.as_str())) && label == name
-    })
+    let (role, label) = label.split_once(' ').unwrap_or((label, ""));
+    role_word(role).is_some_and(|roles| roles.contains(&node.role.as_str())) && label == name
 }

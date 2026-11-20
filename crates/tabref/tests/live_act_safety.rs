@@ -25,6 +25,12 @@ const SHOP: &str = r#"<!doctype html><title>Shop</title>
 
 const DANGER: &str = r#"<!doctype html><title>Danger</title><button>Delete everything</button>"#;
 const DONE: &str = "<!doctype html><title>Done</title><h1>Thank you</h1>";
+const TABLE: &str = r#"<!doctype html><title>Stock</title>
+<table><tr><th>Product</th><th>Variant</th><th>Price</th><th>Action</th></tr>
+<tr><td>Mug</td><td></td><td>9.50</td><td><button onclick="out.textContent='edited Mug'">Edit</button></td></tr>
+<tr><td>Cup</td><td>Mug</td><td>9.50</td><td><button onclick="out.textContent='edited Cup'">Edit</button></td></tr>
+<tr><td>Plate</td><td>12.50 <button onclick="out.textContent='edited Plate'">Edit</button></td></tr>
+</table><p id=out>Nothing</p>"#;
 
 fn site() -> (Harness, String) {
     let port = serve(&[("/shop", SHOP), ("/danger", DANGER), ("/done", DONE)]);
@@ -108,6 +114,32 @@ fn a_do_step_can_use_a_row_copied_from_snap() {
         "{}",
         missing.stderr
     );
+}
+
+#[test]
+fn copied_rows_skip_empty_cells_and_match_text_alongside_controls() {
+    if !live() {
+        return;
+    }
+    let port = serve(&[("/stock", TABLE)]);
+    let tabref = harness("row-scope");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/stock")]);
+    for (prefix, expected) in [
+        ("Mug | 9.50 | [", "edited Mug"),
+        ("Plate | 12.50 [", "edited Plate"),
+    ] {
+        let snap = tabref.ok(&["snap"]);
+        let row = snap
+            .stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("{}", snap.stdout));
+        let batch = format!(r#"click "Edit" in "{row}""#);
+        tabref.ok(&["do", &batch]);
+        let edited = tabref.ok(&["js", "document.getElementById('out').textContent"]);
+        assert_eq!(edited.stdout.trim(), expected);
+    }
 }
 
 #[test]
