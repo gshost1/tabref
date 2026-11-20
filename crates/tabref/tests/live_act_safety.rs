@@ -160,12 +160,25 @@ fn copied_rows_keep_control_names_when_the_tokens_include_details() {
         return;
     }
     let tabref = open_row_markup();
-    for (fragment, expected) in [
-        ("checkbox Select Mug (checked)", "edited checked"),
-        ("options: S | M", "edited fields"),
-        ("Long name for a row button", "edited long"),
+    for (fragment, detail, expected) in [
+        (
+            "checkbox Select Mug (checked)",
+            "button Unavailable (disabled)]",
+            "edited checked",
+        ),
+        (
+            "options: S | M",
+            r#"textbox Code = "A ] | [ B"]"#,
+            "edited fields",
+        ),
+        (
+            "Long name for a row button",
+            "should match the co…]",
+            "edited long",
+        ),
     ] {
         let row = printed_row(&tabref, |line| line.contains(fragment));
+        assert!(row.contains(detail), "{row}");
         click_copied_row(&tabref, &row, expected);
     }
 }
