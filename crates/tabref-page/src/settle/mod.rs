@@ -9,6 +9,7 @@ pub(crate) mod element_state;
 pub(crate) mod element_wait;
 pub(crate) mod page_barrier;
 pub(crate) mod page_wait;
+pub(crate) mod response_bytes;
 pub(crate) mod scroll_outcome;
 pub(crate) mod scroll_settle;
 pub(crate) mod settle_outcome;
