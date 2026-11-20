@@ -10,6 +10,7 @@ use super::page_view::current_page_view;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
+use crate::view::bot_check::action_bot_check;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
 
@@ -90,6 +91,11 @@ pub(crate) fn step_report(
             line.push_str(&format!("; {note}"));
         }
         merge(&mut data, text_check_data(page));
+        if let Some(check) = action_bot_check(session, &page.title, None) {
+            line.push('\n');
+            line.push_str(&check.note());
+            check.add_data(&mut data);
+        }
     }
     merge(&mut data, json!({ "navigated": effects.settled.navigated }));
     Ok((line, data))
@@ -136,8 +142,9 @@ fn effect_block(
     lines.extend(within_budget(&changes));
     merge(&mut data, json!({ "changes": changes }));
     lines.extend(text_check_note(page));
-    if effects.settled.navigated {
+    let captured = if effects.settled.navigated {
         lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
+        None
     } else if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
         let mut appeared = Vec::new();
@@ -153,6 +160,13 @@ fn effect_block(
             lines.push(format!("+{} more new: tabref snap", appeared.len() - shown));
         }
         merge(&mut data, json!({ "new": appeared }));
+        Some(captured)
+    } else {
+        None
+    };
+    if let Some(check) = action_bot_check(session, &page.title, captured.as_ref()) {
+        lines.insert(0, check.note());
+        check.add_data(&mut data);
     }
     Ok((lines, data))
 }

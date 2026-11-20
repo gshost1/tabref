@@ -1,31 +1,72 @@
-use tabref_page::{DomNode, DomTree, PageInfo};
+use std::time::Duration;
+
+use serde_json::Value;
+use tabref_page::{DomNode, DomTree, PageInfo, capture_dom};
 
 use crate::output::outcome::Outcome;
+use crate::session::Session;
+use crate::session::captured_snapshot::CapturedSnapshot;
 
 const NOTE: &str = "note: bot check on this page";
+const ACTION_CHECK_WAIT: Duration = Duration::from_millis(100);
+
+pub(crate) struct BotCheck(&'static str);
+
+impl BotCheck {
+    pub(crate) fn note(&self) -> String {
+        format!("{NOTE} ({})", self.0)
+    }
+
+    pub(crate) fn add_data(&self, data: &mut Value) {
+        data["bot_check"] = true.into();
+        data["bot_check_provider"] = self.0.into();
+    }
+}
 
 /// Recognizes a challenge in the top-level DOM, using the document's title
 /// and markup or the visible owner of a provider's challenge iframe.
 pub(crate) fn bot_check_view(info: &PageInfo, document: Option<&DomTree>, report: &mut Outcome) {
-    let Some(provider) = document.and_then(|document| provider(info, document)) else {
+    let Some(check) = document.and_then(|document| detect(&info.title, document)) else {
         return;
     };
-    report.text.insert_str(0, &format!("{NOTE} ({provider})\n"));
-    report.data["bot_check"] = true.into();
-    report.data["bot_check_provider"] = provider.into();
+    report.text.insert_str(0, &format!("{}\n", check.note()));
+    check.add_data(&mut report.data);
 }
 
-fn provider(info: &PageInfo, document: &DomTree) -> Option<&'static str> {
-    let cloudflare_title = info
-        .title
+/// Reuses the capture taken for new controls when there is one. A short
+/// DOM-only probe covers actions and batch steps that allocate no refs.
+pub(crate) fn action_bot_check(
+    session: &mut Session,
+    title: &str,
+    captured: Option<&CapturedSnapshot>,
+) -> Option<BotCheck> {
+    let page = session.page().ok()?;
+    if let Some(captured) = captured
+        && let Some(document) = captured
+            .main_dom(&page.target_id)
+            .and_then(|trees| trees.first())
+    {
+        return detect(&captured.info.title, document);
+    }
+    let deadline = session.deadline().capped(ACTION_CHECK_WAIT);
+    let trees = capture_dom(session.connection(), &page, deadline).ok()?;
+    detect(title, trees.first()?)
+}
+
+fn detect(title: &str, document: &DomTree) -> Option<BotCheck> {
+    let cloudflare_title = title
         .trim()
         .trim_end_matches(['.', '…'])
         .trim_end()
         .eq_ignore_ascii_case("just a moment");
     if cloudflare_title && document.nodes.iter().any(cloudflare_marker) {
-        return Some("Cloudflare");
+        return Some(BotCheck("Cloudflare"));
     }
-    document.nodes.iter().find_map(visible_captcha)
+    document
+        .nodes
+        .iter()
+        .find_map(visible_captcha)
+        .map(BotCheck)
 }
 
 fn cloudflare_marker(node: &DomNode) -> bool {

@@ -10,6 +10,7 @@ const CLOUDFLARE: &str = include_str!("fixtures/bot_check/cloudflare.html");
 const HCAPTCHA: &str = include_str!("fixtures/bot_check/hcaptcha.html");
 const RECAPTCHA: &str = include_str!("fixtures/bot_check/recaptcha.html");
 const ARTICLE: &str = include_str!("fixtures/bot_check/article.html");
+const SUBMIT: &str = include_str!("fixtures/bot_check/submit.html");
 
 #[test]
 fn challenge_pages_keep_the_normal_view_and_refs() {
@@ -75,6 +76,47 @@ fn challenge_pages_keep_the_normal_view_and_refs() {
         page["ref_count"].as_u64().is_some_and(|count| count > 0),
         "{clicked}"
     );
+}
+
+#[test]
+fn revealing_a_challenge_same_page_is_reported_by_click_and_do() {
+    if !live() {
+        return;
+    }
+    let port = serve(&[("/submit", SUBMIT)]);
+    let tabref = harness("submit-challenge");
+    let url = format!("http://127.0.0.1:{port}/submit");
+    let expected = format!("{NOTE} (reCAPTCHA)");
+
+    let opened = tabref.ok(&["open", &url]);
+    assert!(!opened.stdout.contains(NOTE), "{}", opened.stdout);
+    let clicked = tabref.ok(&["click", "Submit"]);
+    assert!(clicked.stdout.starts_with("clicked"), "{}", clicked.stdout);
+    assert_eq!(
+        clicked
+            .stdout
+            .lines()
+            .filter(|line| *line == expected)
+            .count(),
+        1,
+        "{}",
+        clicked.stdout
+    );
+
+    for steps in ["click Submit", "click Submit\nexpect text \"Sign in\""] {
+        tabref.ok(&["open", &url]);
+        let batch = tabref.ok(&["--json", "do", steps]).json();
+        let click = &batch["data"]["steps"][0];
+        let text = click["text"].as_str().unwrap_or_default();
+        assert!(text.starts_with("ok click"), "{batch}");
+        assert_eq!(
+            text.lines().filter(|line| *line == expected).count(),
+            1,
+            "{batch}"
+        );
+        assert_eq!(click["data"]["bot_check_provider"], "reCAPTCHA", "{batch}");
+        assert_eq!(click["data"]["navigated"], false, "{batch}");
+    }
 }
 
 fn reference<'a>(text: &'a str, control: &str) -> &'a str {
