@@ -124,6 +124,7 @@ pub(crate) fn connect_user_chrome(
         connection,
         warning: Some(format!("in your {} (logged in)", record.name)),
         choice: None,
+        started_headless_profile: false,
     })
 }
 

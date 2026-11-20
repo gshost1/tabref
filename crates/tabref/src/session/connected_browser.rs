@@ -9,4 +9,5 @@ pub(crate) struct ConnectedBrowser {
     pub(crate) connection: CdpConnection,
     pub(crate) warning: Option<String>,
     pub(crate) choice: Option<String>,
+    pub(crate) started_headless_profile: bool,
 }

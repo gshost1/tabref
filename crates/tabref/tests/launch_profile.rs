@@ -18,6 +18,43 @@ use profile_home::{Dirs, launch_on, launched_pid, stop_browser, tabref};
 const PAGE: &str = "<!doctype html><title>Keep</title><h1>Keep</h1>";
 
 #[test]
+fn a_new_headless_profile_launch_reports_its_mode_once() {
+    if !live() {
+        return;
+    }
+    let notice = "note: headless browser (add --headed to see it)";
+    for in_process in [true, false] {
+        let home = harness_home("headless-profile");
+        let config = harness_home("headless-config");
+        let profile = harness_home("headless-browser");
+        let _dirs = Dirs {
+            homes: vec![home.clone(), config.clone(), profile.clone()],
+        };
+        let args = [
+            "open",
+            "about:blank",
+            "--launch",
+            "--profile",
+            profile.to_str().unwrap(),
+        ];
+        let started = tabref(&home, &config, &args, in_process);
+        assert!(started.ok, "{}", started.stderr);
+        assert_eq!(
+            started
+                .stdout
+                .lines()
+                .filter(|line| *line == notice)
+                .count(),
+            1
+        );
+
+        let reused = tabref(&home, &config, &args, in_process);
+        assert!(reused.ok, "{}", reused.stderr);
+        assert!(!reused.stdout.contains(notice), "{}", reused.stdout);
+    }
+}
+
+#[test]
 fn spellings_that_dodge_the_refusals_are_refused_too() {
     let home = harness_home("profile-dodge");
     let config = harness_home("profile-dodge-config");
