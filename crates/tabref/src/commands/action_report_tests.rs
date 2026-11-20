@@ -1,9 +1,44 @@
+#[test]
+fn reorder_preview_fits_whole_cjk_rows_and_reports_omissions() {
+    let rows: Vec<_> = (1..=8)
+        .map(|n| format!("{n} {}", "界".repeat(85)))
+        .collect();
+    let changes = [
+        TextChange::Reordered {
+            above: Some("Header".into()),
+            run: rows.clone(),
+            table: true,
+        },
+        TextChange::Added("追加".repeat(180)),
+        TextChange::Added("Another change".into()),
+    ];
+    let counts = counted(&changes);
+    let text = within_budget(&counts).join("\n");
+    assert!(text.len() <= 600, "{}", text.len());
+    let mut lines = text.lines().skip(1);
+    for row in &rows[..2] {
+        assert_eq!(lines.next().map(str::trim_start), Some(row.as_str()));
+    }
+    assert_eq!(lines.next(), Some("  (+6 more: tabref snap)"));
+    assert_eq!(lines.next(), Some("+2 more: tabref snap"));
+    let data = change_data(&counts);
+    assert_eq!(data["changes"][0], "rows reordered: 2 of 8");
+    assert_eq!(data["change_counts"][0]["line"], data["changes"][0]);
+    assert_eq!(data["change_counts"][0]["count"], 1);
+    assert_eq!(
+        data["reordered"],
+        serde_json::json!({ "above": "Header", "rows": 2, "total": 8, "table": true })
+    );
+}
+
 use serde_json::json;
 use tabref_page::TextChange;
 
 use std::time::{Duration, Instant};
 
-use super::super::action_report_changes::{change_data, counted, step_change, within_budget};
+use super::super::action_report_changes::{
+    change_data, counted, reload_head, step_change, within_budget,
+};
 use super::{NOTHING_READ, NOTHING_SEEN, dialog_line, dialog_lines, nothing_seen};
 
 #[test]
@@ -145,6 +180,20 @@ fn a_repeated_line_says_how_many_times_it_showed() {
 }
 
 #[test]
+fn the_reload_preview_reports_only_counted_additions() {
+    let changes = [
+        TextChange::Removed("Old draft".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Try again".into()),
+    ];
+    assert_eq!(
+        reload_head(&counted(&changes)),
+        ["+ Required ×2", "+ Try again"]
+    );
+}
+
+#[test]
 fn lines_alike_only_in_their_shown_part_stay_apart() {
     let head = "word ".repeat(100);
     let changes = vec![
@@ -206,6 +255,24 @@ fn a_rewritten_line_that_does_not_fit_keeps_its_marker_intact() {
         within_budget(&counted(std::slice::from_ref(&rewrite))),
         vec![rewrite.to_string()]
     );
+}
+
+#[test]
+fn a_long_first_rewrite_shortens_its_context_and_keeps_its_count() {
+    let head = "𠮷".repeat(40);
+    let tail = "𩸽".repeat(40);
+    let before = "🟠".repeat(60);
+    let after = "🟣".repeat(60);
+    let rewrite = TextChange::Changed {
+        before: format!("{head} {before} {tail}"),
+        after: format!("{head} {after} {tail}"),
+    };
+    assert!(rewrite.to_string().len() > 600);
+    let shown = within_budget(&counted(&[rewrite.clone(), rewrite]));
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(shown[0].len() <= 600, "{}", shown[0]);
+    assert!(shown[0].contains(&format!("{{{before} -> {after}}}")));
+    assert!(shown[0].ends_with("… ×2"), "{}", shown[0]);
 }
 
 #[test]

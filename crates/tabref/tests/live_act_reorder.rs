@@ -1,7 +1,7 @@
 //! Live runs of an action that reorders a table: the page draws the rows
 //! again in a new order and adds an Undo button, and the action must print
 //! the rows it now starts with instead of a cell-by-cell diff, one line for
-//! the row links made again, and the Undo button as a new control.
+//! the row links made again, and the Undo and dialog buttons as new controls.
 //! Opt-in: `TABREF_LIVE=1 cargo test -p tabref --test live_act_reorder -- --test-threads=1`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -27,7 +27,8 @@ function draw() {
     row.innerHTML = '<td><a></a></td><td></td>';
     row.firstChild.firstChild.textContent = code;
     row.firstChild.firstChild.href = '/parcel/' + code;
-    row.lastChild.textContent = kg + ' kg';
+    const status = code === 'P-101' ? ' Close' : code === 'P-105' ? ' OK' : '';
+    row.lastChild.textContent = kg + ' kg' + status;
     body.appendChild(row);
   }
 }
@@ -35,7 +36,10 @@ document.getElementById('sort').onclick = () => {
   descending = !descending;
   parcels.sort((a, b) => descending ? b[1] - a[1] : a[1] - b[1]);
   draw();
-  if (!document.getElementById('undo')) document.body.insertAdjacentHTML('beforeend', '<button id=undo>Undo sort</button>');
+  if (!document.getElementById('undo')) {
+    document.body.insertAdjacentHTML('beforeend',
+      '<button id=undo>Undo sort</button><dialog open aria-label="Sort options"><button>Close</button><button>OK</button></dialog>');
+  }
 };
 draw();
 </script>"#;
@@ -88,8 +92,18 @@ fn sorting_a_table_prints_the_rows_it_now_starts_with() {
     let first = out.find("P-106 61.5 kg").expect(&out);
     let second = out.find("P-102 44 kg").expect(&out);
     assert!(first < second, "{out}");
-    assert_eq!(out.matches("\nnew ").count(), 1, "{out}");
+    assert_eq!(out.matches("\nnew ").count(), 3, "{out}");
     assert!(out.contains("Undo sort"), "{out}");
+    assert!(
+        out.lines()
+            .any(|line| line.starts_with("new ") && line.contains("button Close")),
+        "{out}"
+    );
+    assert!(
+        out.lines()
+            .any(|line| line.starts_with("new ") && line.contains("button OK")),
+        "{out}"
+    );
     assert!(
         out.contains(" new refs, earlier refs in them are stale: tabref snap")
             && out.contains("\nrows drawn again: "),
@@ -97,6 +111,23 @@ fn sorting_a_table_prints_the_rows_it_now_starts_with() {
     );
     assert!(!out.contains(" -> "), "{out}");
     assert!(out.len() < 700, "{} bytes:\n{out}", out.len());
+}
+
+#[test]
+fn sorting_a_table_keeps_json_changes_single_line() {
+    if !live() {
+        return;
+    }
+    let (tabref, url) = site();
+    tabref.ok(&["open", &url]);
+    let report = tabref.ok(&["--json", "click", "Weight"]).json();
+    let data = &report["data"];
+    assert_eq!(data["changes"][0], "rows reordered: 5 of 8", "{report}");
+    assert_eq!(data["change_counts"][0]["line"], data["changes"][0]);
+    assert_eq!(
+        data["reordered"],
+        serde_json::json!({"above": "Code Weight", "rows": 5, "total": 8, "table": true})
+    );
 }
 
 #[test]

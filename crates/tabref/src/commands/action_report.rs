@@ -4,14 +4,15 @@ use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
-use super::action_report_changes::{change_data, counted, step_change, within_budget};
+use super::action_report_changes::{change_data, counted, reload_head, step_change, within_budget};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
-use super::redrawn_rows::redrawn;
+use super::redrawn_rows::{NewControl, redrawn};
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
+use crate::view::bot_check::action_bot_check;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
 
@@ -79,15 +80,21 @@ pub(crate) fn step_report(
         }
         if effects.settled.navigated {
             line.push_str(&format!(" {}", quote_text(&page.title)));
-        }
-        let leaves = effects.settled.navigated && effects.url_before != page.url;
-        if !leaves && let Some(change) = step_change(&page.changes) {
+            if effects.url_before == page.url {
+                line.push_str("; page reloaded");
+            }
+        } else if let Some(change) = step_change(&page.changes) {
             line.push_str(&format!("; {change}"));
         }
         if let Some(note) = text_check_note(page) {
             line.push_str(&format!("; {note}"));
         }
         merge(&mut data, text_check_data(page));
+        if let Some(check) = action_bot_check(session, &page.title, None) {
+            line.push('\n');
+            line.push_str(&check.note());
+            check.add_data(&mut data);
+        }
     }
     merge(&mut data, json!({ "navigated": effects.settled.navigated }));
     Ok((line, data))
@@ -131,24 +138,39 @@ fn effect_block(
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
     let changes = counted(&page.changes);
-    lines.extend(within_budget(&changes));
+    if effects.settled.navigated {
+        lines.extend(reload_head(&changes));
+    } else {
+        lines.extend(within_budget(&changes));
+    }
     merge(&mut data, change_data(&changes));
     lines.extend(text_check_note(page));
     if effects.settled.navigated {
-        lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
-    } else if page.changed_anything() || effects.settled.same_document {
+        let report = current_page_view(session)?;
+        lines.push(report.text);
+        merge(&mut data, json!({ "page": report.data }));
+        return Ok((lines, data));
+    }
+    let captured = if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
         let mut found = Vec::new();
         new_controls(&captured.tree, known, &mut found);
-        let (in_rows, outside) = redrawn(&page.changes, &found);
+        let (in_rows, outside) = redrawn(&page.changes, &found, |target| captured.dom(target));
         let shown = outside.len().min(NEW_SHOWN);
         lines.extend(outside.iter().take(shown).map(|line| format!("new {line}")));
         if outside.len() > shown {
             lines.push(format!("+{} more new: tabref snap", outside.len() - shown));
         }
         lines.extend(in_rows);
-        let appeared: Vec<&String> = found.iter().map(|(line, _)| line).collect();
+        let appeared: Vec<&String> = found.iter().map(|control| &control.line).collect();
         merge(&mut data, json!({ "new": appeared }));
+        Some(captured)
+    } else {
+        None
+    };
+    if let Some(check) = action_bot_check(session, &page.title, captured.as_ref()) {
+        lines.insert(0, check.note());
+        check.add_data(&mut data);
     }
     Ok((lines, data))
 }
@@ -193,22 +215,20 @@ fn nothing_seen(acted: &Acted) -> Option<&'static str> {
     })
 }
 
-fn new_controls(
-    node: &AccessibilityNode,
+fn new_controls<'a>(
+    node: &'a AccessibilityNode,
     known: &HashSet<String>,
-    found: &mut Vec<(String, Option<String>)>,
+    found: &mut Vec<NewControl<'a>>,
 ) {
     if node.ref_id.is_some()
-        && node
-            .identity
-            .retained_object
-            .as_ref()
-            .is_some_and(|token| !known.contains(token))
+        && let Some(token) = &node.identity.retained_object
+        && !known.contains(token)
     {
-        found.push((
-            styled(&node_line(node, NEW_LINE_CHARS)),
-            node.identity.name.clone(),
-        ));
+        found.push(NewControl {
+            line: styled(&node_line(node, NEW_LINE_CHARS)),
+            name: node.identity.name.as_deref(),
+            token,
+        });
     }
     for child in &node.children {
         new_controls(child, known, found);

@@ -73,6 +73,10 @@ pub(crate) fn diff_page(before: &[String], after: &[String], cells: &Cells) -> V
     let old = &before[head..before.len() - tail];
     let new = &after[head..after.len() - tail];
     let mut changes = Vec::new();
+    if old.len().saturating_mul(new.len()) > MAX_TABLE_CELLS {
+        pair_up(old, new, &mut changes);
+        return changes;
+    }
     for (removed, added) in hunks(old, new) {
         pair_up(removed, added, &mut changes);
     }
@@ -84,7 +88,7 @@ pub(crate) fn diff_page(before: &[String], after: &[String], cells: &Cells) -> V
     changes
 }
 fn hunks<'a>(old: &'a [String], new: &'a [String]) -> Vec<(&'a [String], &'a [String])> {
-    if old.is_empty() || new.is_empty() || old.len().saturating_mul(new.len()) > MAX_TABLE_CELLS {
+    if old.is_empty() || new.is_empty() {
         return vec![(old, new)];
     }
     let width = new.len() + 1;

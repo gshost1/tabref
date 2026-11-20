@@ -1,3 +1,19 @@
+#[test]
+fn a_middle_exceeding_the_diff_matrix_limit_uses_ordinary_changes() {
+    let mut before = vec!["Header".into()];
+    before.extend((0..1001).map(|n| format!("Parcel {n}")));
+    before.push("Footer".into());
+    let mut after = before.clone();
+    after[1..1002].reverse();
+    let changes = diff_page(&before, &after, &Cells::new());
+    assert!(changes.len() > 1000);
+    assert!(
+        changes
+            .iter()
+            .all(|change| !matches!(change, TextChange::Reordered { .. }))
+    );
+}
+
 use super::{Cells, cells_of};
 use crate::act::text_change::TextChange;
 use crate::act::text_diff::{diff_lines, diff_page, text_lines};

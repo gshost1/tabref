@@ -92,11 +92,15 @@ pub(crate) fn run_step(
     };
     let (mut text, data) = step_report(session, acted, last)?;
     if let Some((before, page)) = late {
-        text.push_str(&format!(
-            " -> {} {} (after the step settled)",
-            short_url(&before, &page.url),
-            quote_text(&page.title)
-        ));
+        let summary_end = text.find('\n').unwrap_or(text.len());
+        text.insert_str(
+            summary_end,
+            &format!(
+                " -> {} {} (after the step settled)",
+                short_url(&before, &page.url),
+                quote_text(&page.title)
+            ),
+        );
     }
     Ok(StepDone { text, data })
 }

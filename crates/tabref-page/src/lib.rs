@@ -69,7 +69,7 @@ pub use outline::page_outline::PageOutline;
 pub use outline::ref_label::RefLabel;
 pub use outline::select_option::SelectOption;
 pub use outline::text_match::TextMatch;
-pub use outline::text_runs::{collapse_run, cut_chars, squash};
+pub use outline::text_runs::{collapse_run, cut_chars, squash, subtree_text};
 pub use outline::text_search::search_text;
 pub use outline::url_resolve::{origin_of, resolve_href, short_href};
 pub use page::capture_watch::{

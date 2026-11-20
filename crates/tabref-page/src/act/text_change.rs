@@ -1,6 +1,7 @@
 use std::fmt;
 
 const CONTEXT_CHARS: usize = 40;
+const COMPACT_CONTEXT_CHARS: usize = 8;
 const LINE_CHARS: usize = 100;
 const ADDED_CHARS: usize = 400;
 const MIDDLE_CHARS: usize = 60;
@@ -38,6 +39,43 @@ impl TextChange {
             other => other.to_string(),
         }
     }
+
+    /// A rewritten line with less context, keeping the changed text and
+    /// its delimiters together in a smaller text preview.
+    pub fn compact_rewrite(&self) -> Option<String> {
+        match self {
+            Self::Changed { before, after } => {
+                Some(inline_change(before, after, COMPACT_CONTEXT_CHARS))
+            }
+            _ => None,
+        }
+    }
+
+    /// The reorder heading, complete rows that fit, and a count of the
+    /// rows left out. The byte budget includes newlines and the footer.
+    pub fn reorder_preview(&self, budget: usize) -> Option<(String, usize)> {
+        let Self::Reordered { above, run, table } = self else {
+            return None;
+        };
+        let mut head = run_head(above, run, *table);
+        for shown in (0..=run.len().min(ROWS_SHOWN)).rev() {
+            let footer = if shown < run.len() {
+                format!("\n  (+{} more: tabref snap)", run.len() - shown)
+            } else {
+                String::new()
+            };
+            let rows: usize = run[..shown].iter().map(|row| row.len() + 3).sum();
+            if head.len() + rows + footer.len() <= budget {
+                for row in &run[..shown] {
+                    head.push_str("\n  ");
+                    head.push_str(row);
+                }
+                head.push_str(&footer);
+                return Some((head, shown));
+            }
+        }
+        None
+    }
 }
 
 impl fmt::Display for TextChange {
@@ -48,10 +86,13 @@ impl fmt::Display for TextChange {
     /// rows, one per indented line, and how to see the rest.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Reordered { above, run, table } => {
-                formatter.write_str(&rows_block(&run_head(above, run, *table), run))
+            Self::Reordered { .. } => {
+                let (block, _) = self.reorder_preview(usize::MAX).ok_or(fmt::Error)?;
+                formatter.write_str(&block)
             }
-            Self::Changed { before, after } => formatter.write_str(&inline_change(before, after)),
+            Self::Changed { before, after } => {
+                formatter.write_str(&inline_change(before, after, CONTEXT_CHARS))
+            }
             Self::Added(line) => write!(formatter, "+ {}", cut(line, ADDED_CHARS)),
             Self::Removed(line) => write!(formatter, "- {}", cut(line, LINE_CHARS)),
         }
@@ -66,20 +107,6 @@ fn run_head(above: &Option<String>, run: &[String], table: bool) -> String {
         format!(" below \"{}\"", cut(line, ABOVE_CHARS))
     });
     format!("reordered {} {noun}{below}, {ROWS_LABEL}", run.len())
-}
-
-fn rows_block(head: &str, first: &[String]) -> String {
-    let count = first.len();
-    let mut block = head.to_owned();
-    let shown = count.min(ROWS_SHOWN);
-    for row in &first[..shown] {
-        block.push_str("\n  ");
-        block.push_str(&cut(row, LINE_CHARS));
-    }
-    if count > shown {
-        block.push_str(&format!("\n  (+{} more: tabref snap)", count - shown));
-    }
-    block
 }
 
 fn brief_rows(head: &str, first: &[String]) -> String {
@@ -102,7 +129,7 @@ fn brief_rows(head: &str, first: &[String]) -> String {
     format!("{head} {rows}{more}")
 }
 
-fn inline_change(before: &str, after: &str) -> String {
+fn inline_change(before: &str, after: &str, context_chars: usize) -> String {
     let old: Vec<&str> = before.split(' ').collect();
     let new: Vec<&str> = after.split(' ').collect();
     let prefix = old
@@ -130,7 +157,7 @@ fn inline_change(before: &str, after: &str) -> String {
     let mut line = String::new();
     let head = old[..prefix].join(" ");
     if !head.is_empty() {
-        line.push_str(&tail(&head, CONTEXT_CHARS));
+        line.push_str(&tail(&head, context_chars));
         line.push(' ');
     }
     line.push_str(&match (removed.is_empty(), added.is_empty()) {
@@ -142,7 +169,7 @@ fn inline_change(before: &str, after: &str) -> String {
     let rest = old[old.len() - suffix..].join(" ");
     if !rest.is_empty() {
         line.push(' ');
-        line.push_str(&cut(&rest, CONTEXT_CHARS));
+        line.push_str(&cut(&rest, context_chars));
     }
     line
 }
