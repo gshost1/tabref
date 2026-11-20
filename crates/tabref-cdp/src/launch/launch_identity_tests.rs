@@ -72,16 +72,18 @@ fn a_port_file_naming_another_port_or_run_is_refused() {
 
 #[test]
 fn a_missing_port_file_is_refused_with_its_path() {
+    let launched = record();
+    let path = launched.profile_dir.join("DevToolsActivePort");
     let missing = Err(AppError::new(
         ErrorCode::ActionFailed,
         "No DevToolsActivePort file",
     ));
-    let error = check_active_port(&record(), missing).unwrap_err();
+    let error = check_active_port(&launched, missing).unwrap_err();
     assert_eq!(error.kind(), Some("cdp_launch_unverified"));
     assert!(
         error
             .message
-            .contains("/home/u/.cache/tabref-profile-a/DevToolsActivePort could not be read"),
+            .contains(&format!("{} could not be read", path.display())),
         "{}",
         error.message
     );
