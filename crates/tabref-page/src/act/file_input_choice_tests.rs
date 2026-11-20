@@ -60,7 +60,7 @@ fn the_nearest_ancestor_with_one_input_decides() {
 }
 
 #[test]
-fn a_body_appended_input_can_serve_a_target_in_a_form() {
+fn a_body_appended_input_can_serve_a_target_in_its_own_form() {
     let candidates = [input(0, "input.dz-hidden-input", Some(3))];
     assert_eq!(
         chosen(choose(&candidates, Some(3), true)),
@@ -69,6 +69,28 @@ fn a_body_appended_input_can_serve_a_target_in_a_form() {
     assert_eq!(
         choose(&candidates, Some(3), false),
         FileInputChoice::OutsideWidget(vec![&candidates[0]])
+    );
+}
+
+#[test]
+fn a_form_target_prefers_an_eligible_input_over_a_nearer_foreign_input() {
+    let mut foreign = input(0, "input#foreign", Some(1));
+    foreign.crosses = true;
+    let candidates = [foreign, input(1, "input#owned", Some(3))];
+    assert_eq!(
+        chosen(choose(&candidates, Some(3), true)),
+        (1, FileInputVia::OnlyOnPage)
+    );
+}
+
+#[test]
+fn an_explicit_label_inside_a_form_cannot_cross_its_boundary() {
+    let mut labelled = input(0, "input#foreign", Some(3));
+    labelled.labelled = true;
+    labelled.crosses = true;
+    assert_eq!(
+        choose(std::slice::from_ref(&labelled), Some(3), true),
+        FileInputChoice::Fenced(&labelled)
     );
 }
 

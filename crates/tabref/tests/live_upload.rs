@@ -95,7 +95,7 @@ fn page_overridden_files_are_labeled_and_cannot_add_result_lines() {
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
     let matched = tabref.ok(&["--json", "upload", "File", file]).json();
     assert_eq!(matched["data"]["page_reports_requested_files"], true);
-    assert!(matched["data"].get("verified").is_none(), "{matched}");
+    assert_eq!(matched["data"]["verified"], true);
     assert_eq!(matched["data"]["via"], "target");
 
     tabref.ok(&[
@@ -112,6 +112,9 @@ fn page_overridden_files_are_labeled_and_cannot_add_result_lines() {
         text.contains("page report differs from request"),
         "{text:?}"
     );
+    let unmatched = tabref.ok(&["--json", "upload", "File", file]).json();
+    assert_eq!(unmatched["data"]["page_reports_requested_files"], false);
+    assert_eq!(unmatched["data"]["verified"], false);
 }
 
 const SEPARATE_WIDGETS: &str = r#"<!doctype html><title>Widgets</title>
@@ -154,4 +157,41 @@ fn a_formless_target_cannot_reach_file_inputs_in_other_widgets() {
     assert_eq!(explicit["data"]["input_hidden"], true);
     assert_eq!(explicit["data"]["via"], "target");
     assert_eq!(explicit["data"]["page_reports_requested_files"], true);
+}
+
+#[test]
+fn explicit_css_errors_include_a_kind_and_recovery_hint() {
+    if !live() {
+        return;
+    }
+    let port = serve(&[("/", SEPARATE_WIDGETS)]);
+    let tabref = harness("upload-css-errors");
+    let dir = scratch("upload-css-errors");
+    let file = dir.0.join("comment.txt");
+    std::fs::write(&file, b"comment").unwrap();
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+    for (target, kind, hint) in [
+        ("css=", "upload_css_invalid_selector", "valid selector"),
+        ("css=[", "upload_css_invalid_selector", "valid selector"),
+        ("css=#missing", "upload_css_no_match", "main document"),
+        (
+            "css=input",
+            "upload_css_multiple_matches",
+            "Narrow the selector",
+        ),
+        (
+            "css=button",
+            "upload_css_not_file_input",
+            "input[type=file]",
+        ),
+    ] {
+        let refused = tabref.run(&["--json", "upload", target, file.to_str().unwrap()]);
+        assert!(!refused.ok, "{}", refused.stdout);
+        let error = &refused.json()["error"];
+        assert_eq!(error["details"]["kind"], kind, "{error}");
+        assert!(
+            error["suggestion"].as_str().unwrap().contains(hint),
+            "{error}"
+        );
+    }
 }

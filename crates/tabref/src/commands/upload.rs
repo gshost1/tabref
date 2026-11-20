@@ -49,6 +49,7 @@ pub(crate) fn run(
             "via": uploaded.via.as_str(),
             "files": uploaded.files,
             "page_reports_requested_files": uploaded.page_reports_requested_files,
+            "verified": uploaded.page_reports_requested_files,
         }),
     ))
 }

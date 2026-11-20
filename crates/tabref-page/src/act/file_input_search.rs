@@ -12,7 +12,7 @@ use crate::{CdpConnection, PageSession};
 /// from the target to the first ancestor that holds it. Shadow roots are
 /// crossed to their host on the way up, so a drop zone inside a component
 /// still finds an input beside the component. An input `crosses` when it
-/// belongs to a form other than the target's, or sits in a shadow root
+/// has a different form owner (including no owner), or sits in a shadow root
 /// whose host is not around the target. The list carries a `key` of
 /// everything the choice rests on; "pick" returns the input only while the
 /// page still gives the same key, so an input that a re-render moved into
@@ -43,10 +43,10 @@ const SEARCH: &str = r"function(mode, index, expected) {
   for (const extra of [this, labelled]) {
     if (isFile(extra) && !inputs.includes(extra)) inputs.push(extra);
   }
-  const ownForm = this.form && this.form.localName === 'form' ? this.form : null;
+  const ownForm = this.localName !== 'label' && this.form && this.form.localName === 'form' ? this.form : null;
   const targetForm = ownForm || chain.find((node) => node.localName === 'form') || null;
   const crosses = (el) => {
-    if (el.form && el.form !== targetForm) return true;
+    if (el.form !== targetForm) return true;
     for (let root = el.getRootNode(); root && root.host; root = root.host.getRootNode()) {
       if (!place.has(root.host)) return true;
     }

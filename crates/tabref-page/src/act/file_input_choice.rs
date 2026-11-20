@@ -63,7 +63,8 @@ pub enum FileInputVia {
 impl FileInputVia {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Itself | Self::Label => "target",
+            Self::Itself => "target",
+            Self::Label => "label",
             Self::Nearest => "nearest",
             Self::OnlyOnPage => "only",
         }
@@ -92,10 +93,10 @@ pub(crate) enum FileInputChoice<'a> {
 
 /// Picks the input in order: the target itself, the input its label
 /// controls, then the file inputs under the nearest ancestor that holds
-/// any. One there is used; several there are refused, and so is one that
-/// crosses into another form or a shadow root the target is not in. An
-/// ancestor that is the whole document allows the only input only when
-/// the target is in a form, for body-appended drop zone inputs.
+/// any eligible input. A form target only considers inputs owned by that
+/// form, including inputs associated with it through a `form` attribute.
+/// Shadow-root boundaries also apply. A formless target cannot reach
+/// unrelated widgets through the document body.
 pub(crate) fn choose(
     candidates: &[FileInputCandidate],
     document_depth: Option<u32>,
@@ -105,18 +106,19 @@ pub(crate) fn choose(
         return FileInputChoice::Chosen(found, FileInputVia::Itself);
     }
     if let Some(found) = candidates.iter().find(|candidate| candidate.labelled) {
+        if has_form && found.crosses {
+            return FileInputChoice::Fenced(found);
+        }
         return FileInputChoice::Chosen(found, FileInputVia::Label);
     }
-    let Some(nearest) = candidates
-        .iter()
-        .filter_map(|candidate| candidate.depth)
-        .min()
-    else {
+    let rank =
+        |input: &FileInputCandidate| input.depth.map(|depth| (has_form && input.crosses, depth));
+    let Some((outside_form, nearest)) = candidates.iter().filter_map(rank).min() else {
         return FileInputChoice::None;
     };
     let at: Vec<&FileInputCandidate> = candidates
         .iter()
-        .filter(|candidate| candidate.depth == Some(nearest))
+        .filter(|candidate| rank(candidate) == Some((outside_form, nearest)))
         .collect();
     let at_document = document_depth.is_some_and(|depth| nearest >= depth);
     if at_document && !has_form {

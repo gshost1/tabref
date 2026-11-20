@@ -21,8 +21,9 @@ const READ_FILES: &str = r"function() {
 /// would, then reads back the names it holds. No native file dialog opens.
 /// A target that is not a file input stands for the one it means: the
 /// input its label controls, else the nearest file input around it (a
-/// drop zone's hidden input in the same form), with a page-wide fallback
-/// only for a target in a form. A path that is not an existing file, several files for a
+/// drop zone's hidden input in the same form). A form target can reach an
+/// input outside the form element only if that form owns it. A path that is
+/// not an existing file, several files for a
 /// single-file input, no file input, or several equally near are refused
 /// before anything is set.
 pub fn upload_files(
@@ -240,7 +241,7 @@ fn fenced_file_input(backend_node_id: i64, found: &FileInputCandidate) -> AppErr
     AppError::new(
         ErrorCode::AmbiguousTarget,
         format!(
-            "The nearest file input to DOM node {backend_node_id}, {}, belongs to another form or widget; no files were sent",
+            "The file input {} is outside the form or widget of DOM node {backend_node_id}; no files were sent",
             found.name
         ),
     )

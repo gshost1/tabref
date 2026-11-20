@@ -36,8 +36,13 @@ input.type = 'file';
 input.multiple = true;
 input.className = 'dz-hidden-input';
 input.style.cssText = 'visibility:hidden;position:absolute;top:0;left:0;height:0;width:0';
+input.setAttribute('form', 'report');
 document.body.appendChild(input);
 </script></body></html>"##;
+
+const OUTSIDE_FORM: &str = r#"<!doctype html><title>Comment and avatar</title>
+<header><input type="file" id="avatar" hidden></header>
+<form id="comment"><button type="button" id="attach">Attach</button></form>"#;
 
 const SIBLING_FORMS: &str = r##"<!doctype html><html><head><title>Card</title></head><body>
 <div class="card">
@@ -120,12 +125,22 @@ fn a_hidden_input_appended_to_the_same_form_is_used() {
 }
 
 #[test]
-fn dropzones_default_hidden_input_under_body_is_used_from_a_link_inside_a_form() {
+fn a_body_appended_input_owned_by_the_form_is_used() {
     if !live() {
         return;
     }
     let outcome = upload_to("/body", BODY_DROPZONE, "#pick");
     assert_eq!(outcome.unwrap(), "input.dz-hidden-input");
+}
+
+#[test]
+fn a_target_inside_a_form_cannot_use_a_formless_input() {
+    if !live() {
+        return;
+    }
+    let error = upload_to("/unowned", OUTSIDE_FORM, "#attach").unwrap_err();
+    assert_eq!(error.kind(), Some("ambiguous_file_input"));
+    assert!(error.message.contains("input#avatar"), "{error:?}");
 }
 
 #[test]
