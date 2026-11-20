@@ -9,6 +9,7 @@ use super::located::Located;
 use super::locator::Locator;
 use super::name_match::{NAME_WORDS, RANKS, normalize, rank};
 use super::role_words::role_word;
+use super::row_scope::row_anchors;
 use super::scope_kind::ScopeKind;
 use crate::ElementToken;
 
@@ -37,7 +38,10 @@ pub fn locate(
     let actionable: Vec<usize> = (0..nodes.len()).filter(|&index| acting[index]).collect();
     let scope_anchors = match &locator.scope {
         Some(scope) => {
-            let found = anchors(&nodes, &normalize(scope));
+            let mut found = anchors(&nodes, &normalize(scope));
+            if found.is_empty() && locator.scope_kind == ScopeKind::Within {
+                found = row_anchors(&nodes, scope);
+            }
             if found.is_empty() {
                 return Err(no_scope(scope));
             }

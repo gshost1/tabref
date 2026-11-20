@@ -128,7 +128,7 @@ fn holder_matches(
             return (!own.is_empty()).then_some(own);
         }
         let role = nodes[at].node.role.as_str();
-        if at != anchor && HOLDS_BUT_ENDS.contains(&role) {
+        if role == "row" || (at != anchor && HOLDS_BUT_ENDS.contains(&role)) {
             return None;
         }
         let parent = nodes[at].parent?;
