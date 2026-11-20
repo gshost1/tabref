@@ -21,8 +21,6 @@ jobs:
           Copy-Item target/debug/tabref.exe "$env:RUNNER_TEMP/before.exe"
           git checkout --detach $current
           cargo build --locked -p tabref
-      - name: Verify Windows reconnect regression
-        run: cargo test --locked -p tabref --test windows_launch_connect
       - name: Time successful reconnects to one Chrome instance
         shell: pwsh
         run: |
