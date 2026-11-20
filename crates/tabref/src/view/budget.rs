@@ -26,10 +26,7 @@ const OUTLINE_SHARE: usize = 5;
 /// where the cut starts and which command prints on from there, and a
 /// compact outline of the headings after it (see [`cut_outline`]) keeps the
 /// rest of the page countable and reachable. Content, marker, outline and
-/// room for the header and footer together stay within the budget. A view
-/// over the budget by less than what its cut would spend on the marker, the
-/// outline and the frame room, and by at most a tenth of the budget, prints
-/// whole: hiding so small a tail would cost a call to read it.
+/// room for the header and footer together stay within the budget.
 pub(crate) fn fit(
     lines: Vec<ViewLine>,
     options: &ViewOptions,
@@ -58,24 +55,27 @@ pub(crate) fn fit(
     let share = room / OUTLINE_SHARE;
     let wanted = cut_outline(&lines, cut_index(&lines, room), share, route, full).cost();
     let content_room = room.saturating_sub(wanted.min(share) + MARKER_ROOM.min(tenth));
-    let cut = cut_index(&lines, content_room);
+    let mut cut = cut_index(&lines, content_room);
     let mut kept: Vec<ViewLine> = lines[..cut].to_vec();
-    let spent: usize = kept.iter().map(ViewLine::cost).sum();
-    if let Some(first) = lines.get(cut) {
-        let last = lines.last().map_or(first.number, |last| last.number);
+    let mut spent: usize = kept.iter().map(ViewLine::cost).sum();
+    let last = lines.last().map_or(0, |line| line.number);
+    while let Some(first) = lines.get(cut) {
         let marker = cut_marker(&lines[cut..], last, route, full);
-        let outline_room = room.saturating_sub(spent + marker.cost());
-        let outline = cut_outline(&lines, cut, outline_room, route, full);
-        let slack = tenth.min(marker.cost() + outline.cost() + FRAME_ROOM.min(tenth));
-        if total <= options.budget + slack {
-            report.lines_shown = report.lines_total - report.chrome_cut;
-            report.chars_shown = total;
-            return (lines, report);
+        if spent + marker.cost() > room {
+            if let Some(line) = kept.pop() {
+                spent -= line.cost();
+                cut -= 1;
+                continue;
+            }
+        } else {
+            spent += marker.cost();
+            kept.push(marker);
         }
         report.budget_from = Some(first.number);
-        kept.push(marker);
+        let outline = cut_outline(&lines, cut, room - spent, route, full);
         report.sections = outline.sections;
         kept.extend(outline.lines);
+        break;
     }
     report.lines_shown = cut;
     report.chars_shown = kept.iter().map(ViewLine::cost).sum();
