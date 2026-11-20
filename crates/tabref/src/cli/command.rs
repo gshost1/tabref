@@ -46,6 +46,9 @@ pub(crate) enum Command {
         /// Start at this line of the view (the cut markers name it)
         #[arg(long, value_name = "LINE", default_value_t = 1)]
         from: usize,
+        /// Stop after this line of the view: --from 1 --to 40 prints lines 1-40
+        #[arg(long, value_name = "LINE")]
+        to: Option<usize>,
     },
     /// Click an element
     Click {
@@ -134,7 +137,9 @@ pub(crate) enum Command {
     },
     /// Search the whole page, text included, for TEXT
     Find {
-        text: String,
+        /// The text; several words are searched as one text
+        #[arg(required = true, num_args = 1..)]
+        text: Vec<String>,
         /// Only nodes of this role
         #[arg(long)]
         role: Option<String>,
@@ -155,6 +160,9 @@ pub(crate) enum Command {
         /// Start at this line of the text (the cut markers name it)
         #[arg(long, value_name = "LINE", default_value_t = 1)]
         from: usize,
+        /// Stop after this line of the text: --from 1 --to 40 prints lines 1-40
+        #[arg(long, value_name = "LINE")]
+        to: Option<usize>,
     },
     /// Wait until a condition holds (bounded by --timeout)
     Wait {
@@ -189,6 +197,10 @@ pub(crate) enum Command {
         step_timeout: u64,
     },
     /// Evaluate a JavaScript expression in the page and print its value
+    ///
+    /// To load more of a page, use `tabref scroll` (many in one `tabref do`):
+    /// it waits for what each scroll loads, where a script that scrolls and
+    /// sleeps can only guess.
     Js { expression: String },
     /// List the open tabs
     Tabs,

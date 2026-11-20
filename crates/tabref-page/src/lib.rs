@@ -69,11 +69,14 @@ pub use outline::page_outline::PageOutline;
 pub use outline::ref_label::RefLabel;
 pub use outline::select_option::SelectOption;
 pub use outline::text_match::TextMatch;
-pub use outline::text_runs::{collapse_run, cut_chars, squash};
+pub use outline::text_runs::{
+    CONTROL_NAME_LIMIT, CONTROL_VALUE_LIMIT, collapse_run, cut_chars, escape_control_label,
+    escape_line, squash, subtree_text,
+};
 pub use outline::text_search::search_text;
 pub use outline::url_resolve::{origin_of, resolve_href, short_href};
 pub use page::capture_watch::{
-    CaptureWatch, arm_capture_watch, check_capture_watch, has_closed_shadow_root,
+    CaptureWatch, IDLE_WAIT_MS, arm_capture_watch, check_capture_watch, has_closed_shadow_root,
 };
 pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
@@ -91,6 +94,8 @@ pub use settle::download_state::DownloadState;
 pub use settle::download_timing::DownloadTiming;
 pub use settle::element_state::ElementState;
 pub use settle::element_wait::wait_for_state;
+pub use settle::load_settle::{LOAD_SETTLE_CAP, LoadSettle, RENDER_CAP, SettleScope, settle_load};
+pub use settle::load_watch::LoadWatch;
 pub use settle::page_wait::{wait_for_text, wait_for_url};
 pub use settle::scroll_outcome::ScrollOutcome;
 pub use settle::scroll_settle::scroll_and_settle;

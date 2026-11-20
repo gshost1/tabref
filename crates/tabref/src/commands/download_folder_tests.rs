@@ -37,3 +37,16 @@ fn a_link_into_the_state_directory_is_within_it() {
     assert!(within(&dangling.join("x"), &root).is_err());
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_private_var_spelling_is_within_a_missing_profile_root() {
+    let relative = PathBuf::from(format!("tabref-download-folder-{}", std::process::id()))
+        .join("Library/Application Support/Google/Chrome");
+    let root = Path::new("/var/tmp").join(&relative);
+    let profile = Path::new("/private/var/tmp")
+        .join(&relative)
+        .join("Default");
+    assert!(!root.exists());
+    assert!(within(&profile, &root).unwrap());
+}

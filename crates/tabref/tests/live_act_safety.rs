@@ -12,9 +12,10 @@ mod common;
 use common::{Harness, harness, live, serve};
 
 const SHOP: &str = r#"<!doctype html><title>Shop</title>
-<table><tr><th>Name</th><th>Action</th></tr>
-<tr><td>Row 1</td><td>none</td></tr>
-<tr><td>Row 10</td><td><button onclick="document.getElementById('out').textContent='edited 10'">Edit</button></td></tr></table>
+<table><tr><th>Name</th><th>Stock</th><th>Action</th></tr>
+<tr><td>Row 1</td><td>0</td><td>none</td></tr>
+<tr><td>Row 10</td><td>3</td><td><button onclick="document.getElementById('out').textContent='edited 10'">Edit</button> <a href="/done">Preview</a></td></tr>
+<tr><td>Row 10</td><td>8</td><td><button onclick="document.getElementById('out').textContent='edited the other row'">Edit</button></td></tr></table>
 <section><article><h3>Widget A</h3><button onclick="document.getElementById('out').textContent='A added'">Add</button></article>
 <article><h3>Widget B</h3><p>Sold out</p></article>
 <article><h3>Widget C</h3><button onclick="document.getElementById('out').textContent='C added'">Add</button></article></section>
@@ -24,6 +25,24 @@ const SHOP: &str = r#"<!doctype html><title>Shop</title>
 
 const DANGER: &str = r#"<!doctype html><title>Danger</title><button>Delete everything</button>"#;
 const DONE: &str = "<!doctype html><title>Done</title><h1>Thank you</h1>";
+const TABLE: &str = r#"<!doctype html><title>Stock</title>
+<table><tr><th>Product</th><th>Variant</th><th>Price</th><th>Action</th></tr>
+<tr><td>Mug</td><td></td><td>9.50</td><td><button onclick="out.textContent='edited Mug'">Edit</button></td></tr>
+<tr><td>Cup</td><td>Mug</td><td>9.50</td><td><button onclick="out.textContent='edited Cup'">Edit</button></td></tr>
+<tr><td>Plate</td><td>12.50 <button onclick="out.textContent='edited Plate'">Edit</button></td></tr>
+</table><p id=out>Nothing</p>"#;
+
+const ROW_MARKUP: &str = r#"<!doctype html><title>Stock</title>
+<table><tr><th>Product</th><th>Variant</th><th>Price</th><th>Action</th></tr>
+<tr><td><input type=checkbox checked aria-label="Select Mug"></td><td>Mug</td><td><button disabled>Unavailable</button></td>
+    <td><button onclick="out.textContent='edited checked'">Edit</button></td></tr>
+<tr><td>Fields</td><td><input aria-label="Code" value="A ] | [ B"></td><td><select aria-label="Size"><option>S</option><option>M</option></select></td>
+    <td><button onclick="out.textContent='edited fields'">Edit</button></td></tr>
+<tr><td>Long</td><td><button aria-label="Long name for a row button that includes characters past the renderer limit and should match the complete accessibility name">Info</button></td>
+    <td><button onclick="out.textContent='edited long'">Edit</button></td></tr>
+<tr><td>Mug | 9.50</td><td><button onclick="out.textContent='edited one cell'">Edit</button></td></tr>
+<tr><td>Mug</td><td>9.50</td><td><button onclick="out.textContent='edited two cells'">Edit</button></td></tr>
+</table><p id=out>Nothing</p>"#;
 
 fn site() -> (Harness, String) {
     let port = serve(&[("/shop", SHOP), ("/danger", DANGER), ("/done", DONE)]);
@@ -82,6 +101,146 @@ fn a_short_ref_from_another_tab_names_that_tab_instead_of_acting_here() {
         again.stderr
     );
     assert!(again.stderr.contains("belongs to tab"), "{}", again.stderr);
+}
+
+#[test]
+fn a_do_step_can_use_a_row_copied_from_snap() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/shop")]);
+    let snap = tabref.ok(&["snap"]);
+    let row = snap
+        .stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("Row 10 | 3 | ["))
+        .unwrap_or_else(|| panic!("{}", snap.stdout));
+    let batch = format!(r#"click "Edit" in "{row}""#);
+    let edited = tabref.ok(&["do", &batch]);
+    assert!(edited.stdout.contains("edited 10"), "{}", edited.stdout);
+    let missing = tabref.run(&["do", r#"click "Edit" in "Row 10 | 0""#]);
+    assert!(
+        missing.stderr.starts_with("error ELEMENT_NOT_FOUND"),
+        "{}",
+        missing.stderr
+    );
+}
+
+#[test]
+fn copied_rows_skip_empty_cells_and_match_text_alongside_controls() {
+    if !live() {
+        return;
+    }
+    let port = serve(&[("/stock", TABLE)]);
+    let tabref = harness("row-scope");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/stock")]);
+    for (prefix, expected) in [
+        ("Mug | 9.50 | [", "edited Mug"),
+        ("Plate | 12.50 [", "edited Plate"),
+    ] {
+        let snap = tabref.ok(&["snap"]);
+        let row = snap
+            .stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("{}", snap.stdout));
+        let batch = format!(r#"click "Edit" in "{row}""#);
+        tabref.ok(&["do", &batch]);
+        let edited = tabref.ok(&["js", "document.getElementById('out').textContent"]);
+        assert_eq!(edited.stdout.trim(), expected);
+    }
+}
+
+#[test]
+fn copied_rows_keep_control_names_when_the_tokens_include_details() {
+    if !live() {
+        return;
+    }
+    let tabref = open_row_markup();
+    for (fragment, detail, expected) in [
+        (
+            "checkbox Select Mug (checked)",
+            "button Unavailable (disabled)]",
+            "edited checked",
+        ),
+        (
+            "options: S | M",
+            r#"textbox Code = "A ] | [ B"]"#,
+            "edited fields",
+        ),
+        (
+            "Long name for a row button",
+            "should match the co…]",
+            "edited long",
+        ),
+    ] {
+        let row = printed_row(&tabref, |line| line.contains(fragment));
+        assert!(row.contains(detail), "{row}");
+        click_copied_row(&tabref, &row, expected);
+    }
+}
+
+#[test]
+fn a_copied_row_with_a_stale_control_value_does_not_match() {
+    if !live() {
+        return;
+    }
+    let tabref = open_row_markup();
+    let row = printed_row(&tabref, |line| line.starts_with("Fields | "));
+    tabref.ok(&[
+        "js",
+        r#"document.querySelector('[aria-label="Code"]').value = 'a ] | [ B'"#,
+    ]);
+    let batch = format!(r#"click "Edit" in '{}'"#, row);
+    let stale = tabref.run(&["do", &batch]);
+    assert!(
+        stale.stderr.starts_with("error ELEMENT_NOT_FOUND"),
+        "{}{}",
+        stale.stdout,
+        stale.stderr
+    );
+    let updated = printed_row(&tabref, |line| line.starts_with("Fields | "));
+    assert!(updated.contains(r#"= "a ] | [ B""#), "{updated}");
+    click_copied_row(&tabref, &updated, "edited fields");
+}
+
+#[test]
+fn copying_rows_distinguishes_a_literal_pipe_from_a_cell_separator() {
+    if !live() {
+        return;
+    }
+    let tabref = open_row_markup();
+    let literal = printed_row(&tabref, |line| line.starts_with(r"Mug \| 9.50 | "));
+    let separator = printed_row(&tabref, |line| line.starts_with("Mug | 9.50 | "));
+    click_copied_row(&tabref, &literal, "edited one cell");
+    click_copied_row(&tabref, &separator, "edited two cells");
+}
+
+fn open_row_markup() -> common::Harness {
+    let port = serve(&[("/stock", ROW_MARKUP)]);
+    let tabref = harness("row-markup");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/stock")]);
+    tabref
+}
+
+fn printed_row(tabref: &common::Harness, matches: impl Fn(&str) -> bool) -> String {
+    let snap = tabref.ok(&["snap"]);
+    snap.stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| matches(line))
+        .unwrap_or_else(|| panic!("{}", snap.stdout))
+        .to_owned()
+}
+
+fn click_copied_row(tabref: &common::Harness, row: &str, expected: &str) {
+    let batch = format!(r#"click "Edit" in '{}'"#, row);
+    tabref.ok(&["do", &batch]);
+    let result = tabref.ok(&["js", "document.getElementById('out').textContent"]);
+    assert_eq!(result.stdout.trim(), expected);
 }
 
 #[test]

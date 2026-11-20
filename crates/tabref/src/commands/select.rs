@@ -19,9 +19,10 @@ pub(crate) fn run(session: &mut Session, target: &str, option: &str) -> Result<O
     full_report(session, acted)
 }
 
-/// Picks the `<select>` option whose label or value is `option` (ignoring
-/// case, or by a unique start of its label), reads the select's value back
-/// and reports the option before and after.
+/// Picks the `<select>` option `option` names in any form the view prints
+/// it (label, `label (value)` or value; then ignoring case, then by a
+/// unique start), reads the select's value back and reports the option
+/// before and after.
 pub(crate) fn act(
     session: &mut Session,
     target: ActTarget,

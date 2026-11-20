@@ -172,16 +172,118 @@ fn the_state_directory_is_refused_as_a_download_folder() {
     assert!(!inside.exists());
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
+fn a_missing_profile_is_refused_through_its_resolved_path() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site("downloads-profile-alias");
+    let outside = scratch("downloads-profile-alias");
+    let real_var = outside.0.canonicalize().unwrap().join("private/var");
+    std::fs::create_dir_all(&real_var).unwrap();
+    let var = outside.0.join("var");
+    std::os::unix::fs::symlink(&real_var, &var).unwrap();
+    let (_, relative) = chrome_profile();
+    let profile = real_var.join("home").join(relative).join("Default");
+    let output = open_with_profile_home(&tabref, &base, &var.join("home"), &profile);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let port = tabref.browser.port.to_string();
+    let saved = tabref.home.join(format!("download-dir-{port}"));
+    assert!(
+        !output.status.success()
+            && stderr.starts_with("error INVALID_ARGS: ")
+            && stderr.contains("profile directory")
+            && !real_var.join("home").exists()
+            && !saved.exists(),
+        "created profile: {}, saved setting: {}, stderr: {stderr}",
+        profile.exists(),
+        saved.exists(),
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn parent_components_are_refused_before_a_profile_path_is_created() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site("downloads-parent-components");
+    let outside = scratch("downloads-parent-components");
+    let home = outside.0.join("browser-home");
+    let (_, relative) = chrome_profile();
+    let profile_root = home.join(relative);
+    let parent = profile_root.parent().unwrap();
+    let profile_name = profile_root.file_name().unwrap();
+    std::fs::create_dir_all(parent).unwrap();
+    let alias = outside.0.join("alias-link");
+    std::os::unix::fs::symlink(parent, &alias).unwrap();
+    let saved = tabref
+        .home
+        .join(format!("download-dir-{}", tabref.browser.port));
+
+    for (start, missing) in [(parent, "nope"), (alias.as_path(), "x")] {
+        let dir = start
+            .join(missing)
+            .join("..")
+            .join(profile_name)
+            .join("Default");
+        let output = open_with_profile_home(&tabref, &base, &home, &dir);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.starts_with("error INVALID_ARGS: ")
+                && stderr.contains("'..' path component"),
+            "{}: {stderr}",
+            dir.display(),
+        );
+        assert!(!parent.join(missing).exists(), "created {missing}");
+        assert!(!profile_root.exists(), "created the profile root");
+        assert!(!saved.exists(), "saved the download folder");
+    }
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn a_browsers_own_profile_directory_is_refused_as_a_download_folder() {
     if !live() {
         return;
     }
     let (tabref, base) = site("downloads-profile");
     let outside = scratch("downloads-profile");
-    let config = outside.0.join("config");
-    let profile = config.join("google-chrome").join("Default");
-    let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
+    let root = outside.0.join("browser-home");
+    let (_, relative) = chrome_profile();
+    let profile = root.join(relative).join("Default");
+    let output = open_with_profile_home(&tabref, &base, &root, &profile);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("error INVALID_ARGS: ") && stderr.contains("profile directory"),
+        "{stderr}"
+    );
+    assert!(!output.status.success());
+    assert!(!root.exists());
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn chrome_profile() -> (&'static str, &'static str) {
+    #[cfg(target_os = "linux")]
+    let profile = ("XDG_CONFIG_HOME", "google-chrome");
+    #[cfg(target_os = "macos")]
+    let profile = ("HOME", "Library/Application Support/Google/Chrome");
+    #[cfg(target_os = "windows")]
+    let profile = ("LOCALAPPDATA", "Google/Chrome/User Data");
+    profile
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn open_with_profile_home(
+    tabref: &Harness,
+    base: &str,
+    home: &Path,
+    dir: &Path,
+) -> std::process::Output {
+    let (env, _) = chrome_profile();
+    Command::new(env!("CARGO_BIN_EXE_tabref"))
         .args([
             "--cdp",
             &tabref.browser.port.to_string(),
@@ -191,18 +293,12 @@ fn a_browsers_own_profile_directory_is_refused_as_a_download_folder() {
         .args([
             "open",
             "--download-dir",
-            profile.to_str().unwrap(),
+            dir.to_str().unwrap(),
             &format!("{base}/"),
         ])
         .env("TABREF_HOME", &tabref.home)
-        .env("XDG_CONFIG_HOME", &config)
+        .env(env, home)
         .env("TABREF_NO_DAEMON", "1")
         .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.starts_with("error INVALID_ARGS: ") && stderr.contains("profile directory"),
-        "{stderr}"
-    );
-    assert!(!config.exists());
+        .unwrap()
 }

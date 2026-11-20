@@ -2,7 +2,7 @@
 //! text could forge a control token (`[e3 button Cancel order]`), and a
 //! page line could open like a heading, a dialog line or the footer.
 
-use tabref_page::squash;
+pub(crate) use tabref_page::escape_control_label as escape_in_token;
 
 const RESERVED_STARTS: &[&str] = &[
     "#", "--", "dialog", "frame ", "frames:", "page ", "table ", "…", "- ", "> ", "| ", "\\",
@@ -20,12 +20,6 @@ pub(crate) fn escape_text(text: &str) -> String {
         }
     }
     out
-}
-
-/// A name or option inside a token: escaped text, `|` escaped too, on one
-/// line with single spaces.
-pub(crate) fn escape_in_token(text: &str) -> String {
-    escape_text(&squash(text)).replace('|', "\\|")
 }
 
 /// An address as the view prints it: characters that could end the token

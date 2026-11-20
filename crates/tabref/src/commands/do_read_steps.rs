@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tabref_cdp::{PageSession, navigate};
 use tabref_core::{AppError, Deadline};
-use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
+use tabref_page::{LoadWatch, LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
 
 use super::act_target::resolve_target;
 use super::action_report::dialog_lines;
@@ -15,8 +15,10 @@ use super::batch_step::BatchStep;
 use super::dialog_report::{error_with_dialogs, kept_page, navigation_dialogs};
 use super::download_lines::{download_json, download_line};
 use super::downloads;
+use super::find;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open::normalize_url;
+use super::open_settle::settle_after;
 use super::page_url::{resolve_url, short_url};
 use super::page_view::current_page_view;
 use super::step_done::StepDone;
@@ -24,11 +26,10 @@ use super::target_spec::TargetSpec;
 use super::wait::wait_for;
 use super::wait_condition::Condition;
 use crate::session::Session;
-use crate::view::find_matches::find_matches;
 use crate::view::node_line::quote_text;
 
 const READ_LIMIT: usize = 4_000;
-const FOUND_SHOWN: usize = 10;
+const FOUND_SHOWN: usize = 5;
 
 /// `open URL`: a path, `?query` or `./relative` address resolves against
 /// the current page. Waits for the page's load; a page still loading after
@@ -98,6 +99,7 @@ fn opened_line(
 ) -> Result<(String, Value), AppError> {
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
     downloads::enable_for_action(session, deadline)?;
+    let mut watch = LoadWatch::start(session.connection(), page, deadline).ok();
     let navigated = navigate(session.connection(), page, url, navigation);
     let dialogs = navigation_dialogs(session, Some(&page.target_id));
     let said: String = dialog_lines(&dialogs)
@@ -121,6 +123,8 @@ fn opened_line(
         }
         let grace = downloads::grace_after(&navigated);
         let started = downloads::after_action(session, page, None, deadline, grace);
+        let loaded = started.is_empty() && navigated.is_ok();
+        settle_after(session, watch.take(), loaded, deadline);
         if !started.is_empty() {
             let lines: Vec<String> = started.iter().map(download_line).collect();
             let downloads: Vec<Value> = started.iter().map(download_json).collect();
@@ -149,7 +153,9 @@ fn opened_line(
         }
         Ok((text, data))
     };
-    after().map_err(|error| error_with_dialogs(error, &dialogs))
+    let outcome = after().map_err(|error| error_with_dialogs(error, &dialogs));
+    settle_after(session, watch, false, deadline);
+    outcome
 }
 
 /// `expect text "Saved"`, `expect gone "Loading"`, `expect url ~saved=1`,
@@ -227,30 +233,38 @@ pub(crate) fn read_step(
     })
 }
 
-/// `find TEXT`: the page's lines that hold it, with the ref to act on.
+/// `find TEXT`: the first lines `tabref find` prints for it, with the ref
+/// to act on, the command that prints the rest, and the note on loading
+/// more when nothing matched.
 pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone, AppError> {
     let needle = joined(args);
     if needle.is_empty() {
         return Err(AppError::invalid_args("find needs the text to look for"));
     }
-    let captured = session.capture()?;
-    let matches = find_matches(&captured.tree, &needle, None);
+    let found = find::search(session, &needle, None, FOUND_SHOWN, true)?;
+    let note = found
+        .note
+        .as_ref()
+        .map_or_else(String::new, |note| format!("; {note}"));
     let mut text = format!(
-        "ok find {} ({} matches)",
+        "ok find {} ({} matches{note})",
         quote_text(&needle),
-        matches.len()
+        found.count
     );
-    for line in matches.iter().take(FOUND_SHOWN) {
+    for line in &found.lines {
         text.push_str("\n  ");
         text.push_str(line);
     }
-    if matches.len() > FOUND_SHOWN {
-        text.push_str(&format!("\n  +{} more", matches.len() - FOUND_SHOWN));
+    if found.count > found.lines.len() {
+        text.push_str(&format!(
+            "\n  +{} more: tabref find {}",
+            found.count - found.lines.len(),
+            quote_text(&needle)
+        ));
     }
-    Ok(StepDone {
-        text,
-        data: json!({ "action": "find", "matches": matches }),
-    })
+    let mut data = found.data;
+    data["action"] = json!("find");
+    Ok(StepDone { text, data })
 }
 
 /// `js "EXPRESSION"`, or `js` and the expression as written: its value as

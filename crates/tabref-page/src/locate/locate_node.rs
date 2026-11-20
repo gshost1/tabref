@@ -9,6 +9,7 @@ use super::located::Located;
 use super::locator::Locator;
 use super::name_match::{NAME_WORDS, RANKS, normalize, rank};
 use super::role_words::role_word;
+use super::row_scope::row_anchors;
 use super::scope_kind::ScopeKind;
 use crate::ElementToken;
 
@@ -38,10 +39,16 @@ pub fn locate(
     let scope_anchors = match &locator.scope {
         Some(scope) => {
             let found = anchors(&nodes, &normalize(scope));
+            let pasted_row = found.is_empty() && locator.scope_kind == ScopeKind::Within;
+            let found = if pasted_row {
+                row_anchors(&nodes, scope)
+            } else {
+                found
+            };
             if found.is_empty() {
                 return Err(no_scope(scope));
             }
-            Some(found)
+            Some((found, pasted_row))
         }
         None => None,
     };
@@ -49,8 +56,8 @@ pub fn locate(
     for tier in tiers(&nodes, (&actionable, &acting), locator, intent) {
         let tier = deepest(&nodes, &tier);
         let picked = match &scope_anchors {
-            Some(found) if locator.scope_kind == ScopeKind::Within => {
-                match near_anchors(&nodes, &tier, found, locator.nth) {
+            Some((found, pasted_row)) if locator.scope_kind == ScopeKind::Within => {
+                match near_anchors(&nodes, &tier, found, locator.nth, *pasted_row) {
                     Some(picked) => picked,
                     None => {
                         record_miss = true;
@@ -58,7 +65,7 @@ pub fn locate(
                     }
                 }
             }
-            Some(found) => {
+            Some((found, _)) => {
                 let after = locator.scope_kind == ScopeKind::After;
                 beside_anchors(&nodes, &tier, found, (after, locator.nth))
             }

@@ -2,7 +2,7 @@ pub(crate) type TextBlocks = Vec<(u64, BlockText)>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BlockText {
-    Lines(Vec<String>),
+    Readable(String),
     CrossOrigin,
     OverBudget,
 }

@@ -4,6 +4,7 @@ use tabref_page::{Block, OutlineInput, PageOutline, build_outline, build_outline
 
 use super::block_renderer::BlockRenderer;
 use super::block_titles::title_of;
+use super::bot_check::bot_check_view;
 use super::budget::fit;
 use super::main_content::{has_main, main_block, text_size};
 use super::node_line::quote_text;
@@ -68,9 +69,23 @@ pub(crate) fn page_view(
             line.text.push_str(&format!(" …({cut}: {command})"));
         }
     }
-    let lines: Vec<ViewLine> = lines.into_iter().skip(options.route.from - 1).collect();
+    let mut lines: Vec<ViewLine> = lines.into_iter().skip(options.route.from - 1).collect();
+    let mut left_out = (0usize, 0usize);
+    let after_to = options.route.to.and_then(|to| {
+        let past = lines.iter().position(|line| line.number > to)?;
+        let next = lines[past].number;
+        left_out = (
+            lines.len() - past,
+            lines[past..].iter().map(ViewLine::cost).sum(),
+        );
+        lines.truncate(past);
+        Some(next)
+    });
     let main = *scope == ViewScope::Page && has_main(&outline.body);
-    let (kept, report) = fit(lines, options, main);
+    let (kept, mut report) = fit(lines, options, main);
+    report.after_to = after_to;
+    report.lines_total += left_out.0;
+    report.chars_total += left_out.1;
     let mut text = header(subject, options);
     for line in &kept {
         text.push('\n');
@@ -88,7 +103,9 @@ pub(crate) fn page_view(
         options,
         unread_frames(subject.skipped_frames),
     ));
-    Ok(Outcome::new(text, data(subject, &kept, &report, &outline)))
+    let mut outcome = Outcome::new(text, data(subject, &kept, &report, &outline));
+    bot_check_view(subject.info, input.trees.first(), &mut outcome);
+    Ok(outcome)
 }
 
 fn header(subject: &ViewSubject<'_>, options: &ViewOptions) -> String {
@@ -125,6 +142,7 @@ fn data(
         "chars_total": report.chars_total,
         "frames_skipped": outline.frames.skipped(),
         "first_cut_line": report.budget_from,
+        "after_to": report.after_to,
     })
 }
 
@@ -136,3 +154,7 @@ fn no_section(wanted: &str) -> AppError {
 #[cfg(test)]
 #[path = "page_view_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "line_range_tests.rs"]
+mod line_range_tests;

@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use super::dom_tree::DomTree;
 use super::node_kind::NodeKind;
 
@@ -29,6 +31,51 @@ pub fn squash(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Maximum number of characters in a shortened control label, after escaping.
+pub const CONTROL_NAME_LIMIT: usize = 100;
+
+/// Maximum number of characters in a shortened control value, before quoting.
+pub const CONTROL_VALUE_LIMIT: usize = 80;
+
+/// Characters escaped for a single printed line. Quoted text also escapes
+/// quotes and backslashes.
+pub fn escape_line(text: &str, quoted: bool) -> String {
+    let mut line = String::with_capacity(text.len());
+    for character in text.chars().filter(|c| !is_bidirectional_control(*c)) {
+        match character {
+            '"' if quoted => line.push_str("\\\""),
+            '\\' if quoted => line.push_str("\\\\"),
+            '\n' => line.push_str("\\n"),
+            '\r' => line.push_str("\\r"),
+            '\t' => line.push_str("\\t"),
+            c if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') => {
+                let _ = write!(line, "\\u{:04x}", u32::from(c));
+            }
+            c => line.push(c),
+        }
+    }
+    line
+}
+
+fn is_bidirectional_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// A label as it appears inside a bracketed control token.
+pub fn escape_control_label(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in squash(text).chars() {
+        if matches!(character, '[' | ']' | '|') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
 const BOX_TAGS: &[&str] = &[
     "BR", "P", "DIV", "LI", "TD", "TH", "TR", "DT", "DD", "H1", "H2", "H3", "H4", "H5", "H6",
     "SECTION", "ARTICLE", "OPTION",
@@ -38,7 +85,7 @@ const BOX_TAGS: &[&str] = &[
 /// runs join as the page set them; a box of its own (a block, an inline
 /// block, a line break) is set off by spaces. Script and style text is left
 /// out.
-pub(crate) fn subtree_text(tree: &DomTree, index: usize) -> String {
+pub fn subtree_text(tree: &DomTree, index: usize) -> String {
     block_text(tree, index, &|_| false)
 }
 

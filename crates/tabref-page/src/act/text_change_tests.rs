@@ -45,6 +45,78 @@ fn a_long_rewrite_shows_both_lines_cut() {
 fn added_and_removed_lines_are_marked() {
     assert_eq!(TextChange::Added("Post".into()).to_string(), "+ Post");
     assert_eq!(TextChange::Removed("Old".into()).to_string(), "- Old");
-    let long = TextChange::Added("x".repeat(300)).to_string();
+    let long = TextChange::Added("x".repeat(500)).to_string();
     assert!(long.ends_with('…'));
+}
+
+#[test]
+fn an_added_message_of_a_few_hundred_characters_is_shown_whole() {
+    let times: Vec<String> = (8..20)
+        .flat_map(|hour| [format!("{hour}:15"), format!("{hour}:45")])
+        .collect();
+    let message = format!(
+        "Dr. Mora is already booked at 9:30 AM on Dec 29, 2026. Free times that day: {}.",
+        times.join(", ")
+    );
+    assert!(message.chars().count() > 200, "{message}");
+    assert_eq!(
+        TextChange::Added(message.clone()).to_string(),
+        format!("+ {message}")
+    );
+}
+
+#[test]
+fn a_cut_line_ends_after_a_whole_word() {
+    let line = "alpha beta gamma delta ".repeat(40);
+    let shown = TextChange::Added(line.trim().to_owned()).to_string();
+    assert!(shown.ends_with(" …"), "{shown}");
+    let kept = shown.trim_start_matches("+ ").trim_end_matches(" …");
+    assert!(line.starts_with(kept), "{shown}");
+    assert!(
+        ["alpha", "beta", "gamma", "delta"]
+            .iter()
+            .any(|word| kept.ends_with(word)),
+        "{shown}"
+    );
+    let removed = TextChange::Removed(line.trim().to_owned()).to_string();
+    assert!(removed.ends_with(" …"), "{removed}");
+}
+
+#[test]
+fn a_reorder_prints_its_first_rows_and_how_to_see_the_rest() {
+    let first: Vec<String> = (1..=12)
+        .map(|n| format!("Row {n} with some text"))
+        .collect();
+    let change = TextChange::Reordered {
+        above: None,
+        run: first,
+        table: true,
+    };
+    let shown = change.to_string();
+    let mut lines = shown.lines();
+    assert_eq!(lines.next(), Some("reordered 12 rows, now starting:"));
+    assert_eq!(lines.next(), Some("  Row 1 with some text"));
+    assert!(shown.ends_with("more: tabref snap)"), "{shown}");
+    assert!(shown.len() <= 450, "{}", shown.len());
+    assert_eq!(
+        change.brief(),
+        "reordered 12 rows, now starting: Row 1 with some text | Row 2 with some text | Row 3 with some text …"
+    );
+}
+
+#[test]
+fn a_reorder_names_the_line_above_it_and_says_lines_outside_a_table() {
+    let change = TextChange::Reordered {
+        above: Some("Shipments".into()),
+        run: vec!["Cap".into(), "Mug".into()],
+        table: false,
+    };
+    assert_eq!(
+        change.to_string(),
+        "reordered 2 lines below \"Shipments\", now starting:\n  Cap\n  Mug"
+    );
+    assert_eq!(
+        change.brief(),
+        "reordered 2 lines below \"Shipments\", now starting: Cap | Mug"
+    );
 }

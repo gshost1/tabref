@@ -1,6 +1,7 @@
 pub(crate) mod act_target;
 pub(crate) mod acted;
 pub(crate) mod action_report;
+mod action_report_changes;
 pub(crate) mod app_guard;
 pub(crate) mod batch_step;
 pub(crate) mod check;
@@ -22,6 +23,7 @@ pub(crate) mod download_wait;
 pub(crate) mod downloads;
 pub(crate) mod fill;
 pub(crate) mod find;
+pub(crate) mod find_room;
 pub(crate) mod focus;
 pub(crate) mod hover;
 pub(crate) mod js;
@@ -30,10 +32,12 @@ pub(crate) mod new_tab;
 pub(crate) mod open;
 
 pub(crate) mod open_request;
+pub(crate) mod open_settle;
 pub(crate) mod page_url;
 pub(crate) mod page_view;
 pub(crate) mod press;
 pub(crate) mod read;
+pub(crate) mod redrawn_rows;
 pub(crate) mod screenshot;
 pub(crate) mod screenshot_path;
 pub(crate) mod scroll;
@@ -195,6 +199,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             rows,
             full,
             from,
+            to,
         } => snap::run(
             session,
             &ViewRequest {
@@ -203,6 +208,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
                 root: root.clone(),
                 rows: rows.clone(),
                 from: *from,
+                to: *to,
                 section: None,
             },
         ),
@@ -225,12 +231,13 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             px,
         } => scroll::run(session, direction, target.as_deref(), *px),
         Command::Upload { target, files } => upload::run(session, target, files),
-        Command::Find { text, role } => find::run(session, text, role.as_deref()),
+        Command::Find { text, role } => find::run(session, &text.join(" "), role.as_deref()),
         Command::Read {
             target,
             section,
             rows,
             from,
+            to,
             ..
         } => read::run(
             session,
@@ -238,6 +245,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
                 root: target.clone(),
                 rows: rows.clone(),
                 from: *from,
+                to: *to,
                 section: section.clone(),
                 ..ViewRequest::default()
             },
