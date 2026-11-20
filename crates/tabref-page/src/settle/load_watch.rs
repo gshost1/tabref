@@ -3,7 +3,9 @@
 //! the new document that counts DOM mutations of the top document from
 //! `DOMContentLoaded` on, so mutations of the parse itself never count. It
 //! hangs off a registered symbol of `window`, which page scripts that list
-//! the window's keys never see, and is removed once read.
+//! the window's keys never see, and is removed once read. An abandoned
+//! observer that already ran before its registration was removed expires
+//! after the command's remaining time, so it cannot expire during settling.
 
 use std::time::Duration;
 
@@ -26,10 +28,15 @@ const LOAD_OBSERVER: &str = r"(() => {
   const state = { count: 0, last: 0 };
   window[key] = state;
   const start = () => {
-    if (state.observer) return;
+    if (window[key] !== state || state.observer) return;
     state.observer = new MutationObserver(records => { state.count += records.length; state.last = performance.now(); });
     state.observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
   };
+  state.timer = setTimeout(() => {
+    if (window[key] !== state) return;
+    state.observer?.disconnect();
+    delete window[key];
+  }, LIFETIME_MS);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
 })()";
@@ -62,7 +69,10 @@ const LOAD_STATUS: &str = r"(() => {
 const LOAD_STOP: &str = r"(() => {
   const key = Symbol.for('KEY');
   const state = window[key];
-  if (state && state.observer) state.observer.disconnect();
+  if (state) {
+    clearTimeout(state.timer);
+    state.observer?.disconnect();
+  }
   delete window[key];
   return true;
 })()";
@@ -104,7 +114,10 @@ impl LoadWatch {
         let id = Some(session.session_id.as_str());
         let quick = || deadline.capped(START_WAIT);
         connection.call("Page.enable", json!({}), id, quick())?;
-        let source = LOAD_OBSERVER.replace("KEY", WATCH_KEY);
+        let lifetime_ms = deadline.remaining().as_millis() + 1;
+        let source = LOAD_OBSERVER
+            .replace("KEY", WATCH_KEY)
+            .replace("LIFETIME_MS", &lifetime_ms.to_string());
         let script = match connection.call(
             "Page.addScriptToEvaluateOnNewDocument",
             json!({ "source": source }),
