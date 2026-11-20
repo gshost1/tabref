@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use super::dom_tree::DomTree;
 use super::node_kind::NodeKind;
 
@@ -31,6 +33,36 @@ pub fn squash(text: &str) -> String {
 
 /// Maximum number of characters in a shortened control label, after escaping.
 pub const CONTROL_NAME_LIMIT: usize = 100;
+
+/// Maximum number of characters in a shortened control value, before quoting.
+pub const CONTROL_VALUE_LIMIT: usize = 80;
+
+/// Characters escaped for a single printed line. Quoted text also escapes
+/// quotes and backslashes.
+pub fn escape_line(text: &str, quoted: bool) -> String {
+    let mut line = String::with_capacity(text.len());
+    for character in text.chars().filter(|c| !is_bidirectional_control(*c)) {
+        match character {
+            '"' if quoted => line.push_str("\\\""),
+            '\\' if quoted => line.push_str("\\\\"),
+            '\n' => line.push_str("\\n"),
+            '\r' => line.push_str("\\r"),
+            '\t' => line.push_str("\\t"),
+            c if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') => {
+                let _ = write!(line, "\\u{:04x}", u32::from(c));
+            }
+            c => line.push(c),
+        }
+    }
+    line
+}
+
+fn is_bidirectional_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
+}
 
 /// A label as it appears inside a bracketed control token.
 pub fn escape_control_label(text: &str) -> String {

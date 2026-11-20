@@ -5,7 +5,9 @@ use tabref_core::{AccessibilityNode, RefId, is_ref_able};
 use super::indexed_node::IndexedNode;
 use super::role_words::role_word;
 use crate::outline::control_build::is_printed_control_state;
-use crate::{CONTROL_NAME_LIMIT, cut_chars, escape_control_label, squash};
+use crate::{
+    CONTROL_NAME_LIMIT, CONTROL_VALUE_LIMIT, cut_chars, escape_control_label, escape_line, squash,
+};
 
 /// Fields start at the first visible cell. The view drops blank cells
 /// and joins the remaining cells with pipes. A copied ref is markup,
@@ -104,7 +106,8 @@ fn take_control(input: &str) -> Option<(&str, &str)> {
                 chars.next();
             }
             '"' if body[..index].ends_with(" = ") => {
-                skip = body.len() - after_quoted_value(&body[index + 1..])?.len();
+                let (_, tail) = split_quoted_value(&body[index + 1..])?;
+                skip = body.len() - tail.len();
             }
             ']' => break index,
             '[' => return None,
@@ -188,42 +191,45 @@ fn collect_controls<'a>(node: &'a AccessibilityNode, controls: &mut Vec<&'a Acce
 }
 
 fn label_matches(label: &str, node: &AccessibilityNode, name: &str) -> bool {
-    let label = squash(label).to_lowercase();
+    let label = squash(label);
     let name = escape_control_label(name);
     let short = cut_chars(&name, CONTROL_NAME_LIMIT).to_lowercase();
     let name = name.to_lowercase();
     let link = node.role == "link";
+    let value = node.identity.value.as_deref();
     let matches = |label: &str| {
-        matches_name(label, &name, link) || (short != name && matches_name(label, &short, link))
+        matches_name(label, &name, value, link)
+            || (short != name && matches_name(label, &short, value, link))
     };
     if link && matches(&label) {
         return true;
     }
     let (role, label) = label.split_once(' ').unwrap_or((&label, ""));
-    (role == node.role || role_word(role).is_some_and(|roles| roles.contains(&node.role.as_str())))
+    let role = role.to_lowercase();
+    (role == node.role || role_word(&role).is_some_and(|roles| roles.contains(&node.role.as_str())))
         && matches(label)
 }
 
-fn matches_name(label: &str, name: &str, link: bool) -> bool {
-    let Some(rest) = label.strip_prefix(name) else {
-        return false;
-    };
-    if rest.is_empty() {
-        return true;
+fn matches_name(mut rest: &str, name: &str, live_value: Option<&str>, link: bool) -> bool {
+    // Only fold the name and suffix keywords. Value text is case-sensitive.
+    for word in name.split_whitespace() {
+        let (printed, tail) = rest.split_once(' ').unwrap_or((rest, ""));
+        if printed.to_lowercase() != word {
+            return false;
+        }
+        rest = tail;
     }
-    let mut rest = if name.is_empty() {
-        rest
-    } else if let Some(rest) = rest.strip_prefix(' ') {
-        rest
-    } else {
-        return false;
-    };
     if let Some(value) = rest.strip_prefix("= \"") {
-        let Some(tail) = after_quoted_value(value) else {
+        let Some((printed, tail)) = split_quoted_value(value) else {
             return false;
         };
+        if !live_value.is_some_and(|value| value_matches(printed, value)) {
+            return false;
+        }
         rest = tail.trim_start();
     }
+    let rest = rest.to_lowercase();
+    let mut rest = rest.as_str();
     if rest.starts_with("options: ") {
         return true;
     }
@@ -239,16 +245,48 @@ fn matches_name(label: &str, name: &str, link: bool) -> bool {
     rest.is_empty() || (link && rest.starts_with("-> "))
 }
 
-fn after_quoted_value(value: &str) -> Option<&str> {
+fn value_matches(printed: &str, live: &str) -> bool {
+    // Table lines collapse spaces, and Chrome's AX value trims the edges.
+    let printed = printed.trim();
+    let matches = |value: &str| printed == squash(&escape_line(value, true));
+    matches(live) || (printed.ends_with('…') && matches(&cut_chars(live, CONTROL_VALUE_LIMIT)))
+}
+
+fn split_quoted_value(value: &str) -> Option<(&str, &str)> {
     let mut chars = value.char_indices();
     while let Some((index, ch)) = chars.next() {
         match ch {
             '\\' => {
                 chars.next();
             }
-            '"' => return Some(&value[index + 1..]),
+            '"' => return Some((&value[..index], &value[index + 1..])),
             _ => {}
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pasted_value_matches_the_escaped_full_or_shortened_value() {
+        let prefix = "x".repeat(CONTROL_VALUE_LIMIT - 5);
+        let value = format!("{prefix} \"\\\tcontinued");
+        assert!(matches_name(
+            &format!(r#"CODE = "{prefix} \"\\\tcontinued" (disabled)"#),
+            "code",
+            Some(&value),
+            false,
+        ));
+        assert!(matches_name(
+            &format!(r#"Code = "{prefix} \"\\\t…""#),
+            "code",
+            Some(&value),
+            false,
+        ));
+        assert!(!matches_name(r#"Code = "x""#, "code", None, false));
+        assert!(matches_name("Code", "code", Some(&value), false));
+    }
 }

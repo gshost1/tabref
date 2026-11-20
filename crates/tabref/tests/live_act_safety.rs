@@ -184,6 +184,30 @@ fn copied_rows_keep_control_names_when_the_tokens_include_details() {
 }
 
 #[test]
+fn a_copied_row_with_a_stale_control_value_does_not_match() {
+    if !live() {
+        return;
+    }
+    let tabref = open_row_markup();
+    let row = printed_row(&tabref, |line| line.starts_with("Fields | "));
+    tabref.ok(&[
+        "js",
+        r#"document.querySelector('[aria-label="Code"]').value = 'a ] | [ B'"#,
+    ]);
+    let batch = format!(r#"click "Edit" in '{}'"#, row);
+    let stale = tabref.run(&["do", &batch]);
+    assert!(
+        stale.stderr.starts_with("error ELEMENT_NOT_FOUND"),
+        "{}{}",
+        stale.stdout,
+        stale.stderr
+    );
+    let updated = printed_row(&tabref, |line| line.starts_with("Fields | "));
+    assert!(updated.contains(r#"= "a ] | [ B""#), "{updated}");
+    click_copied_row(&tabref, &updated, "edited fields");
+}
+
+#[test]
 fn copying_rows_distinguishes_a_literal_pipe_from_a_cell_separator() {
     if !live() {
         return;
