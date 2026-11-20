@@ -4,7 +4,6 @@ use super::cut_report::CutReport;
 use super::cut_stats::CutStats;
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
-use super::view_route::quoted_argument;
 
 /// The view's last line: its size, and when anything was left out, every
 /// kind of cut with the command that shows it: lines past the budget,
@@ -32,12 +31,13 @@ pub(crate) fn footer_line(
         more.push(route.starting_at(from, full));
     }
     if report.sections.count > 0 {
-        cut.push(format!("{} sections as headings", report.sections.count));
-        if let Some(heading) = &report.sections.first_heading {
-            more.push(format!(
-                "tabref read --section {}",
-                quoted_argument(heading)
+        if report.sections.listed < report.sections.count {
+            cut.push(format!(
+                "{} sections after it, {} listed",
+                report.sections.count, report.sections.listed
             ));
+        } else {
+            cut.push(format!("{} sections as headings", report.sections.count));
         }
     }
     if stats.rows_cut > 0 {

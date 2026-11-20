@@ -10,6 +10,12 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
   const root = doc.scrollingElement || doc.documentElement;
   const key = Symbol.for('tabref.scroll');
   const requests = Symbol.for('tabref.scroll-request-tracker');
+  const recordScroll = (target, dy) => {
+    if (!dy) return;
+    win[Symbol.for('tabref.last-vertical-scroll')] = {
+      target, height: target.scrollHeight, started: win.performance.now()
+    };
+  };
   const parent = node => node.parentElement || (node.getRootNode() || {}).host;
   const left = (el, dx, dy) => dy > 0 ? el.scrollHeight - el.clientHeight - el.scrollTop
     : dy < 0 ? el.scrollTop
@@ -32,6 +38,7 @@ pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews, requestMaxAge) {
   };
   const shift = (el) => {
     const before = [el.scrollLeft, el.scrollTop];
+    recordScroll(el, dy);
     if (el === root) win.scrollBy(dx, dy); else el.scrollBy(dx, dy);
     return el.scrollLeft !== before[0] || el.scrollTop !== before[1];
   };
@@ -141,6 +148,7 @@ pub(crate) const WATCH: &str = r"function() {
   if (containingRoot instanceof win.ShadowRoot) observe(containingRoot);
   observeRoots(el);
   const before = [el.scrollLeft, el.scrollTop];
+  recordScroll(el, dy);
   const started = win.Date.now() / 1000;
   if (el === root) win.scrollBy(dx, dy); else el.scrollBy(dx, dy);
   const moved = el.scrollLeft !== before[0] || el.scrollTop !== before[1];
