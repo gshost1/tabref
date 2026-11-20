@@ -1,0 +1,11 @@
+<!doctype html>
+<meta http-equiv="Content-Security-Policy" content="frame-src 'none'">
+<title>Sign in</title>
+<h1>Sign in</h1>
+<label>Username <input name="username"></label>
+<button onclick="sessionStorage.setItem('challenge', 'shown'); location.reload()">Submit</button>
+<iframe hidden title="reCAPTCHA challenge" width="400" height="320"
+  src="https://www.google.com/recaptcha/api2/bframe?k=fixture"></iframe>
+<script>
+  document.querySelector('iframe').hidden = sessionStorage.getItem('challenge') !== 'shown';
+</script>

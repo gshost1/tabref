@@ -38,8 +38,8 @@ pub(crate) fn outline_input(
     let page = session.page()?;
     let deadline = session.deadline();
     let tree = captured.map(|captured| &captured.tree);
-    let trees = match reused(captured, &page.target_id) {
-        Some(trees) => trees,
+    let trees = match captured.and_then(|captured| captured.main_dom(&page.target_id)) {
+        Some(trees) => trees.to_vec(),
         None => capture_dom(session.connection(), &page, deadline)?,
     };
     let viewport =
