@@ -10,6 +10,11 @@ use crate::transport::transport_error::{transport_failed, transport_timeout};
 
 const MIN_IO_SLICE: Duration = Duration::from_millis(1);
 
+pub(crate) fn connect_http(address: SocketAddr, deadline: Deadline) -> Result<TcpStream, AppError> {
+    TcpStream::connect_timeout(&address, slice(deadline)?)
+        .map_err(|error| endpoint_unreachable(address.port(), &error.to_string()))
+}
+
 /// Issues one `GET` to the loopback `address` and returns the body of its `200`
 /// response. The reader ends the read once Content-Length
 /// bytes of body arrive, because Chromium holds the connection open after
@@ -17,27 +22,13 @@ const MIN_IO_SLICE: Duration = Duration::from_millis(1);
 /// other HTTP status is kind `cdp_no_http_route`: a browser whose remote
 /// debugging was turned on at chrome://inspect answers `404` there, as its
 /// DevTools server speaks WebSocket only.
-pub(crate) fn http_get_loopback(
+pub(crate) fn http_get(
+    mut stream: TcpStream,
     address: SocketAddr,
     path: &str,
     deadline: Deadline,
-) -> Result<String, AppError> {
-    http_get_checked(address, path, deadline, &|| Ok(()))
-}
-
-/// [`http_get_loopback`], running `before_write` once the TCP connection is
-/// up and before the request is written; its error drops the connection
-/// with nothing sent.
-pub(crate) fn http_get_checked(
-    address: SocketAddr,
-    path: &str,
-    deadline: Deadline,
-    before_write: &dyn Fn() -> Result<(), AppError>,
 ) -> Result<String, AppError> {
     let port = address.port();
-    let mut stream = TcpStream::connect_timeout(&address, slice(deadline)?)
-        .map_err(|error| endpoint_unreachable(port, &error.to_string()))?;
-    before_write()?;
     stream
         .set_write_timeout(Some(slice(deadline)?))
         .map_err(|error| transport_failed("http", error.to_string()))?;
