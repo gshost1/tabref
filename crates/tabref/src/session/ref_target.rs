@@ -329,6 +329,13 @@ pub(crate) fn allocate_stable_refs(
     given
 }
 
+/// The id of `tab_id`'s latest snapshot, the one short refs name.
+pub(crate) fn latest_snapshot_of(store: &tabref_core::RefStore, tab_id: &str) -> Option<String> {
+    store
+        .read_state(&latest_name(tab_id))
+        .map(|id| id.trim().to_owned())
+}
+
 fn latest_name(tab_id: &str) -> String {
     let safe: String = tab_id
         .chars()

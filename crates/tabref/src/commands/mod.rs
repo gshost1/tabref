@@ -68,7 +68,14 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         return Ok(skill::run(topic.as_deref()));
     }
     let mut session = Session::open(&session_options(cli))?;
+    let reads = only_reads(&cli.command);
+    if !reads {
+        session.note_page_action();
+    }
     let outcome = dispatch_cli(&mut session, cli);
+    if !reads {
+        session.note_page_action();
+    }
     session.with_warning(outcome)
 }
 
@@ -81,6 +88,7 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
 /// part of the report took are added to it (or to its error), those from
 /// another tab marked so, and a result says when no dialog used the answer.
 pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, AppError> {
+    let started_headless_profile = session.take_headless_profile_launch();
     let outcome = dispatch(session, &cli.command);
     let unused = session.connection().take_dialog_choice();
     let left = dialog_report::navigation_dialogs(session, None);
@@ -90,6 +98,9 @@ pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, 
         Err(error) => return Err(dialog_report::error_with_dialogs(error, &left)),
     };
     dialog_report::after_report(&mut outcome, &left);
+    if started_headless_profile {
+        outcome.push_line("note: headless browser (add --headed to see it)");
+    }
     if let Some(unused) = unused {
         outcome.push_line(&unused_note(&unused));
         action_report::set(&mut outcome.data, "dialog_unused", serde_json::json!(true));
@@ -115,6 +126,18 @@ fn unused_note(choice: &tabref_cdp::DialogChoice) -> String {
     format!(
         "note: --dialog {given} was not used: no {wanted} opened during this command; one that \
          opens after it is accepted, and the next command reports it"
+    )
+}
+
+/// Whether `command` only reads the page (or navigates and reads it), so it
+/// may keep and reuse a capture in the daemon. Any other command may change
+/// a page in ways no page script sees, such as a hover: in the daemon it
+/// clears every kept capture, and in-process it stamps the ref store so the
+/// daemon's kept captures are not used again.
+pub(crate) fn only_reads(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Open { .. } | Command::Snap { .. } | Command::Find { .. } | Command::Read { .. }
     )
 }
 

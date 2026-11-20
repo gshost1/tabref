@@ -102,6 +102,7 @@ fn named_browser(spec: &str, deadline: Deadline) -> Result<ConnectedBrowser, App
         connection,
         warning,
         choice: None,
+        started_headless_profile: false,
     })
 }
 
@@ -152,6 +153,7 @@ fn launched_browser(
             connection,
             warning: None,
             choice: Some(format!("launched:{text}")),
+            started_headless_profile: false,
         })),
         Err(error) if browser_is_gone(&error, process_alive(record.pid)) => {
             forget_launched(store);
@@ -197,6 +199,7 @@ fn default_port(
             connection,
             warning: None,
             choice: None,
+            started_headless_profile: false,
         }),
     )
 }
@@ -249,22 +252,23 @@ fn start_browser(
         .profile_dir
         .as_deref()
         .and_then(|profile| running_on_profile(profile, !launch.headed));
-    let (endpoint, connection, text) = match running {
+    let (endpoint, connection, text, started_headless_profile) = match running {
         Some(adopted) => {
             check_active_port(&adopted, read_launch_active_port(&adopted))?;
             let endpoint = adopted.endpoint()?;
             let connection = connect(&endpoint, deadline)?;
-            (endpoint, connection, save_launched(store, &adopted)?)
+            (endpoint, connection, save_launched(store, &adopted)?, false)
         }
         None => {
             let started = launch_chrome(&launch, deadline)?;
             if let Err(error) = check_active_port(&started, read_launch_active_port(&started)) {
                 return Err(abandon(store, &started, error));
             }
+            let headless_profile = started.headless && launch.profile_dir.is_some();
             let text = save_launched(store, &started);
             match (text, started.endpoint()) {
                 (Ok(text), Ok(endpoint)) => match connect(&endpoint, deadline) {
-                    Ok(connection) => (endpoint, connection, text),
+                    Ok(connection) => (endpoint, connection, text, headless_profile),
                     Err(error) => return Err(abandon(store, &started, error)),
                 },
                 (Err(error), _) | (_, Err(error)) => return Err(abandon(store, &started, error)),
@@ -276,6 +280,7 @@ fn start_browser(
         connection,
         warning: None,
         choice: Some(format!("launched:{text}")),
+        started_headless_profile,
     })
 }
 
