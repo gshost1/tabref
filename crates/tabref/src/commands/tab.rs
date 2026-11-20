@@ -18,7 +18,7 @@ pub(crate) fn run(session: &mut Session, hint: &str) -> Result<Outcome, AppError
     session.use_tab(&tab)?;
     let captured = session.shared_capture()?;
     let mut report = page_report(&captured, ViewMode::Interactive);
-    let document = captured.main_dom(&tab).and_then(|trees| trees.first());
+    let document = captured.dom(&tab).and_then(|trees| trees.first());
     bot_check_view(&captured.info, document, &mut report);
     Ok(report)
 }

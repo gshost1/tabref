@@ -43,7 +43,7 @@ pub(crate) fn action_bot_check(
     let page = session.page().ok()?;
     if let Some(captured) = captured
         && let Some(document) = captured
-            .main_dom(&page.target_id)
+            .dom(&page.target_id)
             .and_then(|trees| trees.first())
     {
         return detect(&captured.info.title, document);

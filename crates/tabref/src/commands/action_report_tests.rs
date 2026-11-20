@@ -225,6 +225,24 @@ fn a_rewritten_line_that_does_not_fit_keeps_its_marker_intact() {
 }
 
 #[test]
+fn a_long_first_rewrite_shortens_its_context_and_keeps_its_count() {
+    let head = "𠮷".repeat(40);
+    let tail = "𩸽".repeat(40);
+    let before = "🟠".repeat(60);
+    let after = "🟣".repeat(60);
+    let rewrite = TextChange::Changed {
+        before: format!("{head} {before} {tail}"),
+        after: format!("{head} {after} {tail}"),
+    };
+    assert!(rewrite.to_string().len() > 600);
+    let shown = within_budget(&counted(&[rewrite.clone(), rewrite]));
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(shown[0].len() <= 600, "{}", shown[0]);
+    assert!(shown[0].contains(&format!("{{{before} -> {after}}}")));
+    assert!(shown[0].ends_with("… ×2"), "{}", shown[0]);
+}
+
+#[test]
 fn thousands_of_changes_keep_first_seen_order_under_a_time_bound() {
     let mut changes: Vec<_> = (0..12_000)
         .map(|index| TextChange::Added(format!("Item number {index:05}")))

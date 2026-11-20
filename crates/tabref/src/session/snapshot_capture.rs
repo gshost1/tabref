@@ -37,8 +37,11 @@ impl Session {
             ref_count,
             unreadable_frames: snapshot.unreadable_frames.len(),
             skipped_frames: snapshot.skipped_frames,
-            dom_captures: snapshot.dom_captures,
-            main_dom: Default::default(),
+            dom_captures: snapshot
+                .dom_captures
+                .into_iter()
+                .map(|(target, reply)| (target, reply.into()))
+                .collect(),
         });
         self.keep(&page, &captured, watch);
         Ok(captured)

@@ -60,7 +60,7 @@ pub(super) fn change_data(changes: &[CountedChange<'_>]) -> Value {
 }
 
 /// Show the text lines that fit the byte budget. A cut keeps the repeat
-/// count, and a rewritten line is shown whole or counted as omitted.
+/// count. The first rewrite can use less context to keep its edit intact.
 pub(super) fn within_budget(changes: &[CountedChange<'_>]) -> Vec<String> {
     let mut shown = preview(changes, CHANGE_BUDGET);
     if shown.len() < changes.len() {
@@ -101,6 +101,11 @@ fn preview(changes: &[CountedChange<'_>], mut room: usize) -> Vec<String> {
         }
         if room >= MIN_ROOM && !matches!(change.change, TextChange::Changed { .. }) {
             let text = cut_to_bytes(&text, room - suffix.len());
+            shown.push(format!("{text}{suffix}"));
+        } else if shown.is_empty()
+            && let Some(text) = change.change.compact_rewrite()
+            && text.len() + suffix.len() <= room
+        {
             shown.push(format!("{text}{suffix}"));
         }
         break;
