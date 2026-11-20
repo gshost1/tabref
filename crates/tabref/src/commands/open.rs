@@ -115,7 +115,7 @@ fn load(
             Err(error) if error.kind() == Some("cdp_load_timeout") => true,
             Err(error) => return Err(error),
         };
-        let captured = session.capture()?;
+        let captured = session.shared_capture()?;
         let options = ViewRequest::default().snap_options(&captured.info.url)?;
         let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
         if unfinished {
