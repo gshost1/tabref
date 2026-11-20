@@ -56,15 +56,12 @@ fn challenge_pages_keep_the_normal_view_and_refs() {
         assert!(view.stdout.contains("Log in"), "{}", view.stdout);
     }
     let view = tabref.ok(&["snap"]);
-    let button = view
-        .stdout
-        .split('[')
-        .find(|part| part.contains("button Log in"))
-        .unwrap();
-    let reference = button.split_whitespace().next().unwrap();
-    let scoped = tabref.ok(&["snap", "--root", reference]);
+    let scoped = tabref.ok(&["snap", "--root", reference(&view.stdout, "button Log in")]);
     assert_note(&scoped.stdout, "reCAPTCHA");
     assert!(scoped.stdout.contains("Log in"), "{}", scoped.stdout);
+    let field = tabref.ok(&["read", reference(&view.stdout, "textbox Username")]);
+    assert_note(&field.stdout, "reCAPTCHA");
+    assert!(field.stdout.contains("Username"), "{}", field.stdout);
 
     let opened = tabref.ok(&["open", &url("article")]);
     assert!(!opened.stdout.contains(NOTE), "{}", opened.stdout);
@@ -78,6 +75,13 @@ fn challenge_pages_keep_the_normal_view_and_refs() {
         page["ref_count"].as_u64().is_some_and(|count| count > 0),
         "{clicked}"
     );
+}
+
+fn reference<'a>(text: &'a str, control: &str) -> &'a str {
+    text.split('[')
+        .filter_map(|token| token.split_once(' '))
+        .find_map(|(reference, label)| label.starts_with(control).then_some(reference))
+        .unwrap_or_default()
 }
 
 fn assert_note(text: &str, provider: &str) {
