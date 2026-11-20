@@ -12,6 +12,7 @@ pub(crate) mod endpoint_choice;
 pub(crate) mod endpoint_refusal;
 pub(crate) mod focus_state;
 pub(crate) mod kept_session;
+pub(crate) mod launch_check;
 pub(crate) mod launch_profile;
 pub(crate) mod launch_record;
 pub(crate) mod reached_browser;
