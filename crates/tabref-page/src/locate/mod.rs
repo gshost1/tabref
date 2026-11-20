@@ -8,5 +8,6 @@ pub(crate) mod located;
 pub(crate) mod locator;
 pub(crate) mod name_match;
 pub(crate) mod role_words;
+mod row_scope;
 pub(crate) mod scope_kind;
 pub(crate) mod word;

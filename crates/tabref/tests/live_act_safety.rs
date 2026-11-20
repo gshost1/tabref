@@ -12,9 +12,10 @@ mod common;
 use common::{Harness, harness, live, serve};
 
 const SHOP: &str = r#"<!doctype html><title>Shop</title>
-<table><tr><th>Name</th><th>Action</th></tr>
-<tr><td>Row 1</td><td>none</td></tr>
-<tr><td>Row 10</td><td><button onclick="document.getElementById('out').textContent='edited 10'">Edit</button></td></tr></table>
+<table><tr><th>Name</th><th>Stock</th><th>Action</th></tr>
+<tr><td>Row 1</td><td>0</td><td>none</td></tr>
+<tr><td>Row 10</td><td>3</td><td><button onclick="document.getElementById('out').textContent='edited 10'">Edit</button> <a href="/done">Preview</a></td></tr>
+<tr><td>Row 10</td><td>8</td><td><button onclick="document.getElementById('out').textContent='edited the other row'">Edit</button></td></tr></table>
 <section><article><h3>Widget A</h3><button onclick="document.getElementById('out').textContent='A added'">Add</button></article>
 <article><h3>Widget B</h3><p>Sold out</p></article>
 <article><h3>Widget C</h3><button onclick="document.getElementById('out').textContent='C added'">Add</button></article></section>
@@ -24,6 +25,12 @@ const SHOP: &str = r#"<!doctype html><title>Shop</title>
 
 const DANGER: &str = r#"<!doctype html><title>Danger</title><button>Delete everything</button>"#;
 const DONE: &str = "<!doctype html><title>Done</title><h1>Thank you</h1>";
+const TABLE: &str = r#"<!doctype html><title>Stock</title>
+<table><tr><th>Product</th><th>Variant</th><th>Price</th><th>Action</th></tr>
+<tr><td>Mug</td><td></td><td>9.50</td><td><button onclick="out.textContent='edited Mug'">Edit</button></td></tr>
+<tr><td>Cup</td><td>Mug</td><td>9.50</td><td><button onclick="out.textContent='edited Cup'">Edit</button></td></tr>
+<tr><td>Plate</td><td>12.50 <button onclick="out.textContent='edited Plate'">Edit</button></td></tr>
+</table><p id=out>Nothing</p>"#;
 
 fn site() -> (Harness, String) {
     let port = serve(&[("/shop", SHOP), ("/danger", DANGER), ("/done", DONE)]);
@@ -82,6 +89,57 @@ fn a_short_ref_from_another_tab_names_that_tab_instead_of_acting_here() {
         again.stderr
     );
     assert!(again.stderr.contains("belongs to tab"), "{}", again.stderr);
+}
+
+#[test]
+fn a_do_step_can_use_a_row_copied_from_snap() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/shop")]);
+    let snap = tabref.ok(&["snap"]);
+    let row = snap
+        .stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("Row 10 | 3 | ["))
+        .unwrap_or_else(|| panic!("{}", snap.stdout));
+    let batch = format!(r#"click "Edit" in "{row}""#);
+    let edited = tabref.ok(&["do", &batch]);
+    assert!(edited.stdout.contains("edited 10"), "{}", edited.stdout);
+    let missing = tabref.run(&["do", r#"click "Edit" in "Row 10 | 0""#]);
+    assert!(
+        missing.stderr.starts_with("error ELEMENT_NOT_FOUND"),
+        "{}",
+        missing.stderr
+    );
+}
+
+#[test]
+fn copied_rows_skip_empty_cells_and_match_text_alongside_controls() {
+    if !live() {
+        return;
+    }
+    let port = serve(&[("/stock", TABLE)]);
+    let tabref = harness("row-scope");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/stock")]);
+    for (prefix, expected) in [
+        ("Mug | 9.50 | [", "edited Mug"),
+        ("Plate | 12.50 [", "edited Plate"),
+    ] {
+        let snap = tabref.ok(&["snap"]);
+        let row = snap
+            .stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("{}", snap.stdout));
+        let batch = format!(r#"click "Edit" in "{row}""#);
+        tabref.ok(&["do", &batch]);
+        let edited = tabref.ok(&["js", "document.getElementById('out').textContent"]);
+        assert_eq!(edited.stdout.trim(), expected);
+    }
 }
 
 #[test]
