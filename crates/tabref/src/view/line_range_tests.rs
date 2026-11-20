@@ -4,6 +4,7 @@ use tabref_page::PageInfo;
 
 use super::page_view;
 use super::tests::{Dom, input, snap};
+use crate::output::outcome::Outcome;
 use crate::view::view_options::ViewOptions;
 use crate::view::view_request::ViewRequest;
 use crate::view::view_route::ViewRoute;
@@ -14,7 +15,7 @@ fn render(
     dom: Dom,
     refs: HashMap<(String, i64), tabref_page::RefLabel>,
     options: &ViewOptions,
-) -> String {
+) -> Outcome {
     let info = PageInfo {
         url: "http://site.test/page".into(),
         title: "T".into(),
@@ -25,9 +26,7 @@ fn render(
         ref_count: 0,
         skipped_frames: &[],
     };
-    page_view(&subject, &input(dom, refs), options, &ViewScope::Page)
-        .unwrap()
-        .text
+    page_view(&subject, &input(dom, refs), options, &ViewScope::Page).unwrap()
 }
 
 fn paragraphs(count: usize) -> Dom {
@@ -48,7 +47,10 @@ fn range(from: usize, to: usize) -> ViewOptions {
 
 #[test]
 fn to_stops_the_view_after_that_line_and_says_how_to_go_on() {
-    let out = render(paragraphs(30), HashMap::new(), &range(1, 5));
+    let report = render(paragraphs(30), HashMap::new(), &range(1, 5));
+    assert!(report.data["first_cut_line"].is_null());
+    assert_eq!(report.data["after_to"], 6);
+    let out = report.text;
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 7, "{out}");
     assert_eq!(lines[1], "Paragraph number 001.");
@@ -62,7 +64,7 @@ fn to_stops_the_view_after_that_line_and_says_how_to_go_on() {
 
 #[test]
 fn from_and_to_print_the_lines_between_them_inclusive() {
-    let out = render(paragraphs(30), HashMap::new(), &range(11, 13));
+    let out = render(paragraphs(30), HashMap::new(), &range(11, 13)).text;
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(
         lines[1..4],
@@ -79,10 +81,31 @@ fn from_and_to_print_the_lines_between_them_inclusive() {
 #[test]
 fn to_at_or_past_the_last_line_leaves_nothing_out() {
     for to in [30, 500] {
-        let out = render(paragraphs(30), HashMap::new(), &range(1, to));
+        let report = render(paragraphs(30), HashMap::new(), &range(1, to));
+        assert!(report.data["after_to"].is_null());
+        let out = report.text;
         assert_eq!(out.lines().count(), 32, "{out}");
         assert!(out.ends_with("all shown"), "{out}");
     }
+}
+
+#[test]
+fn a_budget_cut_before_to_offers_one_continuation() {
+    let options = ViewOptions {
+        budget: 250,
+        ..range(1, 20)
+    };
+    let report = render(paragraphs(30), HashMap::new(), &options);
+    let from = report.data["first_cut_line"].as_u64().unwrap();
+    assert!(from <= 20, "{}", report.text);
+    assert_eq!(report.data["after_to"], 21);
+    let footer = report.text.lines().last().unwrap();
+    assert!(
+        footer.contains(&format!("tabref snap --from {from}")),
+        "{footer}"
+    );
+    assert!(footer.contains("lines 21- after --to"), "{footer}");
+    assert_eq!(footer.matches("--from").count(), 1, "{footer}");
 }
 
 #[test]

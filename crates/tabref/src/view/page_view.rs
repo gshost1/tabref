@@ -4,6 +4,7 @@ use tabref_page::{Block, OutlineInput, PageOutline, build_outline, build_outline
 
 use super::block_renderer::BlockRenderer;
 use super::block_titles::title_of;
+use super::bot_check::bot_check_view;
 use super::budget::fit;
 use super::main_content::{has_main, main_block, text_size};
 use super::node_line::quote_text;
@@ -102,7 +103,9 @@ pub(crate) fn page_view(
         options,
         unread_frames(subject.skipped_frames),
     ));
-    Ok(Outcome::new(text, data(subject, &kept, &report, &outline)))
+    let mut outcome = Outcome::new(text, data(subject, &kept, &report, &outline));
+    bot_check_view(subject.info, input.trees.first(), &mut outcome);
+    Ok(outcome)
 }
 
 fn header(subject: &ViewSubject<'_>, options: &ViewOptions) -> String {
@@ -138,7 +141,8 @@ fn data(
         "lines_shown": report.lines_shown,
         "chars_total": report.chars_total,
         "frames_skipped": outline.frames.skipped(),
-        "first_cut_line": report.budget_from.or(report.after_to),
+        "first_cut_line": report.budget_from,
+        "after_to": report.after_to,
     })
 }
 

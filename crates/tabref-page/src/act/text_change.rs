@@ -1,6 +1,7 @@
 use std::fmt;
 
 const CONTEXT_CHARS: usize = 40;
+const COMPACT_CONTEXT_CHARS: usize = 8;
 const LINE_CHARS: usize = 100;
 const ADDED_CHARS: usize = 400;
 const MIDDLE_CHARS: usize = 60;
@@ -23,6 +24,17 @@ impl TextChange {
             other => other.to_string(),
         }
     }
+
+    /// A rewritten line with less context, keeping the changed text and
+    /// its delimiters together in a smaller text preview.
+    pub fn compact_rewrite(&self) -> Option<String> {
+        match self {
+            Self::Changed { before, after } => {
+                Some(inline_change(before, after, COMPACT_CONTEXT_CHARS))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for TextChange {
@@ -32,14 +44,16 @@ impl fmt::Display for TextChange {
     /// to 100. A cut ends after a whole word.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Changed { before, after } => formatter.write_str(&inline_change(before, after)),
+            Self::Changed { before, after } => {
+                formatter.write_str(&inline_change(before, after, CONTEXT_CHARS))
+            }
             Self::Added(line) => write!(formatter, "+ {}", cut(line, ADDED_CHARS)),
             Self::Removed(line) => write!(formatter, "- {}", cut(line, LINE_CHARS)),
         }
     }
 }
 
-fn inline_change(before: &str, after: &str) -> String {
+fn inline_change(before: &str, after: &str, context_chars: usize) -> String {
     let old: Vec<&str> = before.split(' ').collect();
     let new: Vec<&str> = after.split(' ').collect();
     let prefix = old
@@ -67,7 +81,7 @@ fn inline_change(before: &str, after: &str) -> String {
     let mut line = String::new();
     let head = old[..prefix].join(" ");
     if !head.is_empty() {
-        line.push_str(&tail(&head, CONTEXT_CHARS));
+        line.push_str(&tail(&head, context_chars));
         line.push(' ');
     }
     line.push_str(&match (removed.is_empty(), added.is_empty()) {
@@ -79,7 +93,7 @@ fn inline_change(before: &str, after: &str) -> String {
     let rest = old[old.len() - suffix..].join(" ");
     if !rest.is_empty() {
         line.push(' ');
-        line.push_str(&cut(&rest, CONTEXT_CHARS));
+        line.push_str(&cut(&rest, context_chars));
     }
     line
 }

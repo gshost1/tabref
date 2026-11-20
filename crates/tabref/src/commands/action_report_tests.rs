@@ -3,7 +3,9 @@ use tabref_page::TextChange;
 
 use std::time::{Duration, Instant};
 
-use super::super::action_report_changes::{change_data, counted, step_change, within_budget};
+use super::super::action_report_changes::{
+    change_data, counted, reload_head, step_change, within_budget,
+};
 use super::{NOTHING_READ, NOTHING_SEEN, dialog_line, dialog_lines, nothing_seen};
 
 #[test]
@@ -145,6 +147,20 @@ fn a_repeated_line_says_how_many_times_it_showed() {
 }
 
 #[test]
+fn the_reload_preview_reports_only_counted_additions() {
+    let changes = [
+        TextChange::Removed("Old draft".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Try again".into()),
+    ];
+    assert_eq!(
+        reload_head(&counted(&changes)),
+        ["+ Required ×2", "+ Try again"]
+    );
+}
+
+#[test]
 fn lines_alike_only_in_their_shown_part_stay_apart() {
     let head = "word ".repeat(100);
     let changes = vec![
@@ -206,6 +222,24 @@ fn a_rewritten_line_that_does_not_fit_keeps_its_marker_intact() {
         within_budget(&counted(std::slice::from_ref(&rewrite))),
         vec![rewrite.to_string()]
     );
+}
+
+#[test]
+fn a_long_first_rewrite_shortens_its_context_and_keeps_its_count() {
+    let head = "𠮷".repeat(40);
+    let tail = "𩸽".repeat(40);
+    let before = "🟠".repeat(60);
+    let after = "🟣".repeat(60);
+    let rewrite = TextChange::Changed {
+        before: format!("{head} {before} {tail}"),
+        after: format!("{head} {after} {tail}"),
+    };
+    assert!(rewrite.to_string().len() > 600);
+    let shown = within_budget(&counted(&[rewrite.clone(), rewrite]));
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(shown[0].len() <= 600, "{}", shown[0]);
+    assert!(shown[0].contains(&format!("{{{before} -> {after}}}")));
+    assert!(shown[0].ends_with("… ×2"), "{}", shown[0]);
 }
 
 #[test]
