@@ -50,24 +50,25 @@ pub(crate) fn run(
 }
 
 /// [`run`]'s search, keeping `keep` match lines, for `tabref find` and
-/// the `find` step of `do`. With `tree_matches`, the JSON `matches` are
-/// the snapshot's matching lines, as `do --json` has always printed them.
+/// the `find` step of `do`. The step keeps every matching line in JSON
+/// and applies the display limit only to its text.
 pub(crate) fn search(
     session: &mut Session,
     text: &str,
     role: Option<&str>,
     keep: usize,
-    tree_matches: bool,
+    all_matches: bool,
 ) -> Result<Found, AppError> {
     let captured = session.current_capture()?;
     let url = captured.info.url.clone();
+    let cap = if all_matches { usize::MAX } else { keep };
     let mut found = if role.is_some() {
-        snapshot_find(&captured.tree, &url, text, role, keep)
+        snapshot_find(&captured.tree, &url, text, role, cap)
     } else {
         let input = outline_input(session, Some(&captured))?;
-        let (matches, total) = search_text(&input, text, keep);
+        let (matches, total) = search_text(&input, text, cap);
         if total == 0 {
-            snapshot_find(&captured.tree, &url, text, None, keep)
+            snapshot_find(&captured.tree, &url, text, None, cap)
         } else {
             let options = ViewOptions::snap(&url, false, RowWindow::default());
             let mut lines = find_lines(text, &matches, total, &options);
@@ -90,9 +91,7 @@ pub(crate) fn search(
             }
         }
     };
-    if tree_matches {
-        found.data["matches"] = json!(find_matches(&captured.tree, text, role));
-    }
+    found.lines.truncate(keep);
     if found.count == 0 {
         found.note = scroll_room(session).map(|room| room_note(&room));
         if let Some(note) = &found.note {

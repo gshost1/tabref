@@ -1,10 +1,7 @@
 //! What a `find` with no match adds when the page could show more by
-//! scrolling. It claims that only on evidence: the page fetched data
-//! after it loaded (a `fetch` or XHR resource entry) and the document, or
-//! a scroll box on it, has not reached its end. A static page, or one
-//! with nothing left to scroll, gets no note, since `find` already read
-//! all of it. A box is named by its last control whose name occurs once
-//! in it, which `scroll down T` can target.
+//! scrolling. The area last scrolled by tabref must still have room and
+//! have grown since the scroll or fetched data after it. A box is named
+//! by a control whose name is unique across the page.
 
 use serde_json::Value;
 use tabref_page::evaluate;
@@ -15,36 +12,49 @@ use crate::view::node_line::quote_text;
 const ITEM_CHARS: usize = 40;
 
 const ROOM_SCRIPT: &str = r#"(() => {
-  const loads = performance.getEntriesByType('resource')
-    .some((entry) => entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest');
-  if (!loads) return { loads: false };
+  const last = window[Symbol.for('tabref.last-vertical-scroll')];
+  if (!last?.target.isConnected) return { loads: false };
   const root = document.scrollingElement || document.documentElement;
-  const style = (node) => node ? getComputedStyle(node).overflowY : '';
-  const html = style(document.documentElement), body = style(document.body);
-  const locked = html === 'hidden' || html === 'clip' || (html === 'visible' && (body === 'hidden' || body === 'clip'));
-  const left = locked ? 0 : root.scrollHeight - root.clientHeight - root.scrollTop;
-  let best = null, area = 0, seen = 0;
-  for (const node of document.body ? document.body.getElementsByTagName('*') : []) {
-    if (++seen > 5000) break;
-    if (node.clientHeight < 40 || node.scrollHeight - node.clientHeight - node.scrollTop <= 2) continue;
-    const overflow = getComputedStyle(node).overflowY;
-    if (overflow !== 'auto' && overflow !== 'scroll') continue;
-    const size = node.clientHeight * node.clientWidth;
-    if (size > area) { best = node; area = size; }
-  }
-  const facts = { loads: true, page_left: Math.max(0, left), view: root.clientHeight };
-  if (!best) return facts;
+  const target = last.target;
+  const room = target.scrollHeight - target.clientHeight - target.scrollTop;
+  if (room <= 2) return { loads: false };
+  const dataRequest = entry => {
+    if (entry.startTime < last.started ||
+        (entry.initiatorType !== 'fetch' && entry.initiatorType !== 'xmlhttprequest')) return false;
+    try {
+      const url = new URL(entry.name, location.href);
+      return !/(?:^|[.\/-])(?:analytics|beacons?|collect|metrics|telemetry|tracking|doubleclick|posthog)(?:$|[.\/_-])/i
+        .test(url.hostname + url.pathname);
+    } catch { return false; }
+  };
+  const loads = performance.getEntriesByType('resource')
+    .some(dataRequest) || target.scrollHeight > last.height + 1;
+  if (!loads) return { loads: false };
+  const facts = { loads: true, page_left: target === root ? room : 0, view: root.clientHeight };
+  if (target === root) return facts;
   const nameOf = (node) => {
     const name = ((node.getAttribute('aria-label') || '').trim() || (node.innerText || '').trim());
     return name.includes('\n') ? '' : name;
   };
-  const controls = [...best.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[tabindex]')].slice(-500);
-  const names = controls.map(nameOf);
-  const counts = new Map();
-  for (const name of names) counts.set(name.toLowerCase(), (counts.get(name.toLowerCase()) || 0) + 1);
+  const selector = 'a[href],button,input,select,textarea,summary,[role],[tabindex]';
+  const names = [...target.querySelectorAll(selector)].slice(-50).map(nameOf).reverse();
+  const counts = new Map(names.filter(Boolean).map(name => [name.toLowerCase(), 0]));
   facts.list = '';
-  for (let index = names.length - 1; index >= 0 && index >= names.length - 50; index--) {
-    if (names[index] && counts.get(names[index].toLowerCase()) === 1) { facts.list = names[index]; break; }
+  let seen = 0;
+  const scan = tree => {
+    for (const node of tree.querySelectorAll('*')) {
+      if (++seen > 5000) return false;
+      if (node.matches(selector)) {
+        const name = nameOf(node).toLowerCase();
+        if (counts.has(name)) counts.set(name, counts.get(name) + 1);
+      }
+      if (node.shadowRoot && !scan(node.shadowRoot)) return false;
+      if (node.matches('iframe,frame') && (!node.contentDocument || !scan(node.contentDocument))) return false;
+    }
+    return true;
+  };
+  if (counts.size && scan(document)) {
+    facts.list = names.find(name => counts.get(name.toLowerCase()) === 1) || '';
   }
   return facts;
 })()"#;

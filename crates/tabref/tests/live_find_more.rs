@@ -36,7 +36,7 @@ BOX"#;
 
 const SPLIT: &str = r#"<!doctype html><title>Desk</title>
 <style>body{margin:0} #pad{height:calc(100vh - 170px)} #box{height:320px;overflow:auto} .card{height:48px}</style>
-<div id=pad>Desk</div>BOX"#;
+<div id=pad>Desk <button>Message 40</button></div>BOX"#;
 
 const BOX: &str = r#"<div id=box><div id=cards></div><div id=spin>More below</div></div>
 <script>
@@ -63,7 +63,11 @@ box.addEventListener('scroll', () => { if (box.scrollTop + box.clientHeight > bo
 const SHORT: &str = r#"<!doctype html><title>Note</title><h1>Note</h1><p>One short paragraph.</p>"#;
 
 const LONG: &str = r#"<!doctype html><title>Essay</title><style>p{height:60px}</style>
-<h1>Essay</h1>ROWS<footer>The end of the essay</footer>"#;
+<h1>Essay</h1>ROWS<footer>The end of the essay</footer>
+<script>
+window.analytics = new Promise(resolve => addEventListener('scroll',
+  () => fetch('/analytics').then(reply => reply.text()).then(resolve), {once: true}));
+</script>"#;
 
 fn site() -> (Harness, String) {
     let base = lazy_site(vec![
@@ -72,6 +76,7 @@ fn site() -> (Harness, String) {
         ("/desk", SPLIT.replace("BOX", BOX)),
         ("/note", SHORT.to_owned()),
         ("/essay", LONG.replace("ROWS", &rows("p", "Paragraph", 60))),
+        ("/analytics", "received".to_owned()),
     ]);
     (harness("find-more"), base)
 }
@@ -83,6 +88,14 @@ fn no_match_on_a_page_that_scrolls_further_names_the_scroll_loop() {
     }
     let (tabref, base) = site();
     open_loaded(&tabref, &format!("{base}/ledger"), "Entry 30");
+    let before = tabref.ok(&["find", "Entry 65"]);
+    assert!(
+        !before.stdout.contains("scrolls further"),
+        "{}",
+        before.stdout
+    );
+    tabref.ok(&["scroll", "down", "--px", "20000"]);
+    batch(&tabref, "expect text \"Entry 50\"\n");
     let run = tabref.ok(&["find", "Entry 65"]);
     let line = run.stdout.trim();
     assert!(line.starts_with("0 matches for \"Entry 65\""), "{line}");
@@ -112,22 +125,26 @@ fn no_match_in_a_list_that_scrolls_names_a_target_inside_it() {
     }
     let (tabref, base) = site();
     open_loaded(&tabref, &format!("{base}/inbox"), "Message 20");
-    let run = tabref.ok(&["find", "Message 40"]);
+    tabref.ok(&["scroll", "down", "Message 20", "--px", "20000"]);
+    batch(&tabref, "expect text \"Message 40\"\n");
+    let run = tabref.ok(&["find", "Message 55"]);
     let line = run.stdout.trim();
     assert!(
         line.contains("a list on the page scrolls further"),
         "{line}"
     );
-    assert!(line.contains("`scroll down \"Message 20\"`"), "{line}");
+    assert!(line.contains("`scroll down \"Message 40\"`"), "{line}");
     open_loaded(&tabref, &format!("{base}/desk"), "Message 20");
-    let desk = tabref.ok(&["find", "Message 40"]);
+    tabref.ok(&["scroll", "down", "Message 20", "--px", "20000"]);
+    batch(&tabref, "expect text \"Message 39\"\n");
+    let desk = tabref.ok(&["find", "Message 55"]);
     let line = desk.stdout.trim();
     assert!(
         line.contains("; a list on the page scrolls further"),
         "{line}"
     );
-    assert!(line.contains("`scroll down \"Message 20\"`"), "{line}");
-    let scrolled = tabref.ok(&["scroll", "down", "Message 20"]);
+    assert!(line.contains("`scroll down \"Message 39\"`"), "{line}");
+    let scrolled = tabref.ok(&["scroll", "down", "Message 39"]);
     assert!(
         scrolled.stdout.starts_with("scrolled down"),
         "{}",
@@ -147,6 +164,19 @@ fn no_match_where_nothing_scrolls_says_nothing_about_scrolling() {
     tabref.ok(&["open", &format!("{base}/essay")]);
     let top = tabref.ok(&["find", "Absent words"]);
     assert!(!top.stdout.contains("scroll"), "{}", top.stdout);
+    tabref.ok(&["scroll", "down"]);
+    assert!(
+        tabref
+            .ok(&["js", "window.analytics"])
+            .stdout
+            .contains("received")
+    );
+    let after_analytics = tabref.ok(&["find", "Absent words"]);
+    assert!(
+        !after_analytics.stdout.contains("scrolls further"),
+        "{}",
+        after_analytics.stdout
+    );
     tabref.ok(&["js", "window.scrollTo(0, document.body.scrollHeight)"]);
     let bottom = tabref.ok(&["find", "Absent words"]);
     assert!(!bottom.stdout.contains("scroll"), "{}", bottom.stdout);
@@ -190,6 +220,27 @@ fn find_in_a_batch_prints_the_lines_find_prints() {
         stepped.stdout.contains("more: tabref find \"Entry 4\""),
         "{}",
         stepped.stdout
+    );
+    let only_find = batch(&tabref, "find Entry 4\n");
+    assert!(
+        only_find.stdout.lines().count() <= 10,
+        "{}",
+        only_find.stdout
+    );
+    let json = tabref.ok(&["--json", "do", "find Entry 4"]).json();
+    let result = &json["data"]["steps"][0]["data"];
+    let matches = result["matches"].as_array().unwrap();
+    assert!(matches.len() > 5, "{json}");
+    assert_eq!(
+        result["count"].as_u64(),
+        Some(matches.len() as u64),
+        "{json}"
+    );
+    assert!(
+        matches
+            .iter()
+            .all(|line| line.as_str().is_some_and(|s| s.contains("-> /entry/"))),
+        "{json}"
     );
 }
 
