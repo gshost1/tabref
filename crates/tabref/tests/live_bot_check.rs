@@ -11,6 +11,7 @@ const HCAPTCHA: &str = include_str!("fixtures/bot_check/hcaptcha.html");
 const RECAPTCHA: &str = include_str!("fixtures/bot_check/recaptcha.html");
 const ARTICLE: &str = include_str!("fixtures/bot_check/article.html");
 const SUBMIT: &str = include_str!("fixtures/bot_check/submit.html");
+const RELOAD: &str = include_str!("fixtures/bot_check/reload.html");
 
 #[test]
 fn challenge_pages_keep_the_normal_view_and_refs() {
@@ -117,6 +118,35 @@ fn revealing_a_challenge_same_page_is_reported_by_click_and_do() {
         assert_eq!(click["data"]["bot_check_provider"], "reCAPTCHA", "{batch}");
         assert_eq!(click["data"]["navigated"], false, "{batch}");
     }
+}
+
+#[test]
+fn reloading_onto_a_challenge_reports_the_note_once() {
+    if !live() {
+        return;
+    }
+    let port = serve(&[("/reload", RELOAD)]);
+    let tabref = harness("reload-challenge");
+    let url = format!("http://127.0.0.1:{port}/reload");
+    let opened = tabref.ok(&["open", &url]);
+    assert!(!opened.stdout.contains(NOTE), "{}", opened.stdout);
+
+    let batch = tabref.ok(&["--json", "do", "click Submit"]).json();
+    let click = &batch["data"]["steps"][0];
+    assert_eq!(click["data"]["navigated"], true, "{batch}");
+    let page = &click["data"]["page"];
+    assert_eq!(page["url"], url, "{batch}");
+    assert_eq!(page["bot_check_provider"], "reCAPTCHA", "{batch}");
+    assert!(page["snapshot_id"].is_string(), "{batch}");
+    let text = click["text"].as_str().unwrap_or_default();
+    let expected = format!("{NOTE} (reCAPTCHA)");
+    assert_eq!(text.matches(NOTE).count(), 1, "{text}");
+    let mut lines = text.lines().skip_while(|line| *line != expected);
+    assert_eq!(lines.next(), Some(expected.as_str()), "{text}");
+    assert!(
+        lines.next().is_some_and(|line| line.starts_with("page ")),
+        "{text}"
+    );
 }
 
 fn reference<'a>(text: &'a str, control: &str) -> &'a str {

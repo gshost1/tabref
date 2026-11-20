@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
+use super::action_report_changes::{change_data, counted, reload_head, step_change, within_budget};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
@@ -14,7 +15,6 @@ use crate::view::bot_check::action_bot_check;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
 
-const CHANGE_BUDGET: usize = 600;
 const NOTHING_SEEN: &str = " (no visible change)";
 const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
 const NEW_SHOWN: usize = 8;
@@ -79,13 +79,11 @@ pub(crate) fn step_report(
         }
         if effects.settled.navigated {
             line.push_str(&format!(" {}", quote_text(&page.title)));
-        }
-        let leaves = effects.settled.navigated && effects.url_before != page.url;
-        if !leaves && let Some(first) = page.changes.first() {
-            line.push_str(&format!("; {first}"));
-            if page.changes.len() > 1 {
-                line.push_str(&format!(" (+{} more)", page.changes.len() - 1));
+            if effects.url_before == page.url {
+                line.push_str("; page reloaded");
             }
+        } else if let Some(change) = step_change(&page.changes) {
+            line.push_str(&format!("; {change}"));
         }
         if let Some(note) = text_check_note(page) {
             line.push_str(&format!("; {note}"));
@@ -138,14 +136,21 @@ fn effect_block(
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
-    let changes: Vec<String> = page.changes.iter().map(ToString::to_string).collect();
-    lines.extend(within_budget(&changes));
-    merge(&mut data, json!({ "changes": changes }));
+    let changes = counted(&page.changes);
+    if effects.settled.navigated {
+        lines.extend(reload_head(&changes));
+    } else {
+        lines.extend(within_budget(&changes));
+    }
+    merge(&mut data, change_data(&changes));
     lines.extend(text_check_note(page));
-    let captured = if effects.settled.navigated {
-        lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
-        None
-    } else if page.changed_anything() || effects.settled.same_document {
+    if effects.settled.navigated {
+        let report = current_page_view(session)?;
+        lines.push(report.text);
+        merge(&mut data, json!({ "page": report.data }));
+        return Ok((lines, data));
+    }
+    let captured = if page.changed_anything() || effects.settled.same_document {
         let captured = session.capture()?;
         let mut appeared = Vec::new();
         new_controls(&captured.tree, known, &mut appeared);
@@ -209,25 +214,6 @@ fn nothing_seen(acted: &Acted) -> Option<&'static str> {
     } else {
         NOTHING_SEEN
     })
-}
-
-fn within_budget(changes: &[String]) -> Vec<String> {
-    let mut used = 0;
-    let mut shown = Vec::new();
-    for change in changes {
-        if used + change.len() > CHANGE_BUDGET && !shown.is_empty() {
-            break;
-        }
-        used += change.len();
-        shown.push(change.clone());
-    }
-    if shown.len() < changes.len() {
-        shown.push(format!(
-            "+{} more: tabref snap",
-            changes.len() - shown.len()
-        ));
-    }
-    shown
 }
 
 fn new_controls(node: &AccessibilityNode, known: &HashSet<String>, found: &mut Vec<String>) {

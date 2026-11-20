@@ -7,10 +7,14 @@ use super::outline_input::OutlineInput;
 const SIBLINGS_LOOKED_AT: usize = 3;
 
 /// Whether the page hides the node at `index`: it or an ancestor has no
-/// layout or is not visible, or it sits in a closed `<details>` outside
-/// the `<summary>`.
+/// layout, its own `visibility` does not let it show, or it sits in a
+/// closed `<details>` outside the `<summary>`. `visibility` is inherited
+/// and a descendant may turn it back on (a docked pane inside a
+/// `visibility: hidden` layer that covers the page), so only the nearest
+/// rendered element's value counts, never an ancestor's.
 pub(crate) fn is_hidden_at(tree: &DomTree, index: usize) -> bool {
     let chain = tree.ancestors(index);
+    let mut visibility_read = false;
     for (position, ancestor) in chain.iter().enumerate() {
         let Some(node) = tree.node(*ancestor) else {
             continue;
@@ -20,8 +24,11 @@ pub(crate) fn is_hidden_at(tree: &DomTree, index: usize) -> bool {
         }
         let laid_out = node.layout.is_some() || node.display() == "contents";
         let element = matches!(node.kind, NodeKind::Element(_));
-        if element && node.layout.as_ref().is_some_and(|layout| !layout.visible) {
-            return true;
+        if let Some(layout) = node.layout.as_ref().filter(|_| element && !visibility_read) {
+            visibility_read = true;
+            if !layout.visible {
+                return true;
+            }
         }
         if !laid_out && (element || position == 0) && !has_laid_out_descendant(tree, *ancestor) {
             return true;
