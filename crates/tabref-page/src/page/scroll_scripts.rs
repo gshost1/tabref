@@ -22,6 +22,7 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
 
 pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews) {
   PRELUDE
+  WATCH_REQUESTS
   const scrolls = (el) => {
     if (!el || el.nodeType !== 1) return false;
     const style = win.getComputedStyle(el);
@@ -87,7 +88,6 @@ pub(crate) const WATCH: &str = r"function() {
   const state = win[key];
   if (!state || !state.planned) return null;
   state.planned = false;
-  WATCH_REQUESTS
   const el = state.target, dx = state.dx, dy = state.dy;
   Object.assign(state, { added: [], swapped: [], mutations: 0, extent: dy ? el.scrollHeight : el.scrollWidth });
   const observe = target => state.observer.observe(target, { subtree: true, childList: true, characterData: true });

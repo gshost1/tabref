@@ -25,6 +25,7 @@ pub(crate) struct SettleTracker {
     content_loaded: bool,
     same_document: bool,
     pending: HashSet<String>,
+    first_request: Option<Instant>,
     last_activity: Option<Instant>,
     scroll_requests: bool,
 }
@@ -38,6 +39,7 @@ impl SettleTracker {
             content_loaded: false,
             same_document: false,
             pending: HashSet::new(),
+            first_request: None,
             last_activity: None,
             scroll_requests: false,
         }
@@ -107,6 +109,7 @@ impl SettleTracker {
                 };
                 if tracked {
                     self.pending.insert(request_id(params));
+                    self.first_request.get_or_insert(now);
                     self.last_activity = Some(now);
                 }
             }
@@ -156,6 +159,10 @@ impl SettleTracker {
 
     pub(crate) fn saw_network(&self) -> bool {
         self.last_activity.is_some()
+    }
+
+    pub(crate) fn saw_request_by(&self, until: Instant) -> bool {
+        self.first_request.is_some_and(|at| at <= until)
     }
 }
 

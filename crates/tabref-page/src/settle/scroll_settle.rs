@@ -148,7 +148,7 @@ fn settle(
             return dom_quiet(connection, session, site, cap);
         }
         let waited = started.elapsed();
-        let grace = if at_end && tracker.saw_network() {
+        let grace = if at_end && tracker.saw_request_by(started + END_GRACE) {
             ACTIVE_END_GRACE
         } else if at_end {
             END_GRACE

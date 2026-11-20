@@ -82,10 +82,11 @@ fn evaluation_error(
     let text = exception["text"].as_str().unwrap_or_default();
     let in_promise = text.starts_with("Uncaught (in promise)")
         || (expression.contains("await")
-            && exception
-                .pointer("/exception/className")
-                .and_then(Value::as_str)
-                != Some("SyntaxError")
+            && (exception.get("stackTrace").is_some()
+                || exception
+                    .pointer("/exception/className")
+                    .and_then(Value::as_str)
+                    != Some("SyntaxError"))
             && requires_top_level_await(connection, session_id, expression, deadline));
     if in_promise {
         rejected(exception)
