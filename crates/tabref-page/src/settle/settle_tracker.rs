@@ -112,6 +112,9 @@ impl SettleTracker {
                 }
             }
             "Network.requestWillBeSent" => {
+                let id = request_id(params);
+                self.bodies.remove(&id);
+                self.arrived.remove(&id);
                 let kind = params.get("type").and_then(Value::as_str);
                 let tracked = if let Some(started) = self.scroll_started {
                     let sent = params["wallTime"].as_f64();
@@ -131,7 +134,7 @@ impl SettleTracker {
                     kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params)
                 };
                 if tracked {
-                    self.pending.insert(request_id(params));
+                    self.pending.insert(id);
                     self.last_activity = Some(now);
                 }
             }

@@ -281,6 +281,25 @@ fn a_request_still_in_flight_holds_the_settle_past_another_ones_grace() {
 }
 
 #[test]
+fn a_reused_request_id_does_not_inherit_partial_or_complete_body_bytes() {
+    let now = Instant::now();
+    for received in [11, 12] {
+        let mut tracker = SettleTracker::new("F");
+        fetch_answered(&mut tracker, now, 200, json!({ "Content-Length": "12" }));
+        data(&mut tracker, now, received);
+
+        let reused = now + Duration::from_millis(1);
+        fetch_answered(&mut tracker, reused, 200, json!({}));
+        data(&mut tracker, reused, 1);
+        assert_eq!(
+            tracker.next_wait(reused + BODY_GRACE, QUIET),
+            SettleWait::Network,
+            "previous request received {received} bytes"
+        );
+    }
+}
+
+#[test]
 fn a_response_with_no_body_stops_holding_the_settle_when_it_arrives() {
     let now = Instant::now();
     for (status, headers) in [
