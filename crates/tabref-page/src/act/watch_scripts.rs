@@ -39,8 +39,8 @@ pub(crate) const SCAN: &str = r"const scan = () => {
     let room = LIMIT;
     const add = (owner, part) => {
       if (!state.ids.has(owner)) state.ids.set(owner, state.nextId++);
-      if (part !== null && part.length > room) part = null;
-      if (part !== null) room -= part.length;
+      if (typeof part === 'string' && part.length > room) part = null;
+      if (typeof part === 'string') room -= part.length;
       blocks.push([state.ids.get(owner), part]);
     };
     for (const root of roots) {
@@ -56,7 +56,7 @@ pub(crate) const SCAN: &str = r"const scan = () => {
       }
       add(root, left < 0 ? null : lines.join('\n'));
     }
-    for (const [frame, doc] of docs) add(frame, doc ? (doc.body ? doc.body.innerText : '') : null);
+    for (const [frame, doc] of docs) add(frame, doc ? (doc.body ? doc.body.innerText : '') : false);
     return blocks;
   };
   return { roots, docs, unread, text };

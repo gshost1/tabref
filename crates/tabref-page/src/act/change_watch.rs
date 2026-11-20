@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
 use super::page_changes::PageChanges;
-use super::page_mark::{PageMark, TextBlocks};
+use super::page_mark::{BlockText, PageMark, TextBlocks};
 use super::text_change::TextChange;
 use super::text_diff::{diff_lines, text_lines};
 use super::watch_scripts::{COUNT_WATCH, READ_WATCH, SCAN, START_WATCH};
@@ -61,7 +61,14 @@ fn text_blocks(reply: &Value) -> TextBlocks {
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|block| Some((block[0].as_u64()?, block[1].as_str().map(text_lines))))
+        .filter_map(|block| {
+            let text = match &block[1] {
+                Value::String(text) => BlockText::Lines(text_lines(text)),
+                Value::Bool(false) => BlockText::CrossOrigin,
+                _ => BlockText::OverBudget,
+            };
+            Some((block[0].as_u64()?, text))
+        })
         .collect()
 }
 
@@ -72,18 +79,28 @@ fn compare_blocks(before: &TextBlocks, after: TextBlocks) -> (Vec<TextChange>, u
     let unchecked: HashSet<u64> = before
         .iter()
         .chain(&after)
-        .filter_map(|(id, lines)| lines.is_none().then_some(*id))
+        .filter_map(|(id, text)| (!matches!(text, BlockText::Lines(_))).then_some(*id))
+        .collect();
+    let over_budget: HashSet<u64> = before
+        .iter()
+        .chain(&after)
+        .filter_map(|(id, text)| matches!(text, BlockText::OverBudget).then_some(*id))
         .collect();
     let readable_lines = |blocks: &TextBlocks| {
         blocks
             .iter()
             .filter(|(id, _)| !unchecked.contains(id))
-            .flat_map(|(_, lines)| lines.iter().flatten().cloned())
+            .filter_map(|(_, text)| match text {
+                BlockText::Lines(lines) => Some(lines),
+                _ => None,
+            })
+            .flatten()
+            .cloned()
             .collect::<Vec<_>>()
     };
     (
         diff_lines(&readable_lines(before), &readable_lines(&after)),
-        unchecked.len(),
+        over_budget.len(),
     )
 }
 

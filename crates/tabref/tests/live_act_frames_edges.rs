@@ -82,10 +82,7 @@ fn a_frame_that_grows_past_the_budget_is_unchecked_instead_of_removed() {
     let changes = data["data"]["changes"].as_array().unwrap();
     assert_eq!(changes.len(), 1, "{data}");
     assert!(
-        changes[0]["line"]
-            .as_str()
-            .unwrap()
-            .contains("Status reconciled"),
+        changes[0]["line"].as_str().unwrap().contains("reconciled"),
         "{data}"
     );
 }

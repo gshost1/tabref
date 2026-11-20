@@ -163,8 +163,7 @@ fn text_check_data(page: &tabref_page::PageChanges) -> Value {
 
 fn text_check_note(page: &tabref_page::PageChanges) -> Option<String> {
     let count = page.unchecked_text_blocks;
-    (count > 0 && u64::try_from(count).ok() != Some(page.unread_frames))
-        .then(|| format!("Text blocks not checked: {count}"))
+    (count > 0).then(|| format!("Text blocks over budget and not checked: {count}"))
 }
 
 /// Reports no visible change after a click, key press, hover or focus when
