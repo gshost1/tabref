@@ -1,22 +1,29 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use super::response_bytes::{ReplyBody, ResponseBytes};
 use super::settle_wait::SettleWait;
 use crate::CdpEvent;
 
 const TRACKED_REQUESTS: &[&str] = &["Document", "XHR", "Fetch"];
 
+/// How long a request whose promised bytes have all arrived still holds the
+/// settle when Chrome has not reported it finished. Chrome withholds
+/// `loadingFinished` for a `no-store` reply until the page reads the body,
+/// and a page that reads at once gets it within a millisecond of the last
+/// byte, so the grace only runs out for a body read late or never; a page
+/// that reads within it is reported after it renders.
+pub(crate) const BODY_GRACE: Duration = Duration::from_millis(200);
+
 /// The page events seen since an action, folded into what is still
 /// outstanding: a main-frame navigation that has not committed or reached
 /// `DOMContentLoaded`, and document, XHR and fetch requests that a document
-/// of this page sent to its own site and that are still in flight (a
-/// same-site iframe's save counts). Requests to other sites (ads,
-/// analytics), and those from documents with no site of their own such as
-/// `about:blank` ad slots, never hold the settle: they can run for seconds
-/// and say nothing about what the action changed. A navigation's document
-/// request always counts.
+/// of this page sent to its own site and that are still in flight. A
+/// navigation's document request always counts. Scroll settling tracks XHR
+/// and fetch requests from any origin. When all the promised response bytes
+/// arrive, the request gets a bounded grace period to finish and render.
 #[derive(Debug)]
 pub(crate) struct SettleTracker {
     main_frame: String,
@@ -25,7 +32,11 @@ pub(crate) struct SettleTracker {
     content_loaded: bool,
     same_document: bool,
     pending: HashSet<String>,
+    bodies: HashMap<String, ResponseBytes>,
+    arrived: HashMap<String, Instant>,
+    first_scroll_request: Option<f64>,
     last_activity: Option<Instant>,
+    scroll_started: Option<f64>,
 }
 
 impl SettleTracker {
@@ -37,7 +48,19 @@ impl SettleTracker {
             content_loaded: false,
             same_document: false,
             pending: HashSet::new(),
+            bodies: HashMap::new(),
+            arrived: HashMap::new(),
+            first_scroll_request: None,
             last_activity: None,
+            scroll_started: None,
+        }
+    }
+
+    /// Scroll loaders can fetch from an API on a different origin.
+    pub(crate) fn for_scroll(browser_started: f64) -> Self {
+        Self {
+            scroll_started: Some(browser_started),
+            ..Self::new("")
         }
     }
 
@@ -89,9 +112,29 @@ impl SettleTracker {
                 }
             }
             "Network.requestWillBeSent" => {
+                let id = request_id(params);
+                self.bodies.remove(&id);
+                self.arrived.remove(&id);
                 let kind = params.get("type").and_then(Value::as_str);
-                if kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params) {
-                    self.pending.insert(request_id(params));
+                let tracked = if let Some(started) = self.scroll_started {
+                    let sent = params["wallTime"].as_f64();
+                    let Some(sent) = sent.filter(|at| *at >= started) else {
+                        return;
+                    };
+                    if !matches!(kind, Some("XHR" | "Fetch")) {
+                        return;
+                    }
+                    let elapsed = sent - started;
+                    self.first_scroll_request = Some(
+                        self.first_scroll_request
+                            .map_or(elapsed, |first| first.min(elapsed)),
+                    );
+                    true
+                } else {
+                    kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params)
+                };
+                if tracked {
+                    self.pending.insert(id);
                     self.last_activity = Some(now);
                 }
             }
@@ -103,23 +146,64 @@ impl SettleTracker {
                     self.navigating = false;
                 }
             }
-            "Network.loadingFinished" | "Network.loadingFailed" => {
-                if self.pending.remove(&request_id(params)) {
+            "Network.responseReceived" => {
+                let id = request_id(params);
+                if self.pending.contains(&id) {
+                    match ReplyBody::of(params) {
+                        ReplyBody::Empty => self.finish(&id, now),
+                        ReplyBody::Counted(bytes) => {
+                            self.bodies.insert(id, bytes);
+                        }
+                        ReplyBody::Unknown => {}
+                    }
+                }
+            }
+            "Network.dataReceived" => {
+                let id = request_id(params);
+                if self
+                    .bodies
+                    .get_mut(&id)
+                    .is_some_and(|bytes| bytes.add(params))
+                {
+                    self.bodies.remove(&id);
+                    self.arrived.insert(id, now);
                     self.last_activity = Some(now);
                 }
+            }
+            "Network.loadingFinished" | "Network.loadingFailed" => {
+                self.finish(&request_id(params), now);
             }
             _ => {}
         }
     }
 
+    fn finish(&mut self, id: &str, now: Instant) {
+        self.bodies.remove(id);
+        self.arrived.remove(id);
+        if self.pending.remove(id) {
+            self.last_activity = Some(now);
+        }
+    }
+
     /// What is still outstanding at `now`: a navigation, requests in
-    /// flight, or the quiet window after the last request.
+    /// flight, the grace of requests whose bytes have all arrived, or the
+    /// quiet window after the last request.
     pub(crate) fn next_wait(&self, now: Instant, quiet: Duration) -> SettleWait {
         if self.navigating && !(self.committed && self.content_loaded) {
             return SettleWait::Navigation;
         }
-        if !self.pending.is_empty() {
-            return SettleWait::Network;
+        let mut grace_ends: Option<Instant> = None;
+        for id in &self.pending {
+            let Some(at) = self.arrived.get(id) else {
+                return SettleWait::Network;
+            };
+            let ends = *at + BODY_GRACE;
+            if now < ends {
+                grace_ends = Some(grace_ends.map_or(ends, |other| other.max(ends)));
+            }
+        }
+        if let Some(ends) = grace_ends {
+            return SettleWait::QuietUntil(ends);
         }
         match self.last_activity {
             Some(at) if now < at + quiet => SettleWait::QuietUntil(at + quiet),
@@ -141,6 +225,11 @@ impl SettleTracker {
 
     pub(crate) fn saw_network(&self) -> bool {
         self.last_activity.is_some()
+    }
+
+    pub(crate) fn saw_scroll_request_within(&self, grace: Duration) -> bool {
+        self.first_scroll_request
+            .is_some_and(|elapsed| elapsed <= grace.as_secs_f64())
     }
 }
 
