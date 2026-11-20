@@ -5,7 +5,7 @@
 //! hangs off a registered symbol of `window`, which page scripts that list
 //! the window's keys never see, and is removed once read. An abandoned
 //! observer that already ran before its registration was removed expires
-//! two seconds after load, past the longest render wait.
+//! after the command's remaining time, so it cannot expire during settling.
 
 use std::time::Duration;
 
@@ -32,16 +32,11 @@ const LOAD_OBSERVER: &str = r"(() => {
     state.observer = new MutationObserver(records => { state.count += records.length; state.last = performance.now(); });
     state.observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
   };
-  const expire = () => {
+  state.timer = setTimeout(() => {
     if (window[key] !== state) return;
-    state.timer = setTimeout(() => {
-      if (window[key] !== state) return;
-      state.observer?.disconnect();
-      delete window[key];
-    }, 2000);
-  };
-  if (document.readyState === 'complete') expire();
-  else window.addEventListener('load', expire, { once: true });
+    state.observer?.disconnect();
+    delete window[key];
+  }, LIFETIME_MS);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
 })()";
@@ -119,7 +114,10 @@ impl LoadWatch {
         let id = Some(session.session_id.as_str());
         let quick = || deadline.capped(START_WAIT);
         connection.call("Page.enable", json!({}), id, quick())?;
-        let source = LOAD_OBSERVER.replace("KEY", WATCH_KEY);
+        let lifetime_ms = deadline.remaining().as_millis() + 1;
+        let source = LOAD_OBSERVER
+            .replace("KEY", WATCH_KEY)
+            .replace("LIFETIME_MS", &lifetime_ms.to_string());
         let script = match connection.call(
             "Page.addScriptToEvaluateOnNewDocument",
             json!({ "source": source }),

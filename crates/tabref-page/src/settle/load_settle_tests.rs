@@ -7,6 +7,7 @@ use crate::act::act_fixture::{deadline, session};
 use crate::settle::load_watch::{LoadWatch, parse_status};
 use crate::{CdpConnection, CdpEvent};
 use tabref_cdp::{ScriptedTransport, is_timeout};
+use tabref_core::Deadline;
 
 fn status(since: Option<f64>, empty: bool) -> Value {
     json!({ "result": { "result": { "type": "object", "value": {
@@ -103,6 +104,31 @@ fn a_script_registered_after_the_start_timed_out_is_removed() {
     assert_eq!(requests.len(), 4, "{requests:?}");
     assert_eq!(requests[3]["params"]["identifier"], "late");
     assert_eq!(requests[3]["sessionId"], "S");
+}
+
+#[test]
+fn the_observer_outlives_the_command_budget_even_if_load_has_already_fired() {
+    let transport = ScriptedTransport::new()
+        .expect("Page.enable", json!({}))
+        .expect(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({"identifier": "1"}),
+        )
+        .expect("Network.enable", json!({}));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+    let deadline = Deadline::after(8_000).unwrap();
+    LoadWatch::start(&mut connection, &session(), deadline).unwrap();
+    let requests = sent.lock().unwrap();
+    let source = requests[1]["params"]["source"].as_str().unwrap();
+    assert!(!source.contains("addEventListener('load'"), "{source}");
+    let delay: u64 = source
+        .split_once("}, ")
+        .and_then(|(_, rest)| rest.split_once(");"))
+        .and_then(|(delay, _)| delay.parse().ok())
+        .unwrap();
+    assert!(delay > deadline.remaining_ms(), "{delay}");
+    assert!(delay <= deadline.timeout_ms() + 1, "{delay}");
 }
 
 #[test]
