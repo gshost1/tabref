@@ -39,12 +39,13 @@ const NONE: &str = r##"<!doctype html><html><head><title>None</title></head><bod
 <a href="#" id="pick">select files…</a></body></html>"##;
 
 const ONLY: &str = r##"<!doctype html><html><head><title>Only</title></head><body>
-<form><a href="#" id="pick">select files…</a></form>
+<form id="report"><a href="#" id="pick">select files…</a></form>
 <script>
 const input = document.createElement('input');
 input.type = 'file';
 input.multiple = true;
 input.className = 'dz-hidden-input';
+input.setAttribute('form', 'report');
 input.style.display = 'none';
 document.body.appendChild(input);
 </script></body></html>"##;
@@ -80,7 +81,8 @@ fn a_drop_zone_link_label_and_form_each_reach_their_own_file_input() {
     );
 
     let label = token_of(&mut connection, &page, "#cv-label");
-    upload_files(&mut connection, &page, &label, &both[1..], deadline()).unwrap();
+    let labelled = upload_files(&mut connection, &page, &label, &both[1..], deadline()).unwrap();
+    assert_eq!(labelled.via.as_str(), "label");
     assert_eq!(
         files_of(&mut connection, &page, "#cv"),
         vec![name_of(&second)]
