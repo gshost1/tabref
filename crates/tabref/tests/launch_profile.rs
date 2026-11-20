@@ -263,6 +263,40 @@ fn a_profile_keeps_its_data_and_its_running_browser_is_reused() {
 }
 
 #[test]
+fn a_profile_relaunches_after_daemon_stop_with_a_stale_port_file() {
+    if !live() {
+        return;
+    }
+    let home = harness_home("profile-restart");
+    let profile = harness_home("profile-restart-dir");
+    let _dirs = Dirs {
+        homes: vec![home.clone(), profile.clone()],
+    };
+    let config = home.join("config");
+    let profile = profile.join("work");
+    let port_file = profile.join("DevToolsActivePort");
+    let launch = [
+        "open",
+        "about:blank",
+        "--launch",
+        "--profile",
+        profile.to_str().unwrap(),
+    ];
+
+    let first = tabref(&home, &config, &launch, false);
+    assert!(first.ok, "{}{}", first.stdout, first.stderr);
+    let first_port = std::fs::read(&port_file).unwrap();
+    stop_browser(launched_pid(&home).unwrap());
+    std::fs::write(&port_file, &first_port).unwrap();
+
+    let stopped = tabref(&home, &config, &["daemon", "stop"], false);
+    assert!(stopped.ok, "{}{}", stopped.stdout, stopped.stderr);
+    let restarted = tabref(&home, &config, &launch, false);
+    assert!(restarted.ok, "{}{}", restarted.stdout, restarted.stderr);
+    assert_ne!(std::fs::read(port_file).unwrap(), first_port);
+}
+
+#[test]
 fn a_launch_on_a_profile_is_not_served_by_a_kept_connection_to_another_browser() {
     if !live() {
         return;
