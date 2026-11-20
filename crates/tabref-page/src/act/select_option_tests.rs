@@ -123,7 +123,9 @@ fn a_long_select_lists_thirty_options_in_details_and_says_how_many() {
     let all = details["all_options"].as_array().unwrap();
     assert_eq!(all.len(), 30);
     assert_eq!(all[0].as_str().unwrap().chars().count(), 60);
-    assert_eq!(details["options"][0].as_str().unwrap().chars().count(), 60);
+    let labels = details["options"].as_array().unwrap();
+    assert_eq!(labels.len(), 30);
+    assert_eq!(labels[0].as_str().unwrap().chars().count(), 60);
     assert_eq!(details["options_total"], json!(10_000));
     assert!(
         error.message.ends_with("… and 9970 more"),

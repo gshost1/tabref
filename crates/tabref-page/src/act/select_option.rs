@@ -138,7 +138,7 @@ fn refused(options: &[OptionEntry], choice: &str, pick: &OptionPick) -> AppError
     let legacy_options = match pick {
         OptionPick::Ambiguous(found) => Some(labels(found)),
         OptionPick::Disabled(_) => None,
-        _ => Some(labels(&all)),
+        _ => Some(labels(&all[..all.len().min(DETAILED)])),
     };
     let (code, kind, reason, message, matches) = match pick {
         OptionPick::Ambiguous(found) => (
