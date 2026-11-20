@@ -12,42 +12,5 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 4
-      - name: Build both CLI revisions
-        shell: pwsh
-        run: |
-          $current = git rev-parse HEAD
-          git checkout --detach 784adba1cbeb355b3ca02a233a784dd0e92edf7b
-          cargo build --locked -p tabref
-          Copy-Item target/debug/tabref.exe "$env:RUNNER_TEMP/before.exe"
-          git checkout --detach $current
-          cargo build --locked -p tabref
-      - name: Time successful reconnects to one Chrome instance
-        shell: pwsh
-        run: |
-          $before = "$env:RUNNER_TEMP/before.exe"
-          $after = (Resolve-Path target/debug/tabref.exe).Path
-          $env:TABREF_HOME = Join-Path $env:RUNNER_TEMP "tabref-window-timing-$env:GITHUB_RUN_ID"
-          $env:TABREF_NO_DAEMON = "1"
-          $env:TABREF_CHROME = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
-          function Invoke-Tabref($binary, [string[]]$command) {
-            $response = & $binary @command
-            if ($LASTEXITCODE -ne 0) { throw "$binary $command returned ${LASTEXITCODE}: $response" }
-          }
-          Invoke-Tabref $before @('--timeout', '30000', 'open', 'about:blank', '--launch')
-          try {
-            $samples = @{}
-            foreach ($binary in @($before, $after)) { $samples[$binary] = [Collections.Generic.List[double]]::new() }
-            foreach ($step in 0..17) {
-              $pair = if ($step % 2 -eq 0) { @($before, $after) } else { @($after, $before) }
-              foreach ($binary in $pair) {
-                $duration = Measure-Command { Invoke-Tabref $binary @('tabs') }
-                if ($step -ge 3) { $samples[$binary].Add($duration.TotalMilliseconds) }
-              }
-            }
-            foreach ($binary in @($before, $after)) {
-              $sorted = $samples[$binary] | Sort-Object
-              "{0}: n={1} min={2:N2}ms median={3:N2}ms max={4:N2}ms" -f (Split-Path $binary -Leaf), $sorted.Count, $sorted[0], $sorted[7], $sorted[-1]
-            }
-          } finally {
-            Invoke-Tabref $after @('close', '--browser')
-          }
+      - name: Verify the Windows reconnect regression
+        run: cargo test --locked -p tabref --test windows_launch_connect
