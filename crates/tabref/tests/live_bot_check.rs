@@ -82,7 +82,7 @@ fn challenge_pages_keep_the_normal_view_and_refs() {
 
 fn assert_note(text: &str, provider: &str) {
     assert_eq!(
-        text.lines().next().unwrap(),
+        text.lines().next().unwrap_or_default(),
         format!("{NOTE} ({provider})"),
         "{text}"
     );
