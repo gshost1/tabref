@@ -6,7 +6,7 @@ use super::{EventClock, LoadSettle, SettleScope, settle_load};
 use crate::act::act_fixture::{deadline, session};
 use crate::settle::load_watch::{LoadWatch, parse_status};
 use crate::{CdpConnection, CdpEvent};
-use tabref_cdp::ScriptedTransport;
+use tabref_cdp::{ScriptedTransport, is_timeout};
 
 fn status(since: Option<f64>, empty: bool) -> Value {
     json!({ "result": { "result": { "type": "object", "value": {
@@ -71,6 +71,38 @@ fn a_page_with_nothing_left_to_do_costs_one_read() {
     assert!(outcome.settled);
     assert!(!outcome.still_rendering());
     assert!(started.elapsed() < Duration::from_millis(100));
+}
+
+#[test]
+fn a_script_registered_after_the_start_timed_out_is_removed() {
+    let transport = ScriptedTransport::new()
+        .expect("Page.enable", json!({}))
+        .expect_silence("Page.addScriptToEvaluateOnNewDocument")
+        .expect_with_events(
+            "Page.navigate",
+            vec![json!({ "id": 2, "sessionId": "S", "result": { "identifier": "late" } })],
+            json!({ "result": { "frameId": "T" } }),
+        )
+        .expect("Page.removeScriptToEvaluateOnNewDocument", json!({}));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+    let error = LoadWatch::start(&mut connection, &session(), deadline()).unwrap_err();
+    assert!(is_timeout(&error), "{error:?}");
+
+    let reply = connection
+        .call(
+            "Page.navigate",
+            json!({ "url": "https://a.example/" }),
+            Some("S"),
+            deadline(),
+        )
+        .unwrap();
+    assert_eq!(reply["frameId"], "T");
+    connection.poll_pending(deadline()).unwrap();
+    let requests = sent.lock().unwrap();
+    assert_eq!(requests.len(), 4, "{requests:?}");
+    assert_eq!(requests[3]["params"]["identifier"], "late");
+    assert_eq!(requests[3]["sessionId"], "S");
 }
 
 #[test]
@@ -166,17 +198,27 @@ fn a_frame_document_is_no_navigation() {
 #[test]
 fn without_a_kept_capture_a_full_page_is_not_waited_for() {
     let started = Instant::now();
-    let transport = ScriptedTransport::new()
-        .expect_with_events(
-            "Runtime.evaluate",
-            vec![sent("f1", "Fetch", "T")],
-            status(None, false),
-        )
-        .expect("Runtime.evaluate", status(None, false)["result"].clone());
+    let transport = ScriptedTransport::new().expect_with_events(
+        "Runtime.evaluate",
+        vec![sent("f1", "Fetch", "T")],
+        status(None, false),
+    );
     let outcome = settle_as(stops(transport), None, false);
     assert!(!outcome.settled);
     assert!(!outcome.still_rendering());
     assert!(started.elapsed() < Duration::from_millis(100));
+}
+
+#[test]
+fn without_a_kept_capture_a_recent_mutation_does_not_cause_a_second_read() {
+    let transport = ScriptedTransport::new().expect_with_events(
+        "Runtime.evaluate",
+        Vec::new(),
+        status(Some(0.0), false),
+    );
+    let outcome = settle_as(stops(transport), None, false);
+    assert!(!outcome.settled);
+    assert!(!outcome.near_empty);
 }
 
 #[test]

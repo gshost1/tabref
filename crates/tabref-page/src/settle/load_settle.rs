@@ -128,7 +128,9 @@ fn follow(
         }
         if now >= started + cap || deadline.is_expired() {
             if !deadline.is_expired() {
-                status = watch.status(connection, read_by(cap))?;
+                if !cap.is_zero() {
+                    status = watch.status(connection, read_by(cap))?;
+                }
                 if status.near_empty && fetching(&feed.initial, Instant::now()) {
                     return render(connection, watch, &mut feed, started, deadline);
                 }

@@ -5,13 +5,16 @@ use tabref_core::AppError;
 
 use super::waiter::Waiter;
 
+const ADD_NEW_DOCUMENT_SCRIPT: &str = "Page.addScriptToEvaluateOnNewDocument";
+
 /// The requests a connection has in flight, and the replies that arrived
 /// for them before their caller asked. A reply to an id nobody waits for
-/// any more, such as an abandoned request's, is dropped on arrival.
+/// any more is dropped, except when it identifies a script to remove.
 #[derive(Debug, Default)]
 pub(crate) struct ReplyStash {
     waiting: HashMap<u64, Waiter>,
     ready: HashMap<u64, Result<Value, AppError>>,
+    late_scripts: HashMap<u64, String>,
 }
 
 impl ReplyStash {
@@ -38,6 +41,7 @@ impl ReplyStash {
 
     /// Fails every request in flight on `session_id` with `error`.
     pub(crate) fn fail_session(&mut self, session_id: &str, error: impl Fn(&str) -> AppError) {
+        self.late_scripts.retain(|_, session| session != session_id);
         let lost: Vec<(u64, String)> = self
             .waiting
             .iter()
@@ -57,9 +61,19 @@ impl ReplyStash {
         self.ready.contains_key(&id)
     }
 
-    /// Stops waiting for `id`; its reply, early or late, is dropped.
+    /// Stops waiting for `id`. Keep the session of an in-flight script
+    /// registration so a late success can be undone.
     pub(crate) fn abandon(&mut self, id: u64) {
-        self.waiting.remove(&id);
+        if let Some(waiter) = self.waiting.remove(&id)
+            && waiter.method == ADD_NEW_DOCUMENT_SCRIPT
+            && let Some(session) = waiter.session_id
+        {
+            self.late_scripts.insert(id, session);
+        }
         self.ready.remove(&id);
+    }
+
+    pub(crate) fn take_late_script_session(&mut self, id: u64) -> Option<String> {
+        self.late_scripts.remove(&id)
     }
 }

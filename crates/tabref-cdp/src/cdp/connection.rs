@@ -213,7 +213,8 @@ impl CdpConnection {
     }
 
     /// Waits for the reply to `id`. A request that misses `deadline` is
-    /// abandoned, so its late reply is skipped.
+    /// abandoned. Late replies are skipped unless they identify a script
+    /// registration that must be undone.
     pub fn reply(&mut self, id: u64, deadline: Deadline) -> Result<Value, AppError> {
         loop {
             if let Some(outcome) = self.replies.take(id) {
@@ -258,7 +259,8 @@ impl CdpConnection {
         }
     }
 
-    /// Stops waiting for `id`; its reply is skipped whenever it comes.
+    /// Stops waiting for `id`, with the same late-reply handling as a
+    /// timeout in [`reply`](Self::reply).
     pub fn abandon(&mut self, id: u64) {
         self.replies.abandon(id);
     }
@@ -303,8 +305,8 @@ impl CdpConnection {
         Ok(())
     }
 
-    /// Whether the transport failed or closed, after which no request can
-    /// succeed and the connection must be replaced.
+    /// Whether the transport failed or the connection must be retired
+    /// after the current command because cleanup could not be sent.
     pub fn is_closed(&self) -> bool {
         self.health.closed
     }
