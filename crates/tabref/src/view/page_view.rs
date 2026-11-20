@@ -27,9 +27,6 @@ pub(crate) fn page_view(
     options: &ViewOptions,
     scope: &ViewScope,
 ) -> Result<Outcome, AppError> {
-    if let Some(report) = bot_check_view(subject.info, input.trees.first()) {
-        return Ok(report);
-    }
     let outline = match scope {
         ViewScope::Element {
             target_id,
@@ -92,7 +89,9 @@ pub(crate) fn page_view(
         options,
         unread_frames(subject.skipped_frames),
     ));
-    Ok(Outcome::new(text, data(subject, &kept, &report, &outline)))
+    let mut outcome = Outcome::new(text, data(subject, &kept, &report, &outline));
+    bot_check_view(subject.info, input.trees.first(), &mut outcome);
+    Ok(outcome)
 }
 
 fn header(subject: &ViewSubject<'_>, options: &ViewOptions) -> String {

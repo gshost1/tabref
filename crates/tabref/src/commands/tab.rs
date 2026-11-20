@@ -1,6 +1,5 @@
 use tabref_cdp::activate_target;
 use tabref_core::AppError;
-use tabref_page::parse_capture;
 
 use crate::output::outcome::Outcome;
 use crate::output::page_report::page_report;
@@ -17,11 +16,9 @@ pub(crate) fn run(session: &mut Session, hint: &str) -> Result<Outcome, AppError
     let deadline = session.deadline();
     activate_target(session.connection(), &tab, deadline)?;
     session.use_tab(&tab)?;
-    let captured = session.capture()?;
-    if let Some(dom) = captured.dom_captures.get(&tab)
-        && let Some(report) = bot_check_view(&captured.info, parse_capture(dom, &tab).first())
-    {
-        return Ok(report);
-    }
-    Ok(page_report(&captured, ViewMode::Interactive))
+    let captured = session.shared_capture()?;
+    let mut report = page_report(&captured, ViewMode::Interactive);
+    let document = captured.main_dom(&tab).and_then(|trees| trees.first());
+    bot_check_view(&captured.info, document, &mut report);
+    Ok(report)
 }
