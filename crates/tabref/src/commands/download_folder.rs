@@ -3,7 +3,7 @@
 //! tabref's state directory for a browser `open --launch` started, else
 //! none, so the user's own browser keeps its own), and the size cap.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use tabref_cdp::default_user_data_dirs;
 use tabref_core::{AppError, create_private_dir};
@@ -18,8 +18,13 @@ const MB: u64 = 1024 * 1024;
 /// default profile directories, or a folder inside one, are refused before
 /// anything is created, with symbolic links resolved: a page could
 /// otherwise save a file named like tabref's state or a profile's there. A
-/// dangling link is refused too.
+/// dangling link or a parent-directory component is refused too.
 pub(crate) fn choose_folder(session: &mut Session, dir: &Path) -> Result<PathBuf, AppError> {
+    if dir.components().any(|part| part == Component::ParentDir) {
+        return Err(AppError::invalid_args(
+            "--download-dir cannot contain a '..' path component. Use the destination path directly.",
+        ));
+    }
     let absolute = std::path::absolute(dir)?;
     let root = session.store().base_dir().to_path_buf();
     if within(&absolute, &root)? {
