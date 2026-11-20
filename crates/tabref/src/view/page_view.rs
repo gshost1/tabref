@@ -4,6 +4,7 @@ use tabref_page::{Block, OutlineInput, PageOutline, build_outline, build_outline
 
 use super::block_renderer::BlockRenderer;
 use super::block_titles::title_of;
+use super::bot_check::bot_check_view;
 use super::budget::fit;
 use super::main_content::{has_main, main_block, text_size};
 use super::node_line::quote_text;
@@ -26,6 +27,9 @@ pub(crate) fn page_view(
     options: &ViewOptions,
     scope: &ViewScope,
 ) -> Result<Outcome, AppError> {
+    if let Some(report) = bot_check_view(subject.info, input.trees.first()) {
+        return Ok(report);
+    }
     let outline = match scope {
         ViewScope::Element {
             target_id,
