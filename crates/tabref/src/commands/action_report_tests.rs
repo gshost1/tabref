@@ -1,6 +1,34 @@
 use serde_json::json;
 
-use super::{dialog_line, dialog_lines};
+use super::{NOTHING_READ, NOTHING_SEEN, dialog_line, dialog_lines, nothing_seen};
+
+#[test]
+fn a_quiet_action_selects_the_unread_frame_note() {
+    let acted = super::Acted {
+        verb: "click",
+        summary: String::new(),
+        data: json!({}),
+        effects: Some(super::ActionEffects {
+            page: Some(tabref_page::PageChanges {
+                mutations: Some(0),
+                unread_frames: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        known: Default::default(),
+    };
+    assert_eq!(nothing_seen(&acted), Some(NOTHING_READ));
+    let mut acted = acted;
+    if let Some(page) = acted
+        .effects
+        .as_mut()
+        .and_then(|effects| effects.page.as_mut())
+    {
+        page.unread_frames = 0;
+    }
+    assert_eq!(nothing_seen(&acted), Some(NOTHING_SEEN));
+}
 
 #[test]
 fn a_dialog_line_says_which_dialog_opened_and_how_it_was_answered() {

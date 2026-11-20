@@ -36,6 +36,7 @@ impl Session {
             ));
         }
         self.scope = CommandScope::new(options, claim)?;
+        self.captures = None;
         let cancel = self.scope.claim.as_ref().map(TabClaim::cancel_flag);
         self.connection.set_cancel(cancel);
         self.connection.answer_next_dialog(None);
