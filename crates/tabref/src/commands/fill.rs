@@ -10,6 +10,8 @@ use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::view::node_line::quote_text;
 
+const PREVIEW_EDGE: usize = 32;
+
 /// Replaces the text of the field `target` names and reads it back.
 pub(crate) fn run(session: &mut Session, target: &str, text: &str) -> Result<Outcome, AppError> {
     let deadline = session.deadline();
@@ -21,7 +23,8 @@ pub(crate) fn run(session: &mut Session, target: &str, text: &str) -> Result<Out
 
 /// Fills the field with `text` (a date, time or number input takes it in a
 /// natural form and is set whole) and reports the value before and after:
-/// `"Price ($)" "67.00" -> "62.00"`.
+/// `"Price ($)" "67.00" -> "62.00"`. Long values print their length and
+/// a preview of both ends.
 pub(crate) fn act(
     session: &mut Session,
     target: ActTarget,
@@ -38,18 +41,18 @@ pub(crate) fn act(
         deadline,
     )?;
     let effects = session.finish_action(&watched, deadline)?;
-    let observed = filled.observed.clone().unwrap_or_default();
+    let observed = filled.observed.as_deref().unwrap_or_default();
     let mut summary = match &filled.previous {
         Some(previous) => format!(
             "{} {} -> {}",
             target.label,
-            quote_text(previous),
-            quote_text(&observed)
+            quote_value(previous),
+            quote_value(observed)
         ),
-        None => format!("{} = {}", target.label, quote_text(&observed)),
+        None => format!("{} = {}", target.label, quote_value(observed)),
     };
     if !filled.verified {
-        summary.push_str(&format!(" (asked for {})", quote_text(text)));
+        summary.push_str(&format!(" (asked for {})", quote_value(text)));
     }
     Ok(Acted {
         verb: "fill",
@@ -65,4 +68,14 @@ pub(crate) fn act(
         effects: Some(effects),
         known: target.known,
     })
+}
+
+fn quote_value(text: &str) -> String {
+    let len = text.chars().count();
+    if len <= PREVIEW_EDGE * 2 {
+        return quote_text(text);
+    }
+    let head: String = text.chars().take(PREVIEW_EDGE).collect();
+    let tail: String = text.chars().skip(len - PREVIEW_EDGE).collect();
+    format!("{} ({len} chars)", quote_text(&format!("{head}…{tail}")))
 }

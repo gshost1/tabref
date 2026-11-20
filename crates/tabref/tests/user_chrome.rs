@@ -83,6 +83,8 @@ fn the_users_browser_is_used_only_between_connect_and_off() {
     let before = home.tabref(&["--json", "tabs"]);
     let connected = home.tabref(&["connect", "--user-chrome"]);
     let opened = home.tabref(&["open", "data:text/html,<h1>In your Chrome</h1>"]);
+    let listed = home.tabref(&["--json", "tabs"]);
+    let missing = home.tabref(&["--json", "tab", "999"]);
     let pages = list_pages(&home.profile());
     let off = home.tabref(&["connect", "--off"]);
     let daemon = home.tabref(&["--json", "daemon", "status"]);
@@ -103,12 +105,20 @@ fn the_users_browser_is_used_only_between_connect_and_off() {
         connected.stdout
     );
     assert!(opened.ok, "{}{}", opened.stdout, opened.stderr);
-    assert!(
-        opened
-            .stdout
-            .starts_with("warning: in your Google Chrome (logged in)"),
-        "{}",
-        opened.stdout
+    let warning = "your logged-in Google Chrome";
+    assert_eq!(
+        opened.stdout.lines().next(),
+        Some("warning: your logged-in Google Chrome")
+    );
+    assert!(listed.ok, "{}", listed.stdout);
+    assert_eq!(
+        listed.json()["data"]["warnings"],
+        serde_json::json!([warning])
+    );
+    assert!(!missing.ok, "{}", missing.stdout);
+    assert_eq!(
+        missing.json()["error"]["details"]["warnings"],
+        serde_json::json!([warning])
     );
     assert!(pages.contains("In your Chrome"), "{pages}");
     assert!(
@@ -152,7 +162,7 @@ fn open_launch_while_opted_in_uses_tabrefs_own_browser() {
         launched.stdout
     );
     assert!(
-        !launched.stdout.contains("in your Google Chrome"),
+        !launched.stdout.contains("warning: your logged-in"),
         "{}",
         launched.stdout
     );
