@@ -130,7 +130,7 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
     Object.defineProperty(prototype, method, { ...descriptor, value: wrapped });
     restore.push(() => {
       if (Object.getOwnPropertyDescriptor(prototype, method)?.value === wrapped) {
-        Object.defineProperty(prototype, method, descriptor);
+        try { Object.defineProperty(prototype, method, descriptor); } catch {}
       }
     });
   };

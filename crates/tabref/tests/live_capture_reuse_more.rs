@@ -277,13 +277,25 @@ fn direct_page_command(tabref: &Harness, method: &str, params: serde_json::Value
     assert!(reply.get("exceptionDetails").is_none(), "{reply}");
 }
 
+fn kept_snapshot(tabref: &Harness) -> Run {
+    let mut captured = run(tabref, &["snap"], &[]);
+    for _ in 0..3 {
+        let next = run(tabref, &["snap"], &[]);
+        if snapshot_id(&captured) == snapshot_id(&next) {
+            return next;
+        }
+        captured = next;
+    }
+    panic!("the fixture never reused a capture");
+}
+
 #[test]
 fn css_hover_and_stylesheet_edits_invalidate_a_kept_view() {
     if !live() {
         return;
     }
     let tabref = common::harness("reuse-css");
-    let opened = open(
+    open(
         &tabref,
         r#"<!doctype html><meta charset=utf-8><style>
 body { margin: 0 }
@@ -292,6 +304,7 @@ body { margin: 0 }
 </style><button id=trigger>Menu</button><a id=menu href=#settings>Settings entry</a>
 <p id=toast>New notification</p>"#,
     );
+    let opened = kept_snapshot(&tabref);
     assert!(
         !opened.stdout.contains("Settings entry"),
         "{}",
@@ -309,6 +322,7 @@ body { margin: 0 }
         "{}",
         revealed.stdout
     );
+    let revealed = kept_snapshot(&tabref);
     direct_page_command(
         &tabref,
         "Runtime.evaluate",
@@ -330,10 +344,11 @@ fn a_late_closed_shadow_root_is_not_replayed() {
         return;
     }
     let tabref = common::harness("reuse-late-closed");
-    let opened = open(
+    open(
         &tabref,
         "<!doctype html><h1>Open page</h1><div id=host></div>",
     );
+    let opened = kept_snapshot(&tabref);
     direct_page_command(
         &tabref,
         "Runtime.evaluate",
