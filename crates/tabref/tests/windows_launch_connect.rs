@@ -10,13 +10,14 @@ use std::net::TcpListener;
 use std::os::windows::fs::OpenOptionsExt;
 use std::process::Command;
 
-use common::harness_home;
-use serde_json::json;
+use common::scratch;
+use tabref_cdp::{LaunchedBrowser, ProfileUse, launched_alive};
+use tabref_core::RefStore;
 
 #[test]
 fn connecting_to_a_launch_does_not_run_the_profile_owner_check() {
-    let home = harness_home("windows-launch-connect");
-    let profile = home.join("profile");
+    let home = scratch("windows-launch-connect");
+    let profile = home.0.join("profile");
     fs::create_dir(&profile).unwrap();
     let lock = OpenOptions::new()
         .write(true)
@@ -32,28 +33,31 @@ fn connecting_to_a_launch_does_not_run_the_profile_owner_check() {
         format!("{port}\n{websocket_path}\n"),
     )
     .unwrap();
-    fs::write(
-        home.join("launched.json"),
-        json!({
-            "pid": std::process::id(), "port": port, "websocket_path": websocket_path,
-            "profile_dir": profile, "headless": true, "persistent": false, "adopted": false
-        })
-        .to_string(),
-    )
-    .unwrap();
+    let record = LaunchedBrowser {
+        pid: std::process::id(),
+        port,
+        websocket_path: websocket_path.to_owned(),
+        profile_dir: profile,
+        headless: true,
+        started: None,
+        profile_use: ProfileUse::THROWAWAY,
+    };
+    assert_eq!(launched_alive(&record), Some(true));
+    RefStore::new(&home.0)
+        .write_state("launched.json", &serde_json::to_string(&record).unwrap())
+        .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
         .args(["--json", "--timeout", "500", "tabs"])
-        .env("TABREF_HOME", &home)
+        .env("TABREF_HOME", &home.0)
         .env("TABREF_NO_DAEMON", "1")
         .env_remove("TABREF_CDP")
-        .env("SystemRoot", home.join("no-powershell"))
+        .env("SystemRoot", home.0.join("no-powershell"))
         .output()
         .unwrap();
     listener.set_nonblocking(true).unwrap();
     let connected = listener.accept().is_ok();
     drop(lock);
-    fs::remove_dir_all(&home).unwrap();
 
     assert!(
         connected,
