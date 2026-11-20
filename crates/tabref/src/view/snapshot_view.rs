@@ -1,6 +1,7 @@
 use tabref_core::AppError;
-use tabref_page::{PageInfo, page_text};
+use tabref_page::{PageInfo, capture_dom, page_text};
 
+use super::bot_check::bot_check_view;
 use super::outline_source::outline_input;
 use super::page_view::page_view;
 use super::view_mode::ViewMode;
@@ -73,6 +74,28 @@ pub(crate) fn reading_view(
 }
 
 const FALLBACK_TEXT: usize = 24_000;
+
+/// Field reads use a direct element query. Check the top-level page for
+/// a challenge without replacing the field result or allocating refs.
+pub(crate) fn annotate_field_read(session: &mut Session, report: &mut Outcome) {
+    let Ok(page) = session.page() else {
+        return;
+    };
+    if let Some(captured) = session.reusable_capture()
+        && let Some(document) = captured
+            .main_dom(&page.target_id)
+            .and_then(|trees| trees.first())
+    {
+        bot_check_view(&captured.info, Some(document), report);
+        return;
+    }
+    let deadline = session.deadline();
+    if let Ok(info) = PageInfo::read(session.connection(), &page.target_id, deadline)
+        && let Ok(trees) = capture_dom(session.connection(), &page, deadline)
+    {
+        bot_check_view(&info, trees.first(), report);
+    }
+}
 
 /// The page's rendered text, when the DOM capture behind the reading view
 /// fails.

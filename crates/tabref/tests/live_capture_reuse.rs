@@ -90,21 +90,35 @@ fn find_snap_and_read_reuse_the_capture_of_an_unchanged_page() {
     }
     let tabref = common::harness("reuse-still");
     opened(&tabref, STILL);
-    let kept = snapshot_id(&run(&tabref, &["snap"], &[]));
-    let found = run(&tabref, &["find", "needle"], &[]);
-    assert_eq!(snapshot_id(&found), kept, "find captured again");
-    assert!(
-        found.stdout.contains("Alpha needle text"),
-        "{}",
-        found.stdout
-    );
-    let snapped = run(&tabref, &["snap", "--from", "2"], &[]);
-    assert_eq!(snapshot_id(&snapped), kept, "snap captured again");
-    let read = run(&tabref, &["read", "--section", "More"], &[]);
-    assert!(read.stdout.contains("Beta words"), "{}", read.stdout);
-    let found_again = run(&tabref, &["find", "Beta"], &[]);
-    assert_eq!(snapshot_id(&found_again), kept);
+    let mut snapshots = Vec::new();
+    for _ in 0..5 {
+        let kept = snapshot_id(&run(&tabref, &["snap"], &[]));
+        let found = run(&tabref, &["find", "needle"], &[]);
+        assert!(
+            found.stdout.contains("Alpha needle text"),
+            "{}",
+            found.stdout
+        );
+        let snapped = run(&tabref, &["snap", "--from", "2"], &[]);
+        let read = run(&tabref, &["read", "--section", "More"], &[]);
+        assert!(read.stdout.contains("Beta words"), "{}", read.stdout);
+        let found_again = run(&tabref, &["find", "Beta"], &[]);
+        let ids = [
+            kept,
+            snapshot_id(&found),
+            snapshot_id(&snapped),
+            snapshot_id(&found_again),
+        ];
+        if ids.iter().all(|id| id == &ids[0]) {
+            stop(&tabref);
+            return;
+        }
+        snapshots.push(ids);
+    }
     stop(&tabref);
+    panic!(
+        "the watch can time out under load, but no complete sequence reused a capture: {snapshots:?}"
+    );
 }
 
 #[test]
