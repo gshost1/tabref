@@ -55,3 +55,11 @@ fn a_line_added_between_repeated_lines_is_found() {
         vec![TextChange::Added("Post".into())]
     );
 }
+
+#[test]
+fn control_characters_are_escaped_and_bidirectional_marks_dropped() {
+    assert_eq!(
+        text_lines("Alert \u{1b}[2K\u{1b}[31mred\u{7} done\u{202E}"),
+        vec!["Alert \\u001b[2K\\u001b[31mred\\u0007 done"]
+    );
+}
