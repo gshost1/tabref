@@ -8,7 +8,7 @@
 
 use tabref_core::{AppError, DeliverySemantics, ErrorCode};
 
-use crate::{ActivePort, LaunchedBrowser};
+use crate::{ActivePort, LaunchedBrowser, read_active_port};
 
 const BROWSER_PATH: &str = "/devtools/browser/";
 
@@ -23,6 +23,18 @@ pub fn browser_guid(websocket_path: &str) -> Option<&str> {
 /// Whether `websocket_path` names the browser run `record` recorded.
 pub fn same_browser_run(record: &LaunchedBrowser, websocket_path: &str) -> bool {
     browser_guid(websocket_path).is_some_and(|id| browser_guid(&record.websocket_path) == Some(id))
+}
+
+/// Reads the port file for a recorded launch, checking the profile owner.
+pub fn read_launch_active_port(record: &LaunchedBrowser) -> Result<ActivePort, AppError> {
+    #[cfg(windows)]
+    if !crate::discovery::windows_profile_owner::is_own_directory(&record.profile_dir) {
+        return Err(AppError::new(
+            ErrorCode::PermDenied,
+            "The recorded profile directory is not confirmed to be owned by the current user",
+        ));
+    }
+    read_active_port(&record.profile_dir)
 }
 
 /// `Ok` when the record's profile `DevToolsActivePort`, as `read`, still
@@ -57,23 +69,54 @@ fn unverified(record: &LaunchedBrowser, what: &str, detail: &str) -> AppError {
         ErrorCode::PermDenied,
         format!(
             "The browser 'open --launch' started (pid {}) cannot be confirmed on port {}: its \
-             DevToolsActivePort at {} {what}; tabref does not attach to it",
+             DevToolsActivePort at {} {what}",
             record.pid,
             record.port,
             path.display()
         ),
     )
-    .with_suggestion(format!(
-        "Quit that browser (pid {}), then run 'tabref open <url> --launch' for a new one",
-        record.pid
-    ))
+    .with_suggestion(recovery_hint(record))
     .with_platform_detail(detail)
     .with_details(serde_json::json!({
         "kind": "cdp_launch_unverified",
+        "pid": record.pid,
+        "profile_dir": record.profile_dir,
         "port": record.port,
         "path": path.display().to_string(),
     }))
     .with_disposition(DeliverySemantics::not_delivered())
+}
+
+/// Recovery when the recorded process is still alive but its port cannot
+/// be trusted.
+pub fn unverified_launch_port(record: &LaunchedBrowser) -> AppError {
+    AppError::new(
+        ErrorCode::PermDenied,
+        format!(
+            "Cannot confirm DevTools port {} for the recorded browser (pid {})",
+            record.port, record.pid
+        ),
+    )
+    .with_details(serde_json::json!({
+        "kind": "cdp_launch_unverified",
+        "pid": record.pid,
+        "port": record.port,
+        "profile_dir": record.profile_dir,
+    }))
+    .with_suggestion(recovery_hint(record))
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
+fn recovery_hint(record: &LaunchedBrowser) -> String {
+    let launch = if record.profile_use.persistent {
+        "tabref open <url> --launch --profile <profile-dir>"
+    } else {
+        "tabref open <url> --launch"
+    };
+    format!(
+        "Quit that browser (pid {}) manually. Its profile directory is {:?}. Then run '{launch}'.",
+        record.pid, record.profile_dir
+    )
 }
 
 #[cfg(test)]
