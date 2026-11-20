@@ -36,7 +36,7 @@ let busy = false;
 new IntersectionObserver(seen => {
   if (!seen[0].isIntersecting || busy) return;
   busy = true;
-  fetch('/entries?name=Late&total=40&from=30&delay=3000').then(r => r.json()).then(page => {
+  fetch('/entries?name=Late&total=40&from=30&delay=4500').then(r => r.json()).then(page => {
     for (const text of page.items) { const li = document.createElement('li'); li.textContent = text; document.getElementById('rows').appendChild(li); }
   });
 }).observe(document.getElementById('tail'));
@@ -119,6 +119,85 @@ fn a_request_slower_than_the_waits_is_not_called_the_end() {
     let (tabref, base) = site();
     tabref.ok(&["open", &format!("{base}/slow")]);
     assert_unsure(&tabref.ok(&["scroll", "down", "--px", "20000"]));
+    let next = tabref.ok(&["--json", "scroll", "down"]);
+    let data = next.json();
+    assert_eq!(data["data"]["loading"], true, "{data}");
+    assert_eq!(data["data"]["moved"], false, "{data}");
+    assert_eq!(data["data"]["at_end"], true, "{data}");
+    assert_eq!(
+        first_line(&tabref.ok(&["scroll", "down"])),
+        "did not move: at the bottom; more may still be loading"
+    );
+}
+
+#[test]
+fn a_cross_site_fetch_is_followed_and_reports_the_loaded_rows() {
+    if !live() {
+        return;
+    }
+    let remote = lazy_site(vec![]).replace("127.0.0.1", "localhost");
+    let page = SLOW_FETCH
+        .replace("ROWS", &rows("li", "Entry", 30))
+        .replace("fetch('/entries", &format!("fetch('{remote}/entries"))
+        .replace("delay=4500", "delay=950");
+    let base = lazy_site(vec![("/feed", page)]);
+    let tabref = harness("scroll-cross-site");
+    tabref.ok(&["open", &format!("{base}/feed")]);
+    let run = tabref.ok(&["scroll", "down", "--px", "20000"]);
+    assert!(
+        first_line(&run).contains("10 new items loaded"),
+        "{}",
+        run.stdout
+    );
+}
+
+#[test]
+fn a_list_in_an_open_shadow_root_reports_the_rows_it_adds() {
+    if !live() {
+        return;
+    }
+    let page = r#"<!doctype html><title>Shadow feed</title><div id=feed></div>
+<script>
+const root = document.getElementById('feed').attachShadow({mode: 'open'});
+root.innerHTML = '<style>li{height:40px}</style><ol id=rows>ROWS</ol><p id=tail>More</p>';
+let started = false;
+new IntersectionObserver(seen => {
+  if (!seen[0].isIntersecting || started) return;
+  started = true;
+  setTimeout(() => root.getElementById('rows').insertAdjacentHTML('beforeend', '<li>Shadow entry</li>'), 100);
+}).observe(root.getElementById('tail'));
+</script>"#.replace("ROWS", &rows("li", "Entry", 30));
+    let base = lazy_site(vec![("/shadow", page)]);
+    let tabref = harness("scroll-shadow");
+    tabref.ok(&["open", &format!("{base}/shadow")]);
+    let run = tabref.ok(&["scroll", "down", "--px", "20000"]);
+    assert!(
+        first_line(&run).contains("1 new item loaded"),
+        "{}",
+        run.stdout
+    );
+    assert!(run.stdout.contains("Shadow entry"), "{}", run.stdout);
+}
+
+#[test]
+fn a_rejection_in_top_level_await_is_reported_as_a_rejection() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/more")]);
+    let run = tabref.run(&[
+        "--json",
+        "js",
+        "await Promise.reject(new Error('quota gone'))",
+    ]);
+    assert!(!run.ok, "{}", run.stdout);
+    assert_eq!(
+        run.json()["error"]["details"]["kind"],
+        "js_rejected",
+        "{}",
+        run.stdout
+    );
 }
 
 #[test]

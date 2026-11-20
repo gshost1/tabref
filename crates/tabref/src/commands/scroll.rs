@@ -154,7 +154,7 @@ fn first_line(direction: &str, step: f64, outcome: &ScrollOutcome) -> String {
         (true, _) if !doubt.is_empty() => format!("{moved}{doubt}"),
         (true, true) => format!("{moved}; {edge}: nothing new loaded"),
         (true, false) => moved,
-        (false, true) if outcome.hidden => format!("did not move: {edge}{doubt}"),
+        (false, true) if !doubt.is_empty() => format!("did not move: {edge}{doubt}"),
         (false, true) => format!("did not move: {edge}, nothing new loaded"),
         (false, false) => format!("did not move: nothing left to scroll {direction}"),
     }

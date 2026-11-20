@@ -26,6 +26,7 @@ pub(crate) struct SettleTracker {
     same_document: bool,
     pending: HashSet<String>,
     last_activity: Option<Instant>,
+    scroll_requests: bool,
 }
 
 impl SettleTracker {
@@ -38,6 +39,15 @@ impl SettleTracker {
             same_document: false,
             pending: HashSet::new(),
             last_activity: None,
+            scroll_requests: false,
+        }
+    }
+
+    /// Scroll loaders can fetch from an API on a different origin.
+    pub(crate) fn for_scroll() -> Self {
+        Self {
+            scroll_requests: true,
+            ..Self::new("")
         }
     }
 
@@ -90,7 +100,12 @@ impl SettleTracker {
             }
             "Network.requestWillBeSent" => {
                 let kind = params.get("type").and_then(Value::as_str);
-                if kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params) {
+                let tracked = if self.scroll_requests {
+                    matches!(kind, Some("XHR" | "Fetch"))
+                } else {
+                    kind.is_some_and(|kind| TRACKED_REQUESTS.contains(&kind)) && same_site(params)
+                };
+                if tracked {
                     self.pending.insert(request_id(params));
                     self.last_activity = Some(now);
                 }

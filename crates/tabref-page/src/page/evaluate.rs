@@ -52,7 +52,14 @@ fn evaluate_settled(
         deadline,
     )?;
     if let Some(exception) = reply.get("exceptionDetails") {
-        return Err(thrown(exception));
+        let in_promise = exception["text"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("Uncaught (in promise)"));
+        return Err(if in_promise {
+            rejected(exception)
+        } else {
+            thrown(exception)
+        });
     }
     let result = reply.get_mut("result").map_or(Value::Null, Value::take);
     let Some(object_id) = result.get("objectId").and_then(Value::as_str) else {
