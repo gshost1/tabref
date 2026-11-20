@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tabref_cdp::{PageSession, navigate};
 use tabref_core::{AppError, Deadline};
-use tabref_page::{LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
+use tabref_page::{LoadWatch, LocateIntent, PageInfo, Word, evaluate, page_text, read_element};
 
 use super::act_target::resolve_target;
 use super::action_report::dialog_lines;
@@ -18,6 +18,7 @@ use super::downloads;
 use super::find;
 use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open::normalize_url;
+use super::open_settle::settle_after;
 use super::page_url::{resolve_url, short_url};
 use super::page_view::current_page_view;
 use super::step_done::StepDone;
@@ -98,6 +99,7 @@ fn opened_line(
 ) -> Result<(String, Value), AppError> {
     let navigation = deadline.capped(Duration::from_millis(deadline.remaining_ms() * 3 / 4));
     downloads::enable_for_action(session, deadline)?;
+    let mut watch = LoadWatch::start(session.connection(), page, deadline).ok();
     let navigated = navigate(session.connection(), page, url, navigation);
     let dialogs = navigation_dialogs(session, Some(&page.target_id));
     let said: String = dialog_lines(&dialogs)
@@ -121,6 +123,8 @@ fn opened_line(
         }
         let grace = downloads::grace_after(&navigated);
         let started = downloads::after_action(session, page, None, deadline, grace);
+        let loaded = started.is_empty() && navigated.is_ok();
+        settle_after(session, watch.take(), loaded, deadline);
         if !started.is_empty() {
             let lines: Vec<String> = started.iter().map(download_line).collect();
             let downloads: Vec<Value> = started.iter().map(download_json).collect();
@@ -149,7 +153,9 @@ fn opened_line(
         }
         Ok((text, data))
     };
-    after().map_err(|error| error_with_dialogs(error, &dialogs))
+    let outcome = after().map_err(|error| error_with_dialogs(error, &dialogs));
+    settle_after(session, watch, false, deadline);
+    outcome
 }
 
 /// `expect text "Saved"`, `expect gone "Loading"`, `expect url ~saved=1`,
