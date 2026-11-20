@@ -25,6 +25,7 @@ pub use act::change_watch::{mark_page, page_changes};
 pub use act::checked::set_checked;
 pub use act::click::{click, click_times};
 pub use act::element_reading::ElementReading;
+pub use act::file_input_choice::FileInputVia;
 pub use act::fill::fill;
 pub use act::fill_outcome::FillOutcome;
 pub use act::focus::{focus, focus_target, page_focused};
@@ -43,7 +44,7 @@ pub use act::select_option::select_option;
 pub use act::select_outcome::SelectOutcome;
 pub use act::text_change::TextChange;
 pub use act::unactionable::Unactionable;
-pub use act::upload::upload_files;
+pub use act::upload::{upload_files, upload_input_files};
 pub use act::upload_outcome::UploadOutcome;
 pub use locate::locate_intent::LocateIntent;
 pub use locate::locate_node::locate;
@@ -72,6 +73,9 @@ pub use outline::text_match::TextMatch;
 pub use outline::text_runs::{collapse_run, cut_chars, squash};
 pub use outline::text_search::search_text;
 pub use outline::url_resolve::{origin_of, resolve_href, short_href};
+pub use page::capture_watch::{
+    CaptureWatch, arm_capture_watch, check_capture_watch, has_closed_shadow_root,
+};
 pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
 pub use page::page_scroll::scroll_page;

@@ -144,16 +144,28 @@ pub(crate) fn same_process(record: &UserChromeRecord) -> bool {
 /// `lsof` reports them must all be the opted-in browser; with no such check
 /// (Windows), tabref refuses.
 fn listener_is(port: u16, record: &UserChromeRecord) -> Result<(), AppError> {
-    match listener_pids(port) {
+    listeners_are(port, record, listener_pids(port))
+}
+
+/// [`listener_is`] for the listener `pids` found (`None`: none could be
+/// found on this platform).
+pub(crate) fn listeners_are(
+    port: u16,
+    record: &UserChromeRecord,
+    pids: Option<Vec<u32>>,
+) -> Result<(), AppError> {
+    match pids {
         Some(pids) if pids.is_empty() => Err(gone(record)),
-        Some(pids) if pids.iter().all(|pid| *pid == record.pid) => Ok(()),
-        Some(pids) => Err(not_the_profile(
-            record,
-            port,
-            &ListenerVerdict::Untrusted {
-                holder: Some(format!("pid {}", pids.first().copied().unwrap_or_default())),
-            },
-        )),
+        Some(pids) => match pids.iter().find(|pid| **pid != record.pid) {
+            None => Ok(()),
+            Some(stranger) => Err(not_the_profile(
+                record,
+                port,
+                &ListenerVerdict::Untrusted {
+                    holder: Some(format!("pid {stranger}")),
+                },
+            )),
+        },
         None => Err(unsupported()),
     }
 }
