@@ -173,14 +173,21 @@ fn the_state_directory_is_refused_as_a_download_folder() {
 }
 
 #[test]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn a_browsers_own_profile_directory_is_refused_as_a_download_folder() {
     if !live() {
         return;
     }
     let (tabref, base) = site("downloads-profile");
     let outside = scratch("downloads-profile");
-    let config = outside.0.join("config");
-    let profile = config.join("google-chrome").join("Default");
+    let root = outside.0.join("browser-home");
+    #[cfg(target_os = "linux")]
+    let (env, relative) = ("XDG_CONFIG_HOME", "google-chrome");
+    #[cfg(target_os = "macos")]
+    let (env, relative) = ("HOME", "Library/Application Support/Google/Chrome");
+    #[cfg(target_os = "windows")]
+    let (env, relative) = ("LOCALAPPDATA", "Google/Chrome/User Data");
+    let profile = root.join(relative).join("Default");
     let output = Command::new(env!("CARGO_BIN_EXE_tabref"))
         .args([
             "--cdp",
@@ -195,7 +202,7 @@ fn a_browsers_own_profile_directory_is_refused_as_a_download_folder() {
             &format!("{base}/"),
         ])
         .env("TABREF_HOME", &tabref.home)
-        .env("XDG_CONFIG_HOME", &config)
+        .env(env, &root)
         .env("TABREF_NO_DAEMON", "1")
         .output()
         .unwrap();
@@ -204,5 +211,6 @@ fn a_browsers_own_profile_directory_is_refused_as_a_download_folder() {
         stderr.starts_with("error INVALID_ARGS: ") && stderr.contains("profile directory"),
         "{stderr}"
     );
-    assert!(!config.exists());
+    assert!(!output.status.success());
+    assert!(!root.exists());
 }
