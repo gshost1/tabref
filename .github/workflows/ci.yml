@@ -11,6 +11,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 4
-      - name: Verify the Windows reconnect regression
-        run: cargo test --locked -p tabref --test windows_launch_connect
+          fetch-depth: 0
+      - name: Build both CLI revisions
+        shell: pwsh
+        run: |
+          $current = git rev-parse HEAD
+          git checkout --detach 784adba1cbeb355b3ca02a233a784dd0e92edf7b
+          cargo build --locked -p tabref
+          Copy-Item target/debug/tabref.exe "$env:RUNNER_TEMP/before.exe"
+          git checkout --detach $current
+          cargo build --locked -p tabref
+      - name: Time successful reconnects to one Chrome instance
+        timeout-minutes: 3
+        run: python -u scripts/time-windows-reconnect.py
