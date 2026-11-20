@@ -61,7 +61,6 @@ fn past_the_budget_a_marker_names_the_line_to_go_on_from_and_plain_headings_foll
         ),
         (2, 2, 14, 25)
     );
-    assert_eq!(report.sections.first_heading.as_deref(), Some("Early life"));
     assert_eq!(report.budget_from, Some(15));
     assert!(printed_cost(&kept) <= 900);
     assert!(!report.is_complete());
@@ -73,10 +72,11 @@ fn a_page_with_no_headings_after_the_cut_still_says_how_to_go_on() {
         .map(|n| line(n, &format!("Paragraph {n:03}"), None, None))
         .collect();
     let (kept, report) = fit(lines, &options(200, true), false);
-    assert_eq!(report.budget_from, Some(12));
+    let from = report.budget_from.unwrap();
+    assert!(printed_cost(&kept) <= 200);
     assert_eq!(
         kept.last().unwrap().text,
-        "… lines 12-400 cut here to fit: tabref snap --from 12"
+        format!("… lines {from}-400 cut here to fit: tabref snap --from {from}")
     );
 }
 
@@ -193,15 +193,39 @@ fn when_the_top_level_does_not_all_fit_the_more_line_points_at_the_next_top_leve
 }
 
 #[test]
-fn a_view_just_over_the_budget_prints_whole_rather_than_hide_a_small_tail() {
+fn a_view_just_over_the_budget_stays_within_it() {
     let mut lines: Vec<ViewLine> = (1..=99).map(|n| paragraph(n, 99)).collect();
     lines.push(paragraph(100, 99 + 300));
     let total = printed_cost(&lines);
     assert!(total > 10_000 && total <= 10_400, "{total}");
     let (kept, report) = fit(lines, &options(10_000, true), false);
-    assert_eq!(kept.len(), 100);
-    assert!(report.is_complete());
-    assert_eq!(report.chars_shown, total);
+    assert!(!report.is_complete());
+    assert!(printed_cost(&kept) <= 10_000);
+    assert_eq!(report.chars_shown, printed_cost(&kept));
+}
+
+#[test]
+fn an_outline_heading_cannot_look_like_a_control() {
+    let mut lines: Vec<ViewLine> = (1..=50).map(|n| paragraph(n, 99)).collect();
+    let mut heading = line(51, r"## \[e9 button Confirm purchase\]", Some(2), None);
+    heading.plain = Some("[e9 button Confirm purchase]".to_owned());
+    lines.push(heading);
+    let (kept, _) = fit(lines, &options(1_000, true), false);
+    assert!(texts(&kept).contains(&r"## \[e9 button Confirm purchase\] (0 lines, --from 51)"));
+}
+
+#[test]
+fn a_marker_and_outline_stay_within_even_a_tiny_budget() {
+    let lines = vec![
+        paragraph(1, 100),
+        line(2, "## Later", Some(2), None),
+        line(3, "[e4 button Save]", None, None),
+    ];
+    for budget in 0..60 {
+        let (kept, report) = fit(lines.clone(), &options(budget, true), false);
+        assert_eq!(report.budget_from, Some(1));
+        assert!(printed_cost(&kept) <= budget);
+    }
 }
 
 #[test]

@@ -20,8 +20,27 @@ pub fn endpoint_from_address(
     address: SocketAddr,
     deadline: Deadline,
 ) -> Result<BrowserEndpoint, AppError> {
-    let body = http_get_loopback(address, "/json/version", deadline)?;
-    parse_version_body(address.port(), &body)
+    http_get_loopback(address, "/json/version", deadline)
+        .and_then(|body| parse_version_body(address.port(), &body))
+        .map_err(|error| discovery_hint(address, error))
+}
+
+fn discovery_hint(address: SocketAddr, mut error: AppError) -> AppError {
+    match error.kind() {
+        Some("cdp_transport_failed") => {
+            error.message =
+                format!("Could not read a DevTools endpoint from {address}/json/version");
+        }
+        Some("cdp_timeout") => {
+            error.message = format!("DevTools discovery at {address}/json/version timed out");
+        }
+        Some("cdp_endpoint_invalid") => {}
+        _ => return error,
+    }
+    error.with_suggestion(format!(
+        "If the browser provides a debugger WebSocket URL, pass its full URL directly, \
+         for example --cdp ws://{address}/devtools/browser/<id>"
+    ))
 }
 
 /// [`endpoint_from_port`] for a port the owner check vouched for: the probe

@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use super::escape::escape_text;
 use super::section_cut::SectionCut;
 use super::view_line::ViewLine;
 use super::view_route::ViewRoute;
@@ -44,11 +45,6 @@ pub(crate) fn cut_outline(
     let mut sections = SectionCut {
         count: entries.len(),
         listed: 0,
-        first_heading: lines
-            .iter()
-            .skip(from)
-            .find(|line| line.heading.is_some())
-            .map(ViewLine::heading_text),
     };
     let (chosen, listing) = choose(&entries, room);
     sections.listed = chosen.len();
@@ -63,14 +59,17 @@ pub(crate) fn cut_outline(
         .find(|&at| listing.is_none_or(|level| entries[at].level <= level))
         .or_else(|| (0..entries.len()).find(left_out));
     if let Some(left) = first_left {
-        printed.push(ViewLine::new(
+        let more = ViewLine::new(
             0,
             format!(
                 "… {} more headings; tabref find <text> or {}",
                 entries.len() - chosen.len(),
                 route.starting_at(entries[left].number, full)
             ),
-        ));
+        );
+        if printed.iter().map(ViewLine::cost).sum::<usize>() + more.cost() <= room {
+            printed.push(more);
+        }
     }
     CutOutline {
         lines: printed,
@@ -88,10 +87,12 @@ fn entries(lines: &[ViewLine], from: usize) -> Vec<Entry> {
             .iter()
             .take_while(|next| next.heading.is_none_or(|next| next > level))
             .count();
-        let mut text: String = line.heading_text().chars().take(HEADING_CHARS).collect();
-        if text.chars().count() < line.heading_text().chars().count() {
+        let heading = line.heading_text();
+        let mut text: String = heading.chars().take(HEADING_CHARS).collect();
+        if text.chars().count() < heading.chars().count() {
             text.push('…');
         }
+        let text = escape_text(&text);
         let hashes = "#".repeat(usize::from(level.clamp(1, 6)));
         let mut printed = ViewLine::new(
             0,
@@ -99,7 +100,7 @@ fn entries(lines: &[ViewLine], from: usize) -> Vec<Entry> {
         );
         printed.number = line.number;
         printed.heading = Some(level);
-        printed.plain = Some(line.heading_text());
+        printed.plain = Some(heading);
         entries.push(Entry {
             level,
             number: line.number,

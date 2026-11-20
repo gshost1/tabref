@@ -5,6 +5,9 @@ for one still running; `open --download-dir DIR URL` picks the folder (default f
 its state folder). In your own Chrome, tabref restores Chrome's default download behaviour after each
 command; a download that starts after the command goes to Chrome's own folder and is not reported.
 
+Upload checks widget boundaries in page JavaScript. A hostile page can defeat that check, but the files still go to that same page.
+Use `tabref upload 'css=input#avatar' FILE` to target one file input in the main document directly.
+
 JavaScript dialogs are accepted and reported; `--dialog dismiss` (or `accept=TEXT` for a prompt) answers the
 first confirm, prompt or leave-page dialog of the whole command, `do` included; not reliable while another
 tabref command runs at the same time. Without the daemon (always on Windows), a dialog that opens after a

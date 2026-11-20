@@ -2,10 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use tabref_cdp::{LaunchOptions, ProcessView, process_start};
+use tabref_cdp::{LaunchOptions, ProcessView, UserBrowser, process_start};
 use tabref_core::RefStore;
 
-use super::{find_user_chrome, runs_profile, same_process, shown_dir};
+use super::{find_user_chrome, listeners_are, only_profile, runs_profile, same_process, shown_dir};
 use crate::session::session_options::SessionOptions;
 use crate::session::user_chrome_record::{
     UserChromeRecord, choice_in_use, forget_user_chrome, opt_in_guard, save_user_chrome,
@@ -184,4 +184,86 @@ fn a_profile_under_home_is_shown_short() {
         assert_eq!(shown_dir(&dir), "~/.config/google-chrome");
     }
     assert_eq!(shown_dir(Path::new("/srv/profile")), "/srv/profile");
+}
+
+fn opted_in(pid: u32) -> UserChromeRecord {
+    UserChromeRecord {
+        name: "Google Chrome".to_owned(),
+        user_data_dir: PathBuf::from("/Users/u/Library/Application Support/Google/Chrome"),
+        pid,
+        started: Some("Mon Nov 16 10:00:00 2026".to_owned()),
+    }
+}
+
+#[test]
+fn lsof_listeners_must_all_be_the_opted_in_browser() {
+    let record = opted_in(500);
+    assert!(listeners_are(9333, &record, Some(vec![500])).is_ok());
+    let gone = listeners_are(9333, &record, Some(Vec::new())).unwrap_err();
+    assert_eq!(gone.kind(), Some(super::GONE_KIND));
+    let unsupported = listeners_are(9333, &record, None).unwrap_err();
+    assert_eq!(unsupported.kind(), Some("cdp_user_chrome_unsupported"));
+    let stranger = listeners_are(9333, &record, Some(vec![777])).unwrap_err();
+    assert_eq!(stranger.kind(), Some("cdp_endpoint_unverified"));
+    assert!(
+        stranger.message.contains("held by pid 777"),
+        "{}",
+        stranger.message
+    );
+}
+
+#[test]
+fn a_second_listener_beside_the_browser_is_named_not_the_browser() {
+    let record = opted_in(500);
+    let error = listeners_are(9333, &record, Some(vec![500, 777])).unwrap_err();
+    assert_eq!(error.kind(), Some("cdp_endpoint_unverified"));
+    assert!(
+        error.message.contains("held by pid 777"),
+        "{}",
+        error.message
+    );
+}
+
+#[cfg(unix)]
+fn browser(name: &'static str, dir: &Path) -> UserBrowser {
+    UserBrowser {
+        name,
+        user_data_dir: dir.to_path_buf(),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_port_file_an_exited_browser_left_does_not_shadow_the_running_one() {
+    let stale = temp("stale-chrome");
+    std::fs::write(
+        stale.join("DevToolsActivePort"),
+        "40123\n/devtools/browser/old\n",
+    )
+    .unwrap();
+    let live = profile("live-fork", std::process::id());
+    let never = temp("never-debugged");
+
+    let picked = only_profile(vec![
+        browser("Google Chrome", &stale),
+        browser("ego lite", &live),
+        browser("Chromium", &never),
+    ]);
+    let only_stale = only_profile(vec![browser("Google Chrome", &stale)]).unwrap_err();
+    let none = only_profile(vec![browser("Chromium", &never)]).unwrap_err();
+    let both = only_profile(vec![browser("ego lite", &live), browser("Brave", &live)]).unwrap_err();
+    for dir in [&stale, &live, &never] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    assert_eq!(picked.unwrap(), ("ego lite", live));
+    assert_eq!(only_stale.kind(), Some("cdp_user_chrome_not_found"));
+    assert!(
+        only_stale.message.contains("left from an earlier run"),
+        "{}",
+        only_stale.message
+    );
+    assert_eq!(none.kind(), Some("cdp_user_chrome_not_found"));
+    assert!(none.message.contains("None of your browsers"));
+    assert_eq!(both.kind(), Some("cdp_user_chrome_ambiguous"));
 }

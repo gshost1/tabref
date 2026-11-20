@@ -114,10 +114,7 @@ fn a_form_just_past_the_budget_shows_its_controls_or_points_at_them() {
         let pointed = view.stdout.contains("form controls follow, from line");
         assert!(shown || pointed, "{rows} rows:\n{}", view.stdout);
         let chars = view.stdout.chars().count();
-        assert!(
-            chars <= SNAP_BUDGET + 1_200 + 400,
-            "{rows} rows: {chars} chars"
-        );
+        assert!(chars <= SNAP_BUDGET, "{rows} rows: {chars} chars");
         if pointed {
             let from = view
                 .stdout

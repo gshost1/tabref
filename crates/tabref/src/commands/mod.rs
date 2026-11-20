@@ -1,6 +1,7 @@
 pub(crate) mod act_target;
 pub(crate) mod acted;
 pub(crate) mod action_report;
+mod action_report_changes;
 pub(crate) mod app_guard;
 pub(crate) mod batch_step;
 pub(crate) mod check;
@@ -22,6 +23,7 @@ pub(crate) mod download_wait;
 pub(crate) mod downloads;
 pub(crate) mod fill;
 pub(crate) mod find;
+pub(crate) mod find_room;
 pub(crate) mod focus;
 pub(crate) mod hover;
 pub(crate) mod js;
@@ -68,7 +70,14 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         return Ok(skill::run(topic.as_deref()));
     }
     let mut session = Session::open(&session_options(cli))?;
+    let reads = only_reads(&cli.command);
+    if !reads {
+        session.note_page_action();
+    }
     let outcome = dispatch_cli(&mut session, cli);
+    if !reads {
+        session.note_page_action();
+    }
     session.with_warning(outcome)
 }
 
@@ -119,6 +128,18 @@ fn unused_note(choice: &tabref_cdp::DialogChoice) -> String {
     format!(
         "note: --dialog {given} was not used: no {wanted} opened during this command; one that \
          opens after it is accepted, and the next command reports it"
+    )
+}
+
+/// Whether `command` only reads the page (or navigates and reads it), so it
+/// may keep and reuse a capture in the daemon. Any other command may change
+/// a page in ways no page script sees, such as a hover: in the daemon it
+/// clears every kept capture, and in-process it stamps the ref store so the
+/// daemon's kept captures are not used again.
+pub(crate) fn only_reads(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Open { .. } | Command::Snap { .. } | Command::Find { .. } | Command::Read { .. }
     )
 }
 
@@ -208,7 +229,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             px,
         } => scroll::run(session, direction, target.as_deref(), *px),
         Command::Upload { target, files } => upload::run(session, target, files),
-        Command::Find { text, role } => find::run(session, text, role.as_deref()),
+        Command::Find { text, role } => find::run(session, &text.join(" "), role.as_deref()),
         Command::Read {
             target,
             section,
