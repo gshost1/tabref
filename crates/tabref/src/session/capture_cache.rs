@@ -26,8 +26,8 @@ use super::Session;
 use super::captured_snapshot::CapturedSnapshot;
 use super::ref_target::latest_snapshot_of;
 
-const MAX_AGE: Duration = Duration::from_secs(60);
-const WATCH_WAIT: Duration = Duration::from_millis(300);
+const MAX_AGE: Duration = Duration::from_secs(5);
+const WATCH_WAIT: Duration = Duration::from_millis(8);
 const MAX_KEPT: usize = 4;
 const PAGE_ACTIONS: &str = "page-actions";
 
