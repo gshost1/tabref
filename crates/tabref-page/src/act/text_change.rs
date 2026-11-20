@@ -1,32 +1,135 @@
 use std::fmt;
 
 const CONTEXT_CHARS: usize = 40;
+const COMPACT_CONTEXT_CHARS: usize = 8;
 const LINE_CHARS: usize = 100;
+const ADDED_CHARS: usize = 400;
 const MIDDLE_CHARS: usize = 60;
+const BRIEF_ROWS_CHARS: usize = 80;
+const ROWS_LABEL: &str = "now starting:";
+const ROWS_SHOWN: usize = 5;
+const ABOVE_CHARS: usize = 40;
 
 /// One line of a page's rendered text that an action changed: rewritten in
-/// place, added or removed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// place, added or removed; or a run of lines the action put in a new
+/// order (a sorted list drawn again): the line above the run, the run's
+/// lines in their new order, and whether a table drew them as rows.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TextChange {
-    Changed { before: String, after: String },
+    Changed {
+        before: String,
+        after: String,
+    },
     Added(String),
     Removed(String),
+    Reordered {
+        above: Option<String>,
+        run: Vec<String>,
+        table: bool,
+    },
+}
+
+impl TextChange {
+    /// The change as a `do` step's line carries it: as printed, with an
+    /// added line cut to 100 characters like a removed one.
+    pub fn brief(&self) -> String {
+        match self {
+            Self::Added(line) => format!("+ {}", cut(line, LINE_CHARS)),
+            Self::Reordered { above, run, table } => brief_rows(&run_head(above, run, *table), run),
+            other => other.to_string(),
+        }
+    }
+
+    /// A rewritten line with less context, keeping the changed text and
+    /// its delimiters together in a smaller text preview.
+    pub fn compact_rewrite(&self) -> Option<String> {
+        match self {
+            Self::Changed { before, after } => {
+                Some(inline_change(before, after, COMPACT_CONTEXT_CHARS))
+            }
+            _ => None,
+        }
+    }
+
+    /// The reorder heading, complete rows that fit, and a count of the
+    /// rows left out. The byte budget includes newlines and the footer.
+    pub fn reorder_preview(&self, budget: usize) -> Option<(String, usize)> {
+        let Self::Reordered { above, run, table } = self else {
+            return None;
+        };
+        let mut head = run_head(above, run, *table);
+        for shown in (0..=run.len().min(ROWS_SHOWN)).rev() {
+            let footer = if shown < run.len() {
+                format!("\n  (+{} more: tabref snap)", run.len() - shown)
+            } else {
+                String::new()
+            };
+            let rows: usize = run[..shown].iter().map(|row| row.len() + 3).sum();
+            if head.len() + rows + footer.len() <= budget {
+                for row in &run[..shown] {
+                    head.push_str("\n  ");
+                    head.push_str(row);
+                }
+                head.push_str(&footer);
+                return Some((head, shown));
+            }
+        }
+        None
+    }
 }
 
 impl fmt::Display for TextChange {
     /// `▲ {3 -> 4} ▼ Books set in winter` for a rewritten line, keeping the
-    /// words around the change; `+ line` and `- line` otherwise, cut to 100
-    /// characters.
+    /// words around the change; `+ line` otherwise, whole up to 400
+    /// characters so a validation message keeps its list, and `- line` cut
+    /// to 100. A cut ends after a whole word. A reorder prints its first
+    /// rows, one per indented line, and how to see the rest.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Changed { before, after } => formatter.write_str(&inline_change(before, after)),
-            Self::Added(line) => write!(formatter, "+ {}", cut(line, LINE_CHARS)),
+            Self::Reordered { .. } => {
+                let (block, _) = self.reorder_preview(usize::MAX).ok_or(fmt::Error)?;
+                formatter.write_str(&block)
+            }
+            Self::Changed { before, after } => {
+                formatter.write_str(&inline_change(before, after, CONTEXT_CHARS))
+            }
+            Self::Added(line) => write!(formatter, "+ {}", cut(line, ADDED_CHARS)),
             Self::Removed(line) => write!(formatter, "- {}", cut(line, LINE_CHARS)),
         }
     }
 }
 
-fn inline_change(before: &str, after: &str) -> String {
+/// `reordered 8 rows below "Code Weight", now starting:`; `lines` when no
+/// table drew them, and no `below` when the run starts the page.
+fn run_head(above: &Option<String>, run: &[String], table: bool) -> String {
+    let noun = if table { "rows" } else { "lines" };
+    let below = above.as_ref().map_or_else(String::new, |line| {
+        format!(" below \"{}\"", cut(line, ABOVE_CHARS))
+    });
+    format!("reordered {} {noun}{below}, {ROWS_LABEL}", run.len())
+}
+
+fn brief_rows(head: &str, first: &[String]) -> String {
+    let count = first.len();
+    let mut rows = String::new();
+    let mut shown = 0;
+    for row in first {
+        let row = cut(row, BRIEF_ROWS_CHARS);
+        let joined = rows.chars().count() + row.chars().count() + 3;
+        if shown > 0 && joined > BRIEF_ROWS_CHARS {
+            break;
+        }
+        if shown > 0 {
+            rows.push_str(" | ");
+        }
+        rows.push_str(&row);
+        shown += 1;
+    }
+    let more = if count > shown { " …" } else { "" };
+    format!("{head} {rows}{more}")
+}
+
+fn inline_change(before: &str, after: &str, context_chars: usize) -> String {
     let old: Vec<&str> = before.split(' ').collect();
     let new: Vec<&str> = after.split(' ').collect();
     let prefix = old
@@ -54,7 +157,7 @@ fn inline_change(before: &str, after: &str) -> String {
     let mut line = String::new();
     let head = old[..prefix].join(" ");
     if !head.is_empty() {
-        line.push_str(&tail(&head, CONTEXT_CHARS));
+        line.push_str(&tail(&head, context_chars));
         line.push(' ');
     }
     line.push_str(&match (removed.is_empty(), added.is_empty()) {
@@ -66,7 +169,7 @@ fn inline_change(before: &str, after: &str) -> String {
     let rest = old[old.len() - suffix..].join(" ");
     if !rest.is_empty() {
         line.push(' ');
-        line.push_str(&cut(&rest, CONTEXT_CHARS));
+        line.push_str(&cut(&rest, context_chars));
     }
     line
 }
@@ -119,14 +222,24 @@ fn splits_number(chars: &[char], at: usize) -> bool {
     at > 0 && chars.get(at).is_some_and(char::is_ascii_digit) && chars[at - 1].is_ascii_digit()
 }
 
-/// `text` cut to `limit` characters, ending in `…` when cut.
+/// `text` cut to about `limit` characters, ending in `…` when cut: after
+/// the last whole word that fits, or mid-word when the first half of the
+/// room holds no space.
 pub(crate) fn cut(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit {
         return text.to_owned();
     }
-    let mut kept: String = text.chars().take(limit).collect();
-    kept.push('…');
-    kept
+    let kept: String = text.chars().take(limit).collect();
+    let next_is_space = text.chars().nth(limit).is_some_and(char::is_whitespace);
+    if next_is_space {
+        return format!("{} …", kept.trim_end());
+    }
+    match kept.rfind(' ') {
+        Some(space) if kept[..space].chars().count() >= limit / 2 => {
+            format!("{} …", kept[..space].trim_end())
+        }
+        _ => format!("{kept}…"),
+    }
 }
 
 fn tail(text: &str, limit: usize) -> String {

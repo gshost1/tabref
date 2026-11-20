@@ -92,11 +92,15 @@ pub(crate) fn run_step(
     };
     let (mut text, data) = step_report(session, acted, last)?;
     if let Some((before, page)) = late {
-        text.push_str(&format!(
-            " -> {} {} (after the step settled)",
-            short_url(&before, &page.url),
-            quote_text(&page.title)
-        ));
+        let summary_end = text.find('\n').unwrap_or(text.len());
+        text.insert_str(
+            summary_end,
+            &format!(
+                " -> {} {} (after the step settled)",
+                short_url(&before, &page.url),
+                quote_text(&page.title)
+            ),
+        );
     }
     Ok(StepDone { text, data })
 }
@@ -191,8 +195,9 @@ fn scroll_step(
             _ => None,
         };
         let outcome = scroll::scroll(session, direction, container.as_ref(), None, deadline)?;
+        let first = outcome.text.lines().next().unwrap_or_default();
         return Ok(StepDone {
-            text: format!("ok {}", outcome.text),
+            text: format!("ok {first}"),
             data: outcome.data,
         });
     }

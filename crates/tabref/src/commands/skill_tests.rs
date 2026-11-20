@@ -12,7 +12,7 @@ fn the_guide_explains_how_to_start_chrome_when_needed() {
 fn the_guide_stays_short_and_points_to_the_rare_commands() {
     let guide = run(None).text;
     assert!(guide.len() <= 2_800, "{} bytes", guide.len());
-    assert!(guide.contains("tabref skill more"));
+    assert!(guide.contains("tabref skill more` for waits, `connect` to your own Chrome"));
     let more = run(Some("more")).text;
     for rare in [
         "--user-chrome",
@@ -34,4 +34,58 @@ fn the_guide_does_not_offer_upload_as_a_batch_step() {
         .find(|line| line.starts_with("Steps:"))
         .unwrap_or_default();
     assert!(steps.contains("but `upload`"), "{steps}");
+}
+
+#[test]
+fn the_guide_explains_when_commands_wait_and_when_to_read_the_result() {
+    let guide = run(None).text;
+    for rule in [
+        "read that instead of taking a snapshot",
+        "in one `tabref do`",
+        "repeat `scroll down` in a `for`",
+        "Commands wait for the page. Don't add sleeps.",
+    ] {
+        assert!(guide.contains(rule), "{rule}");
+    }
+    for misleading in [
+        "not shell loops",
+        "do not\nsnapshot again",
+        "waits for the page itself",
+    ] {
+        assert!(!guide.contains(misleading), "{misleading}");
+    }
+}
+
+#[test]
+fn the_guide_keeps_the_forms_a_model_copies() {
+    let guide = run(None).text;
+    for form in [
+        "across the whole page, not the first block",
+        "[e9 select Size = \"M\" options: S | M | L]",
+        "visible|enabled|hidden|gone|value=X",
+        "for n in 1 2 3 4 5 6",
+        "tabref read --section \"<heading>\"",
+    ] {
+        assert!(guide.contains(form), "{form}");
+    }
+    let example = guide.split("tabref do <<'EOF'").nth(1).unwrap_or_default();
+    let body = example.split("\n    end").next().unwrap_or_default();
+    let mut steps = body.trim().lines().map(str::trim);
+    assert_eq!(steps.next(), Some("for name price in Cap 12.00 Mug 9.50"));
+    assert_eq!(steps.next(), Some("open /admin/products"));
+    assert_eq!(steps.next(), Some("click \"Edit\" in \"{name}\""));
+    assert_eq!(steps.next(), Some("fill \"Price\" {price}"));
+    assert_eq!(steps.next(), Some("click \"Save\""));
+}
+
+#[test]
+fn the_guide_keeps_error_recovery_hints() {
+    let guide = run(None).text;
+    for hint in [
+        "`ELEMENT_NOT_FOUND`: check close names.",
+        "`AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`.",
+        "`STALE_REF`: use the fresh ref.",
+    ] {
+        assert!(guide.contains(hint), "{hint}");
+    }
 }

@@ -4,7 +4,8 @@
 //! kept connection outlives the browser, then holds the launch-record lock
 //! for the rest, so no launch saves a record in between. It refuses when the
 //! recorded pid is not that browser any more (another program, or another
-//! profile). It asks the browser to close (`Browser.close`, so a profile
+//! profile), or when the launch record's port cannot be verified. It asks
+//! the browser to close (`Browser.close`, so a profile
 //! writes out what it holds). A browser it started itself that is still
 //! there is then killed with its process group (`recorded_process`); one it
 //! adopted, or any on Windows, is only asked. Then it removes a throwaway
@@ -15,14 +16,15 @@ use std::time::Duration;
 
 use serde_json::json;
 use tabref_cdp::{
-    LaunchedBrowser, abandon_launch, connect, connect_held, is_launched_browser, launched_alive,
+    LaunchedBrowser, abandon_launch, check_active_port, connect, connect_held, is_launched_browser,
+    launched_alive, read_launch_active_port, unverified_launch_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode, RefStore};
 
 use crate::cli::Cli;
 use crate::daemon::control::stop_endpoint_less;
 use crate::output::outcome::Outcome;
-use crate::session::endpoint_choice::launched_check;
+use crate::session::launch_check::{LaunchCheck, managed_launch_check};
 use crate::session::launch_record::{forget_launched, load_launched, lock_launched, read_launched};
 
 const CLOSE_BUDGET: Duration = Duration::from_secs(5);
@@ -59,10 +61,13 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
         )));
     }
     let deadline = Deadline::after(cli.timeout_ms())?.capped(CLOSE_BUDGET);
-    let graceful = was_running && ask_to_close(&record, deadline) && exited(&record, deadline);
+    let graceful = was_running && ask_to_close(&record, deadline)? && exited(&record, deadline);
     let may_kill = cfg!(unix) && !record.profile_use.adopted;
-    if was_running && !graceful && !may_kill {
-        return Err(not_closed(&record));
+    if was_running && !graceful && launched_alive(&record) == Some(true) {
+        if !may_kill {
+            return Err(not_closed(&record));
+        }
+        check_active_port(&record, read_launch_active_port(&record))?;
     }
     if !abandon_launch(&record) {
         return Err(AppError::new(
@@ -112,20 +117,23 @@ fn not_closed(record: &LaunchedBrowser) -> AppError {
 }
 
 /// Sends `Browser.close` when the record's port is still its browser's.
-fn ask_to_close(record: &LaunchedBrowser, deadline: Deadline) -> bool {
-    let Ok(endpoint) = record.endpoint() else {
-        return false;
+fn ask_to_close(record: &LaunchedBrowser, deadline: Deadline) -> Result<bool, AppError> {
+    let check = managed_launch_check(record);
+    let endpoint = record.endpoint()?;
+    let connection = match check {
+        LaunchCheck::Held(held) => connect_held(&endpoint, &held, deadline),
+        LaunchCheck::Alive => connect(&endpoint, deadline),
+        LaunchCheck::Unverified(error) => return Err(error),
+        LaunchCheck::Gone if launched_alive(record) == Some(true) => {
+            return Err(unverified_launch_port(record));
+        }
+        LaunchCheck::Gone => return Ok(false),
     };
-    let connection = match launched_check(record) {
-        Some(Some(held)) => connect_held(&endpoint, &held, deadline),
-        Some(None) => connect(&endpoint, deadline),
-        None => return false,
-    };
-    connection.is_ok_and(|mut connection| {
+    Ok(connection.is_ok_and(|mut connection| {
         connection
             .call("Browser.close", json!({}), None, deadline)
             .is_ok()
-    })
+    }))
 }
 
 /// Whether the browser exited (after it was asked to close) by `deadline`.

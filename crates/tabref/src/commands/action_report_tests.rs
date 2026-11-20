@@ -1,6 +1,45 @@
-use serde_json::json;
+use std::time::{Duration, Instant};
 
+use serde_json::json;
+use tabref_page::TextChange;
+
+use super::super::action_report_changes::{
+    change_data, counted, reload_head, step_change, within_budget,
+};
 use super::{NOTHING_READ, NOTHING_SEEN, dialog_line, dialog_lines, nothing_seen};
+
+#[test]
+fn reorder_preview_fits_whole_cjk_rows_and_reports_omissions() {
+    let rows: Vec<_> = (1..=8)
+        .map(|n| format!("{n} {}", "界".repeat(82)))
+        .collect();
+    let changes = [
+        TextChange::Reordered {
+            above: Some("Header".into()),
+            run: rows.clone(),
+            table: true,
+        },
+        TextChange::Added("追加".repeat(180)),
+        TextChange::Added("Another change".into()),
+    ];
+    let counts = counted(&changes);
+    let text = within_budget(&counts).join("\n");
+    assert!(text.len() <= 600, "{}", text.len());
+    let mut lines = text.lines().skip(1);
+    for row in &rows[..2] {
+        assert_eq!(lines.next().map(str::trim_start), Some(row.as_str()));
+    }
+    assert_eq!(lines.next(), Some("  (+6 more: tabref snap)"));
+    assert_eq!(lines.next(), Some("+2 more: tabref snap"));
+    let data = change_data(&counts);
+    assert_eq!(data["changes"][0], "rows reordered: 2 of 8");
+    assert_eq!(data["change_counts"][0]["line"], data["changes"][0]);
+    assert_eq!(data["change_counts"][0]["count"], 1);
+    assert_eq!(
+        data["reordered"],
+        serde_json::json!({ "above": "Header", "rows": 2, "total": 8, "table": true })
+    );
+}
 
 #[test]
 fn a_quiet_action_selects_the_unread_frame_note() {
@@ -96,4 +135,170 @@ fn only_repeats_next_to_each_other_collapse_and_one_more_is_singular() {
     );
     let many: Vec<_> = (0..11).map(|index| alert(&format!("N{index}"))).collect();
     assert_eq!(dialog_lines(&many).last().unwrap(), "1 more dialog");
+}
+
+#[test]
+fn a_line_the_page_shows_twice_is_reported_once() {
+    let changes = vec![
+        TextChange::Added("Please fix the following:".into()),
+        TextChange::Added("Phone must be 555-123-4567.".into()),
+        TextChange::Added("Phone must be 555-123-4567.".into()),
+        TextChange::Removed("Draft".into()),
+        TextChange::Added("Draft".into()),
+    ];
+    assert_eq!(
+        within_budget(&counted(&changes)),
+        vec![
+            "+ Please fix the following:",
+            "+ Phone must be 555-123-4567. ×2",
+            "- Draft",
+            "+ Draft",
+        ]
+    );
+}
+
+#[test]
+fn a_repeated_line_says_how_many_times_it_showed() {
+    let changes = vec![
+        TextChange::Added("Required".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Saved".into()),
+    ];
+    let counts = counted(&changes);
+    assert_eq!(within_budget(&counts), vec!["+ Required ×2", "+ Saved"]);
+    assert_eq!(
+        change_data(&counts),
+        json!({
+            "changes": ["+ Required ×2", "+ Saved"],
+            "change_counts": [
+                { "line": "+ Required", "count": 2 },
+                { "line": "+ Saved", "count": 1 }
+            ],
+            "distinct_changes_omitted": 0
+        })
+    );
+}
+
+#[test]
+fn the_reload_preview_reports_only_counted_additions() {
+    let changes = [
+        TextChange::Removed("Old draft".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Required".into()),
+        TextChange::Added("Try again".into()),
+    ];
+    assert_eq!(
+        reload_head(&counted(&changes)),
+        ["+ Required ×2", "+ Try again"]
+    );
+}
+
+#[test]
+fn lines_alike_only_in_their_shown_part_stay_apart() {
+    let head = "word ".repeat(100);
+    let changes = vec![
+        TextChange::Added(format!("{head}first")),
+        TextChange::Added(format!("{head}second")),
+    ];
+    let counted = counted(&changes);
+    assert_eq!(counted.len(), 2);
+    assert!(counted.iter().all(|line| line.count == 1));
+}
+
+#[test]
+fn a_step_line_cuts_its_change_at_100_characters() {
+    let changes = vec![
+        TextChange::Added("x ".repeat(200)),
+        TextChange::Added("Saved".into()),
+    ];
+    let line = step_change(&changes).unwrap();
+    assert!(line.chars().count() <= 120, "{line}");
+    assert!(line.ends_with(" (+1 more)"), "{line}");
+}
+
+#[test]
+fn a_change_that_does_not_fit_is_cut_to_the_room_left() {
+    let lines: Vec<_> = (0..50)
+        .map(|n| TextChange::Added(format!("{n} {}", "y".repeat(297))))
+        .collect();
+    let shown = within_budget(&counted(&lines));
+    assert_eq!(shown.len(), 3, "{shown:?}");
+    assert_eq!(shown[0], lines[0].to_string());
+    assert!(shown[1].ends_with('…'), "{}", shown[1]);
+    assert_eq!(shown[2], "+48 more: tabref snap");
+    let used: usize = shown[..2].iter().map(String::len).sum();
+    assert!(used <= 600, "{used}");
+}
+
+#[test]
+fn the_first_change_keeps_to_the_budget_too() {
+    let wide = TextChange::Added("字".repeat(400));
+    let shown = within_budget(&counted(&[wide.clone(), wide]));
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(shown[0].len() <= 600, "{}", shown[0].len());
+    assert!(shown[0].ends_with("… ×2"), "{}", shown[0]);
+}
+
+#[test]
+fn a_rewritten_line_that_does_not_fit_keeps_its_marker_intact() {
+    let added = TextChange::Added("x".repeat(399));
+    let rewrite = TextChange::Changed {
+        before: "字".repeat(50),
+        after: "語".repeat(50),
+    };
+    let changes = [added.clone(), rewrite.clone()];
+    assert_eq!(
+        within_budget(&counted(&changes)),
+        vec![added.to_string(), "+1 more: tabref snap".to_owned()]
+    );
+    assert_eq!(
+        within_budget(&counted(std::slice::from_ref(&rewrite))),
+        vec![rewrite.to_string()]
+    );
+}
+
+#[test]
+fn a_long_first_rewrite_shortens_its_context_and_keeps_its_count() {
+    let head = "𠮷".repeat(40);
+    let tail = "𩸽".repeat(40);
+    let before = "🟠".repeat(60);
+    let after = "🟣".repeat(60);
+    let rewrite = TextChange::Changed {
+        before: format!("{head} {before} {tail}"),
+        after: format!("{head} {after} {tail}"),
+    };
+    assert!(rewrite.to_string().len() > 600);
+    let shown = within_budget(&counted(&[rewrite.clone(), rewrite]));
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(shown[0].len() <= 600, "{}", shown[0]);
+    assert!(shown[0].contains(&format!("{{{before} -> {after}}}")));
+    assert!(shown[0].ends_with("… ×2"), "{}", shown[0]);
+}
+
+#[test]
+fn thousands_of_changes_keep_first_seen_order_under_a_time_bound() {
+    let mut changes: Vec<_> = (0..12_000)
+        .map(|index| TextChange::Added(format!("Item number {index:05}")))
+        .collect();
+    changes.push(changes[34].clone());
+    let started = Instant::now();
+    let counts = counted(&changes);
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(counts.len(), 12_000);
+    assert_eq!(counts[34].change, &changes[34]);
+    assert_eq!(counts[34].count, 2);
+    assert_eq!(counts[11_999].change, &changes[11_999]);
+    let json = change_data(&counts);
+    assert_eq!(json["changes"].as_array().unwrap().len(), 50);
+    assert_eq!(json["change_counts"].as_array().unwrap().len(), 50);
+    assert_eq!(json["distinct_changes_omitted"], 11_950);
+    assert_eq!(json["changes"][34], "+ Item number 00034 ×2");
+    assert_eq!(
+        json["change_counts"][34],
+        json!({ "line": "+ Item number 00034", "count": 2 })
+    );
 }

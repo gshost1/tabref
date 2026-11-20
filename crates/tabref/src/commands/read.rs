@@ -5,7 +5,7 @@ use tabref_page::read_element;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::ref_target::RefTarget;
-use crate::view::snapshot_view::reading_view;
+use crate::view::snapshot_view::{annotate_field_read, reading_view};
 use crate::view::view_request::ViewRequest;
 use crate::view::view_scope::ViewScope;
 
@@ -70,7 +70,7 @@ fn read_field(session: &mut Session, target: &RefTarget) -> Result<Outcome, AppE
     {
         out.push_str(&format!("\n{text}"));
     }
-    Ok(Outcome::new(
+    let mut report = Outcome::new(
         out,
         json!({
             "ref": target.ref_id.to_string(),
@@ -78,5 +78,7 @@ fn read_field(session: &mut Session, target: &RefTarget) -> Result<Outcome, AppE
             "value": reading.value,
             "checked": reading.checked,
         }),
-    ))
+    );
+    annotate_field_read(session, &mut report);
+    Ok(report)
 }

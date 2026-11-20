@@ -41,3 +41,15 @@ fn a_server_that_holds_the_connection_open_is_read_without_waiting_for_eof() {
     assert_eq!(http_ok_body(&raw).as_deref(), Some("{}"));
     server.join().unwrap();
 }
+
+#[test]
+fn the_status_is_read_from_an_http_status_line_only() {
+    use super::http_status;
+    assert_eq!(
+        http_status(b"HTTP/1.1 404 Not Found\r\nContent-Length:0\r\n\r\n"),
+        Some(404)
+    );
+    assert_eq!(http_status(b"HTTP/1.1 200 OK\r\n\r\n{}"), Some(200));
+    assert_eq!(http_status(b"garbage 404"), None);
+    assert_eq!(http_status(b""), None);
+}

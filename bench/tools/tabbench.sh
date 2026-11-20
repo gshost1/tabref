@@ -24,7 +24,8 @@
 # fresh copy and any fresh staging. A clean start removes those leftovers too.
 #
 # --taskset fresh (run and smoke): the sealed folder (--fresh-dir <dir> or BENCH_FRESH_DIR) is seal-checked here,
-# copied into tabbench's home as a tar stream ($HOME/fresh), seal-checked again there, and handed to run_web.py as a
+# copied into tabbench's home as a tar stream ($HOME/fresh, made owner-writable there so a read-only original's copy
+# can still be deleted; the seal covers content, not modes), seal-checked again there, and handed to run_web.py as a
 # disposable copy (--fresh-remove-copy): run_web.py deletes it once its module is loaded and its server is up. After
 # the pass the operator's original is seal-checked again; only then are the pass's staged rows committed to
 # results-web.jsonl (else discarded). The sealed output (answers, verifier text, transcripts) is moved out of
@@ -66,7 +67,8 @@ with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
 }
 stop_all() { as_user bash -c 'kill -9 -1' 2>/dev/null || true; }
 fresh_out() {
-  as_user bash -c 'rm -rf "$HOME/fresh" "$HOME/fresh.new" "$HOME/runs/fresh-staged" "$HOME/runs-smoke"' 2>/dev/null || true
+  as_user bash -c 'chmod -R u+w "$HOME/fresh" "$HOME/fresh.new" 2>/dev/null
+      rm -rf "$HOME/fresh" "$HOME/fresh.new" "$HOME/runs/fresh-staged" "$HOME/runs-smoke"' 2>/dev/null || true
 }
 cleanup() { stop_all; fresh_out; }
 begin() {
@@ -122,7 +124,7 @@ fresh_in() {
   python3 -I -B "$here/harness/fresh.py" verify "$FRESH_SRC"
   tar -C "$FRESH_SRC" -cf - . \
     | as_user bash -c 'set -e; rm -rf "$HOME/fresh.new" "$HOME/fresh"; mkdir -m 700 "$HOME/fresh.new"
-        tar -C "$HOME/fresh.new" --no-same-owner -xf -; mv "$HOME/fresh.new" "$HOME/fresh"'
+        tar -C "$HOME/fresh.new" --no-same-owner -xf -; chmod -R u+w "$HOME/fresh.new"; mv "$HOME/fresh.new" "$HOME/fresh"'
   as_user python3 -I -B "$H/tabref/bench/harness/fresh.py" verify "$H/fresh"
 }
 fresh_finish() {

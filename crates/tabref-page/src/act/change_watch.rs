@@ -16,7 +16,8 @@ use tabref_core::{AppError, Deadline};
 use super::page_changes::PageChanges;
 use super::page_mark::{BlockText, PageMark, TextBlocks};
 use super::text_change::TextChange;
-use super::text_diff::{diff_lines, text_lines};
+use super::text_diff::{diff_page, text_lines};
+use super::text_reorder::{Cells, cells_of};
 use super::watch_scripts::{COUNT_WATCH, READ_WATCH, SCAN, START_WATCH};
 use crate::{CdpConnection, PageSession};
 
@@ -63,7 +64,7 @@ fn text_blocks(reply: &Value) -> TextBlocks {
         .flatten()
         .filter_map(|block| {
             let text = match &block[1] {
-                Value::String(text) => BlockText::Lines(text_lines(text)),
+                Value::String(text) => BlockText::Readable(text.clone()),
                 Value::Bool(false) => BlockText::CrossOrigin,
                 _ => BlockText::OverBudget,
             };
@@ -79,29 +80,29 @@ fn compare_blocks(before: &TextBlocks, after: TextBlocks) -> (Vec<TextChange>, u
     let unchecked: HashSet<u64> = before
         .iter()
         .chain(&after)
-        .filter_map(|(id, text)| (!matches!(text, BlockText::Lines(_))).then_some(*id))
+        .filter_map(|(id, text)| (!matches!(text, BlockText::Readable(_))).then_some(*id))
         .collect();
     let over_budget: HashSet<u64> = before
         .iter()
         .chain(&after)
         .filter_map(|(id, text)| matches!(text, BlockText::OverBudget).then_some(*id))
         .collect();
-    let readable_lines = |blocks: &TextBlocks| {
-        blocks
-            .iter()
-            .filter(|(id, _)| !unchecked.contains(id))
-            .filter_map(|(_, text)| match text {
-                BlockText::Lines(lines) => Some(lines),
-                _ => None,
-            })
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>()
+    let readable = |blocks: &TextBlocks| {
+        let mut lines = Vec::new();
+        let mut cells = Cells::new();
+        for (id, block) in blocks {
+            if !unchecked.contains(id) {
+                if let BlockText::Readable(text) = block {
+                    lines.extend(text_lines(text));
+                    cells.extend(cells_of(text));
+                }
+            }
+        }
+        (lines, cells)
     };
-    (
-        diff_lines(&readable_lines(before), &readable_lines(&after)),
-        over_budget.len(),
-    )
+    let (before, _) = readable(before);
+    let (after, cells) = readable(&after);
+    (diff_page(&before, &after, &cells), over_budget.len())
 }
 
 /// How many DOM mutations the watch has counted so far; `None` when the
