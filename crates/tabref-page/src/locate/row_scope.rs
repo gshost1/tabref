@@ -210,8 +210,8 @@ fn label_matches(label: &str, node: &AccessibilityNode, name: &str) -> bool {
         && matches(label)
 }
 
+/// Only fold the name and suffix keywords. Value text is case-sensitive.
 fn matches_name(mut rest: &str, name: &str, live_value: Option<&str>, link: bool) -> bool {
-    // Only fold the name and suffix keywords. Value text is case-sensitive.
     for word in name.split_whitespace() {
         let (printed, tail) = rest.split_once(' ').unwrap_or((rest, ""));
         if printed.to_lowercase() != word {
@@ -245,8 +245,8 @@ fn matches_name(mut rest: &str, name: &str, live_value: Option<&str>, link: bool
     rest.is_empty() || (link && rest.starts_with("-> "))
 }
 
+/// Table lines collapse spaces, and Chrome's AX value trims the edges.
 fn value_matches(printed: &str, live: &str) -> bool {
-    // Table lines collapse spaces, and Chrome's AX value trims the edges.
     let printed = printed.trim();
     let matches = |value: &str| printed == squash(&escape_line(value, true));
     matches(live) || (printed.ends_with('…') && matches(&cut_chars(live, CONTROL_VALUE_LIMIT)))
