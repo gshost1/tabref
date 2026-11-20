@@ -166,7 +166,7 @@ impl Session {
 
     fn capture_key(&self, page: &PageSession) -> (String, String) {
         (
-            self.endpoint.websocket_url.as_url().to_owned(),
+            self.endpoint().websocket_url.as_url().to_owned(),
             page.target_id.clone(),
         )
     }
