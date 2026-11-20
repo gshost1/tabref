@@ -73,7 +73,7 @@ pub use outline::text_runs::{collapse_run, cut_chars, squash};
 pub use outline::text_search::search_text;
 pub use outline::url_resolve::{origin_of, resolve_href, short_href};
 pub use page::capture_watch::{
-    CaptureWatch, arm_capture_watch, check_capture_watch, has_closed_shadow_root,
+    CaptureWatch, IDLE_WAIT_MS, arm_capture_watch, check_capture_watch, has_closed_shadow_root,
 };
 pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
