@@ -39,7 +39,6 @@ pub use act::page_mark::PageMark;
 pub use act::read::read_element;
 pub use act::screenshot::{capture_screenshot, png_size};
 pub use act::scroll::{box_center, scroll_into_view};
-pub use act::scroll_by::scroll_by;
 pub use act::select_option::select_option;
 pub use act::select_outcome::SelectOutcome;
 pub use act::text_change::TextChange;
@@ -78,8 +77,8 @@ pub use page::capture_watch::{
 };
 pub use page::evaluate::evaluate;
 pub use page::page_info::PageInfo;
-pub use page::page_scroll::scroll_page;
 pub use page::page_text::page_text;
+pub use page::scroll_site::ScrollSite;
 pub use settle::action_settle::{follow_late_navigation, settle_action, watch_navigation};
 pub use settle::dialog_json::{DIALOG_OPENING, dialog_json, drain_dialogs, mark_other_tab};
 pub use settle::download_events::{
@@ -93,6 +92,8 @@ pub use settle::download_timing::DownloadTiming;
 pub use settle::element_state::ElementState;
 pub use settle::element_wait::wait_for_state;
 pub use settle::page_wait::{wait_for_text, wait_for_url};
+pub use settle::scroll_outcome::ScrollOutcome;
+pub use settle::scroll_settle::scroll_and_settle;
 pub use settle::settle_outcome::SettleOutcome;
 pub use settle::state_wait::StateWait;
 pub use settle::watched_action::WatchedAction;
