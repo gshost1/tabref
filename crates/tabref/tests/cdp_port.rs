@@ -37,9 +37,7 @@ fn tabs_against(reply: &'static str, json: bool) -> (common::Run, String) {
                 {
                     std::thread::sleep(Duration::from_millis(5));
                 }
-                Err(error) => {
-                    panic!("test server did not accept the discovery connection: {error}")
-                }
+                Err(error) => return Err(error),
             }
         };
         stream.set_nonblocking(false).unwrap();
@@ -54,7 +52,7 @@ fn tabs_against(reply: &'static str, json: bool) -> (common::Run, String) {
             }
         }
         stream.write_all(reply.as_bytes()).unwrap();
-        request
+        Ok(request)
     });
 
     let home = common::scratch("cdp-port");
@@ -76,6 +74,9 @@ fn tabs_against(reply: &'static str, json: bool) -> (common::Run, String) {
     let hint = format!("--cdp ws://{address}/devtools/browser/<id>");
     let printed = if json { &run.stdout } else { &run.stderr };
     assert!(printed.contains(&hint), "{printed}");
-    assert_eq!(server.join().unwrap(), "GET /json/version HTTP/1.1");
+    assert_eq!(
+        server.join().unwrap().unwrap(),
+        "GET /json/version HTTP/1.1"
+    );
     (run, hint)
 }
