@@ -17,7 +17,7 @@ pub(super) struct NewControl<'a> {
 /// The line for the controls made again inside a reorder, if any, and the
 /// lines of the other new controls. Without a reorder every control is
 /// listed.
-pub(crate) fn redrawn<'a>(
+pub(super) fn redrawn<'a>(
     changes: &[TextChange],
     found: &[NewControl<'_>],
     documents: impl Fn(&str) -> Option<&'a [DomTree]>,
