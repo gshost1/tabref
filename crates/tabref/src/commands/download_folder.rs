@@ -3,7 +3,7 @@
 //! tabref's state directory for a browser `open --launch` started, else
 //! none, so the user's own browser keeps its own), and the size cap.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use tabref_cdp::default_user_data_dirs;
 use tabref_core::{AppError, create_private_dir};
@@ -18,8 +18,13 @@ const MB: u64 = 1024 * 1024;
 /// default profile directories, or a folder inside one, are refused before
 /// anything is created, with symbolic links resolved: a page could
 /// otherwise save a file named like tabref's state or a profile's there. A
-/// dangling link is refused too.
+/// dangling link or a parent-directory component is refused too.
 pub(crate) fn choose_folder(session: &mut Session, dir: &Path) -> Result<PathBuf, AppError> {
+    if dir.components().any(|part| part == Component::ParentDir) {
+        return Err(AppError::invalid_args(
+            "--download-dir cannot contain a '..' path component. Use the destination path directly.",
+        ));
+    }
     let absolute = std::path::absolute(dir)?;
     let root = session.store().base_dir().to_path_buf();
     if within(&absolute, &root)? {
@@ -102,17 +107,14 @@ pub(crate) fn download_folder(session: &mut Session) -> Result<Option<PathBuf>, 
 pub(crate) const UNSAFE_FOLDER: &str = "download_folder_unsafe";
 
 /// Whether `dir` is `root` or inside it, as written and with symbolic
-/// links resolved, for a `dir` that need not exist yet: its nearest
-/// existing ancestor is resolved. A dangling link on the way is
-/// `INVALID_ARGS`.
+/// links resolved. Both paths may be missing, so resolve their nearest
+/// existing ancestors. A dangling link in `dir` is `INVALID_ARGS`.
 pub(crate) fn within(dir: &Path, root: &Path) -> Result<bool, AppError> {
     let root_absolute = std::path::absolute(root)?;
     if dir.starts_with(&root_absolute) {
         return Ok(true);
     }
-    let real_root = root
-        .canonicalize()
-        .unwrap_or_else(|_| root_absolute.clone());
+    let real_root = resolved(&root_absolute).unwrap_or(root_absolute);
     Ok(resolved(dir)?.starts_with(real_root))
 }
 
