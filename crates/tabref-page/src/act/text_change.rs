@@ -13,7 +13,7 @@ const ABOVE_CHARS: usize = 40;
 /// place, added or removed; or a run of lines the action put in a new
 /// order (a sorted list drawn again): the line above the run, the run's
 /// lines in their new order, and whether a table drew them as rows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TextChange {
     Changed {
         before: String,

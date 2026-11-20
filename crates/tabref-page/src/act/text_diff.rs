@@ -12,14 +12,42 @@ const MAX_TABLE_CELLS: usize = 1_000_000;
 const PLAIN_CHANGES: usize = 4;
 
 /// The page's rendered text as diff lines: each line trimmed, runs of
-/// whitespace collapsed to one space, and blank lines dropped.
+/// whitespace collapsed to one space, and blank lines dropped. A control
+/// character that is not whitespace (a terminal escape, a bell) becomes
+/// `\uXXXX` and bidirectional marks are dropped, as `quote_text` prints
+/// them, so page text cannot drive the terminal the result is read in.
 pub(crate) fn text_lines(text: &str) -> Vec<String> {
     text.lines()
-        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|line| printable(&line.split_whitespace().collect::<Vec<_>>().join(" ")))
         .filter(|line| !line.is_empty())
         .collect()
 }
 
+pub(crate) fn printable(line: &str) -> String {
+    if !line.chars().any(|c| c.is_control() || is_bidirectional(c)) {
+        return line.to_owned();
+    }
+    let mut kept = String::with_capacity(line.len() + 8);
+    for character in line.chars().filter(|c| !is_bidirectional(*c)) {
+        if character.is_control() {
+            kept.push_str(&format!("\\u{:04x}", u32::from(character)));
+        } else {
+            kept.push(character);
+        }
+    }
+    kept
+}
+
+fn is_bidirectional(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// The changes that turn `before` into `after`, in page order. A removed
+/// line followed by an added one that shares its first or last word is one
+/// line rewritten in place.
 #[cfg(test)]
 pub(crate) fn diff_lines(before: &[String], after: &[String]) -> Vec<TextChange> {
     diff_page(before, after, &Cells::new())

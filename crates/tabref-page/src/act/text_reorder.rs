@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::text_change::TextChange;
-use super::text_diff::pair_up;
+use super::text_diff::{pair_up, printable};
 
 const SHAPE_SAMPLE: usize = 5;
 const MAX_BACKED: usize = 20;
@@ -26,7 +26,10 @@ pub(crate) fn cells_of(text: &str) -> Cells {
                 .split('\t')
                 .filter(|cell| !cell.trim().is_empty())
                 .count();
-            (line.split_whitespace().collect::<Vec<_>>().join(" "), cells)
+            (
+                printable(&line.split_whitespace().collect::<Vec<_>>().join(" ")),
+                cells,
+            )
         })
         .filter(|(line, cells)| *cells >= 2 && !line.is_empty())
         .collect()

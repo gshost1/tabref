@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
+use super::action_report_changes::{change_data, counted, step_change, within_budget};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
@@ -14,12 +15,10 @@ use crate::session::action_effects::ActionEffects;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
 
-const CHANGE_BUDGET: usize = 600;
 const NOTHING_SEEN: &str = " (no visible change)";
+const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
 const NEW_SHOWN: usize = 8;
 const NEW_LINE_CHARS: usize = 80;
-const MIN_ROOM: usize = 60;
-const ELLIPSIS: &str = " …";
 
 /// An action as a single command prints it: `clicked "Save"`, then what it
 /// set off, capped near 150 tokens: dialogs, the new address, the page's
@@ -27,8 +26,8 @@ const ELLIPSIS: &str = " …";
 /// led to another page, a snapshot of that page.
 pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome, AppError> {
     let mut first = format!("{} {}", past(acted.verb), acted.summary);
-    if nothing_seen(&acted) {
-        first.push_str(NOTHING_SEEN);
+    if let Some(note) = nothing_seen(&acted) {
+        first.push_str(note);
     }
     let mut outcome = Outcome::new(first, acted.data);
     if let Some(effects) = &acted.effects {
@@ -50,8 +49,8 @@ pub(crate) fn step_report(
     last: bool,
 ) -> Result<(String, Value), AppError> {
     let mut line = format!("ok {} {}", acted.verb, acted.summary);
-    if nothing_seen(&acted) {
-        line.push_str(NOTHING_SEEN);
+    if let Some(note) = nothing_seen(&acted) {
+        line.push_str(note);
     }
     let mut data = acted.data;
     let Some(effects) = &acted.effects else {
@@ -85,6 +84,10 @@ pub(crate) fn step_report(
         if !leaves && let Some(change) = step_change(&page.changes) {
             line.push_str(&format!("; {change}"));
         }
+        if let Some(note) = text_check_note(page) {
+            line.push_str(&format!("; {note}"));
+        }
+        merge(&mut data, text_check_data(page));
     }
     merge(&mut data, json!({ "navigated": effects.settled.navigated }));
     Ok((line, data))
@@ -117,6 +120,7 @@ fn effect_block(
         return Ok((lines, data));
     };
     merge(&mut data, json!({ "url": page.url, "title": page.title }));
+    merge(&mut data, text_check_data(page));
     if effects.settled.navigated && effects.url_before != page.url {
         let report = current_page_view(session)?;
         lines.push(report.text);
@@ -126,9 +130,10 @@ fn effect_block(
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
-    let changes = distinct_changes(&page.changes);
+    let changes = counted(&page.changes);
     lines.extend(within_budget(&changes));
-    merge(&mut data, json!({ "changes": changes }));
+    merge(&mut data, change_data(&changes));
+    lines.extend(text_check_note(page));
     if effects.settled.navigated {
         lines.push("the page reloaded, so earlier refs are stale; tabref snap for new ones".into());
     } else if page.changed_anything() || effects.settled.same_document {
@@ -148,74 +153,44 @@ fn effect_block(
     Ok((lines, data))
 }
 
-/// Whether a click, double-click, key press, hover or focus showed no
-/// effect at all: no navigation, tab, dialog, download, DOM mutation or text
-/// change. Changes inside a closed shadow root or drawn on a canvas look
-/// like this too. A focus the page moved away already says so.
-fn nothing_seen(acted: &Acted) -> bool {
+fn text_check_data(page: &tabref_page::PageChanges) -> Value {
+    json!({
+        "unread_frames": page.unread_frames,
+        "unchecked_text_blocks": page.unchecked_text_blocks,
+    })
+}
+
+fn text_check_note(page: &tabref_page::PageChanges) -> Option<String> {
+    let count = page.unchecked_text_blocks;
+    (count > 0).then(|| format!("Text blocks over budget and not checked: {count}"))
+}
+
+/// Reports no visible change after a click, key press, hover or focus when
+/// the document, open shadow roots and same-origin frames showed no effect.
+/// Names the gap when a visible cross-origin frame could not be checked.
+/// A focus the page moved away already says so.
+fn nothing_seen(acted: &Acted) -> Option<&'static str> {
     if acted.data.get("focused") == Some(&Value::Bool(false)) {
-        return false;
+        return None;
     }
-    let Some(effects) = &acted.effects else {
-        return false;
-    };
-    matches!(
+    let effects = acted.effects.as_ref()?;
+    let quiet = matches!(
         acted.verb,
         "click" | "double-click" | "press" | "hover" | "focus"
     ) && !effects.settled.navigated
         && !effects.settled.same_document
         && effects.new_tab.is_none()
         && effects.dialogs().is_empty()
-        && effects.downloads.is_empty()
-        && effects
-            .page
-            .as_ref()
-            .is_some_and(|page| page.mutations == Some(0) && page.changes.is_empty())
-}
-
-/// The changed lines that fit 600 bytes, in order: one that does not fit
-/// whole is cut to the room left when that is 60 bytes or more, the first
-/// line too, and the rest are counted.
-fn within_budget(changes: &[String]) -> Vec<String> {
-    let mut used = 0;
-    let mut shown = Vec::new();
-    for change in changes {
-        let room = CHANGE_BUDGET - used;
-        if change.len() <= room {
-            used += change.len();
-            shown.push(change.clone());
-            continue;
-        }
-        if room >= MIN_ROOM {
-            shown.push(cut_to_bytes(change, room));
-        }
-        break;
+        && effects.downloads.is_empty();
+    let page = effects.page.as_ref()?;
+    if !quiet || page.mutations != Some(0) || !page.changes.is_empty() {
+        return None;
     }
-    if shown.len() < changes.len() {
-        shown.push(format!(
-            "+{} more: tabref snap",
-            changes.len() - shown.len()
-        ));
-    }
-    shown
-}
-
-/// `text` within `room` bytes, ending in `…`: after its last whole word
-/// when one ends in the second half of the room, else mid-word.
-fn cut_to_bytes(text: &str, room: usize) -> String {
-    let limit = room.saturating_sub(ELLIPSIS.len());
-    let mut end = 0;
-    for (at, character) in text.char_indices() {
-        if at + character.len_utf8() > limit {
-            break;
-        }
-        end = at + character.len_utf8();
-    }
-    let kept = &text[..end];
-    match kept.rfind(' ') {
-        Some(space) if space >= limit / 2 => format!("{}{ELLIPSIS}", kept[..space].trim_end()),
-        _ => format!("{kept}{ELLIPSIS}"),
-    }
+    Some(if page.unread_frames > 0 {
+        NOTHING_READ
+    } else {
+        NOTHING_SEEN
+    })
 }
 
 fn new_controls(
@@ -343,48 +318,6 @@ pub(crate) fn styled(line: &str) -> String {
         }
         _ => line.to_owned(),
     }
-}
-
-/// The changed lines as printed, each once with how many times it showed
-/// (`+ Required ×2`): a page often shows the same message twice (a summary
-/// list and inline under the field). Lines are compared whole, before any
-/// cut.
-pub(crate) fn distinct_changes(changes: &[tabref_page::TextChange]) -> Vec<String> {
-    counted(changes)
-        .into_iter()
-        .map(|(change, count)| with_count(change.to_string(), count))
-        .collect()
-}
-
-fn counted(changes: &[tabref_page::TextChange]) -> Vec<(&tabref_page::TextChange, usize)> {
-    let mut counts: Vec<(&tabref_page::TextChange, usize)> = Vec::new();
-    for change in changes {
-        match counts.iter_mut().find(|(seen, _)| *seen == change) {
-            Some((_, count)) => *count += 1,
-            None => counts.push((change, 1)),
-        }
-    }
-    counts
-}
-
-fn with_count(line: String, count: usize) -> String {
-    if count > 1 {
-        format!("{line} ×{count}")
-    } else {
-        line
-    }
-}
-
-/// The first change as a `do` step's line carries it, cut to 100
-/// characters, with how many more there were: `+ Saved (+2 more)`.
-fn step_change(changes: &[tabref_page::TextChange]) -> Option<String> {
-    let counts = counted(changes);
-    let (first, count) = counts.first()?;
-    let line = with_count(first.brief(), *count);
-    if counts.len() > 1 {
-        return Some(format!("{line} (+{} more)", counts.len() - 1));
-    }
-    Some(line)
 }
 
 #[cfg(test)]
