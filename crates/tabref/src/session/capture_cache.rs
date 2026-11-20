@@ -153,8 +153,7 @@ impl Session {
         };
         let key = self.capture_key(page);
         let whole = captured
-            .dom_captures
-            .get(&page.target_id)
+            .dom_reply(&page.target_id)
             .is_some_and(|capture| !has_closed_shadow_root(capture));
         match watch {
             Some(watch) if whole => cache.put(

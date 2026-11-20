@@ -83,7 +83,7 @@ pub(crate) fn annotate_field_read(session: &mut Session, report: &mut Outcome) {
     };
     if let Some(captured) = session.reusable_capture()
         && let Some(document) = captured
-            .main_dom(&page.target_id)
+            .dom(&page.target_id)
             .and_then(|trees| trees.first())
     {
         bot_check_view(&captured.info, Some(document), report);

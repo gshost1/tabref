@@ -3,8 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use tabref_core::capability::CLICK;
 use tabref_core::{AccessibilityNode, AppError};
 use tabref_page::{
-    DomTree, ElementToken, OutlineInput, RefLabel, capture_dom, frame_owner_in, parse_capture,
-    read_viewport,
+    DomTree, ElementToken, OutlineInput, RefLabel, capture_dom, frame_owner_in, read_viewport,
 };
 
 use crate::session::Session;
@@ -38,7 +37,7 @@ pub(crate) fn outline_input(
     let page = session.page()?;
     let deadline = session.deadline();
     let tree = captured.map(|captured| &captured.tree);
-    let trees = match captured.and_then(|captured| captured.main_dom(&page.target_id)) {
+    let trees = match captured.and_then(|captured| captured.dom(&page.target_id)) {
         Some(trees) => trees.to_vec(),
         None => capture_dom(session.connection(), &page, deadline)?,
     };
@@ -63,8 +62,8 @@ pub(crate) fn outline_input(
         if !asks_input && !is_large(&trees, owner, viewport) {
             continue;
         }
-        if let Some(child_trees) = reused(captured, &target) {
-            frames.insert((page.target_id.clone(), owner), child_trees);
+        if let Some(child_trees) = captured.and_then(|captured| captured.dom(&target)) {
+            frames.insert((page.target_id.clone(), owner), child_trees.to_vec());
             continue;
         }
         if captured.is_some_and(|captured| left_out(captured, &target)) {
@@ -83,12 +82,6 @@ pub(crate) fn outline_input(
         refs,
         viewport,
     })
-}
-
-/// The DOM of `target` from the snapshot's own capture, when it took one.
-fn reused(captured: Option<&CapturedSnapshot>, target: &str) -> Option<Vec<DomTree>> {
-    let capture = captured?.dom_captures.get(target)?;
-    Some(parse_capture(capture, target))
 }
 
 /// Whether the snapshot left `target` out, whatever the reason.
