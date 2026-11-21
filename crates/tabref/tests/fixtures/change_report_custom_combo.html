@@ -1,0 +1,17 @@
+<!doctype html><title>Category editor</title>
+<label for=category>Category</label>
+<input id=category role=combobox aria-controls=categories aria-expanded=false value=News>
+<ul id=categories role=listbox aria-label=Category hidden></ul>
+<script>
+const labels = ['Announcements', 'Arts', 'Business', 'Community', 'Culture', 'Design', 'Education', 'Engineering', 'Events', 'Features', 'Finance', 'Health', 'News', 'Opinion', 'Research', 'Science', 'Sports', 'Technology'];
+const box = document.getElementById('category'), list = document.getElementById('categories');
+for (const label of labels) {
+  const option = document.createElement('li');
+  option.setAttribute('role', 'option');
+  option.textContent = label;
+  list.append(option);
+}
+function show(open) { list.hidden = !open; box.setAttribute('aria-expanded', String(open)); }
+box.onfocus = () => show(true);
+box.onkeydown = event => { if (event.key === 'Escape') show(false); };
+</script>

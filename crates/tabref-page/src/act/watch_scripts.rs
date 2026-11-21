@@ -59,7 +59,34 @@ pub(crate) const SCAN: &str = r"const scan = () => {
     for (const [frame, doc] of docs) add(frame, doc ? (doc.body ? doc.body.innerText : '') : false);
     return blocks;
   };
-  return { roots, docs, unread, text };
+  const popups = state => {
+    const result = [];
+    const id = node => {
+      if (!state.ids.has(node)) state.ids.set(node, state.nextId++);
+      return state.ids.get(node);
+    };
+    for (const [root, owner] of [[document, null], ...roots.map(root => [root, root]), ...docs.filter(([, doc]) => doc).map(([frame, doc]) => [doc, frame])]) {
+      for (const popup of root.querySelectorAll('[role=listbox],[role=menu],[popover]')) {
+        if (!shown(popup) || popup.closest('select')) continue;
+        if (popup.parentElement?.closest('[role=listbox],[role=menu],[popover]')) continue;
+        const role = popup.getAttribute('role') === 'listbox' || popup.querySelector('[role=option]') ? 'listbox' : 'menu';
+        const items = Array.from(popup.querySelectorAll('[role=option],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio]')).filter(shown);
+        const separate = items.every(item => {
+          for (let node = item; node; node = node.parentElement) {
+            if (!['block', 'list-item', 'flow-root'].includes(getComputedStyle(node).display)) return false;
+            if (node === popup) return true;
+          }
+          return false;
+        });
+        const labels = (popup.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(key => root.getElementById(key)?.textContent || '').join(' ').trim();
+        result.push({ id: id(popup), block: owner ? id(owner) : 0, role,
+          name: labels || popup.getAttribute('aria-label') || '', count: items.length,
+          text: separate ? items.map(item => item.innerText).join('\n') : null });
+      }
+    }
+    return result;
+  };
+  return { roots, docs, unread, text, popups };
 };";
 
 pub(crate) const START_WATCH: &str = r"(() => {
@@ -74,7 +101,7 @@ pub(crate) const START_WATCH: &str = r"(() => {
   for (const target of [document, ...found.roots]) state.observer.observe(target, options);
   for (const [, doc] of found.docs) if (doc) state.observer.observe(doc, options);
   window[key] = state;
-  return { url: location.href, title: document.title, blocks: found.text(state) };
+  return { url: location.href, title: document.title, blocks: found.text(state), popups: found.popups(state) };
 })()";
 
 pub(crate) const READ_WATCH: &str = r"(() => {
@@ -88,8 +115,9 @@ pub(crate) const READ_WATCH: &str = r"(() => {
     delete window[key];
   }
   const found = scan();
-  const blocks = found.text(state || { ids: new WeakMap(), nextId: 1 });
-  return { url: location.href, title: document.title, mutations, unread: found.unread, blocks };
+  const current = state || { ids: new WeakMap(), nextId: 1 };
+  const blocks = found.text(current);
+  return { url: location.href, title: document.title, mutations, unread: found.unread, blocks, popups: found.popups(current) };
 })()";
 
 pub(crate) const COUNT_WATCH: &str = r"(() => {
