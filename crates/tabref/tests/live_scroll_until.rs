@@ -6,7 +6,7 @@ use common::lazy_site::{batch, lazy_site, rows};
 use common::{harness, live};
 
 const PAGE: &str = r#"<!doctype html><style>li{height:18px}</style><ol id=rows>ROWS</ol><p id=tail>More</p><script>
-let busy=false, count=30;
+let busy=false, count=60;
 new IntersectionObserver(entries=>{
  if (!entries[0].isIntersecting || busy || count>=810) return;
  busy=true;
@@ -21,7 +21,7 @@ fn ignores_non_rendered_match(prefix: &str) {
     let page = format!(
         "{prefix}{}",
         PAGE.replace("810", "90")
-            .replace("ROWS", &rows("li", "Entry", 30))
+            .replace("ROWS", &rows("li", "Entry", 60))
     );
     let base = lazy_site(vec![("/", page)]);
     let tabref = harness("scroll-visible-text");
@@ -60,7 +60,7 @@ fn until_in_a_container_ignores_matching_text_outside_it() {
     }
     let page = PAGE
         .replace("810", "90")
-        .replace("ROWS", &rows("li", "Entry", 30))
+        .replace("ROWS", &rows("li", "Entry", 60))
         .replace(
             "<ol id=rows>",
             "<p>Entry 90</p><div style='height:320px;overflow:auto'><ol id=rows>",
@@ -107,7 +107,7 @@ fn a_do_scroll_until_prints_the_summary_and_indented_find_refs() {
     if !live() {
         return;
     }
-    let page = PAGE.replace("ROWS", &rows("li", "Entry", 30)).replace(
+    let page = PAGE.replace("ROWS", &rows("li", "Entry", 60)).replace(
         "li.textContent=text;",
         "const link=document.createElement('a');link.href='#'+count;link.textContent=text;li.appendChild(link);",
     );
@@ -141,7 +141,7 @@ fn a_do_scroll_loop_uses_the_container_holding_its_target() {
         return;
     }
     let page = PAGE
-        .replace("ROWS", &rows("li", "Entry", 30))
+        .replace("ROWS", &rows("li", "Entry", 60))
         .replace(
             "<ol id=rows>",
             "<div style='height:320px;overflow:auto'><ol id=rows>",
@@ -168,7 +168,7 @@ fn one_command_reaches_a_late_lazy_row_and_returns_matches() {
     if !live() {
         return;
     }
-    let base = lazy_site(vec![("/", PAGE.replace("ROWS", &rows("li", "Entry", 30)))]);
+    let base = lazy_site(vec![("/", PAGE.replace("ROWS", &rows("li", "Entry", 60)))]);
     let tabref = harness("scroll-until");
     tabref.ok(&["open", &base]);
     let run = tabref.ok(&["--json", "scroll", "down", "--until", "Entry 810"]);

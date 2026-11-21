@@ -83,15 +83,13 @@ fn step_outcome(
     deadline: Deadline,
 ) -> Result<ScrollOutcome, AppError> {
     match container {
-        Some(target) => {
-            scroll_and_settle(
-                session.connection(),
-                &target.session,
-                ScrollSite::Element(&target.token),
-                delta,
-                deadline,
-            )
-        }
+        Some(target) => scroll_and_settle(
+            session.connection(),
+            &target.session,
+            ScrollSite::Element(&target.token),
+            delta,
+            deadline,
+        ),
         None => {
             let page = session.page()?;
             scroll_and_settle(
