@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
+#[path = "common/held_download.rs"]
+mod held_download;
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -360,14 +362,7 @@ fn a_held_over_cap_file_is_retried_by_the_next_command() {
         .unwrap()
         .unwrap()
         .path();
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.share_mode(1 | 2);
-    }
-    let held = options.open(&path).unwrap();
+    let held = held_download::hold(&path);
     let first = tabref.ok(&["--json", "js", "1"]).json();
     assert_eq!(first["data"]["value"], 1);
     let download = &first["data"]["downloads"][0];
