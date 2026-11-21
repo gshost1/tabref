@@ -10,19 +10,30 @@ type Graph = Vec<(String, Option<Vec<String>>)>;
 const INVENTORY: &str = r"(() => {
   const key = Symbol.for('tabref.capture-opaque');
   const entries = [];
+  let elements = 0, rules = 0, overflow = false;
+  const seen = new WeakSet();
   const visit = root => {
+    const nodes = root.querySelectorAll('*');
+    elements += nodes.length;
+    if (elements > 30000) { overflow = true; return; }
     for (const sheet of [...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])]) {
       const walk = sheet => {
-        try { for (const rule of sheet.cssRules) if (rule.styleSheet) walk(rule.styleSheet); }
+        if (seen.has(sheet)) return;
+        seen.add(sheet);
+        try { for (const rule of sheet.cssRules) {
+          if (++rules > 10000) { overflow = true; return; }
+          if (rule.styleSheet) walk(rule.styleSheet);
+        } }
         catch { entries.push({sheet, href: sheet.href}); }
       };
       walk(sheet);
+      if (overflow) return;
     }
-    for (const el of root.querySelectorAll('*')) if (el.shadowRoot) visit(el.shadowRoot);
+    for (const el of nodes) { if (el.shadowRoot) visit(el.shadowRoot); if (overflow) return; }
   };
   visit(document);
   window[key] = {token: TOKEN, entries};
-  return entries.map(entry => entry.href);
+  return overflow ? [] : entries.map(entry => entry.href);
 })()";
 
 pub(super) fn prepare(
@@ -131,6 +142,13 @@ fn collect(
             continue;
         };
         if header["isInline"].as_bool() != Some(false) {
+            continue;
+        }
+        if header["length"]
+            .as_u64()
+            .is_none_or(|length| length > 1_000_000)
+        {
+            graph.push((url.to_owned(), None));
             continue;
         }
         let reply = connection.call(

@@ -154,7 +154,8 @@ fn rules(tokens: &[Token], depth: usize) -> Parsed {
         let body = &tokens[start..i - 1];
         match name.as_str() {
             "media" if media(prelude) => imports.extend(rules(body, depth + 1)?),
-            "supports" | "layer" if !prelude.is_empty() => imports.extend(rules(body, depth + 1)?),
+            "supports" if !prelude.is_empty() => imports.extend(rules(body, depth + 1)?),
+            "layer" => imports.extend(rules(body, depth + 1)?),
             "font-face" if prelude.is_empty() => declarations(body)?,
             "" if !prelude.is_empty() => {
                 if prelude.windows(2).any(|pair| {
@@ -171,9 +172,16 @@ fn rules(tokens: &[Token], depth: usize) -> Parsed {
 }
 
 fn declarations(tokens: &[Token]) -> Option<()> {
+    let mut stack = Vec::new();
     for token in tokens {
         if matches!(token, Token::Mark('@' | '{' | '}')) {
             return None;
+        }
+        match token {
+            Token::Mark('(') => stack.push(')'),
+            Token::Mark('[') => stack.push(']'),
+            Token::Mark(c @ (')' | ']')) if stack.pop() != Some(*c) => return None,
+            _ => {}
         }
         if let Some(name) = word(token) {
             if ["animation-timeline", "scroll-timeline", "view-timeline"]
@@ -185,7 +193,7 @@ fn declarations(tokens: &[Token]) -> Option<()> {
             }
         }
     }
-    Some(())
+    stack.is_empty().then_some(())
 }
 
 fn import(tokens: &[Token]) -> Option<String> {

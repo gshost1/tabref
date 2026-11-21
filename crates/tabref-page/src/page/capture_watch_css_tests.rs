@@ -15,6 +15,7 @@ fn safe_sheets_cover_static_rules_and_tracked_media() {
         "@media (prefers-contrast:custom) or (forced-colors:active){a{color:red}}",
         "@supports (display:grid){@media (max-height:10.5rem){a{display:grid}}}",
         "@layer base, theme; @layer theme { @supports selector(:has(a)) { a{display:block} } }",
+        "@layer { @media screen { button { color:red } } }",
         "@MEDIA SCREEN AND (MIN-WIDTH: 10PX) { a { color:red } }",
         "a/*:has()*/[title=':has(@container)']{content:'@property'}",
     ] {
@@ -57,6 +58,9 @@ fn unsafe_and_unknown_constructs_are_blind_at_every_depth() {
         "/* unterminated",
         "a{color:red",
         "a{color:red}}",
+        "a{color:rgb(1,2,3}",
+        "a{color:rgb(1,2,3))}",
+        "a{--x:[1,2)}",
         "@media (width:1px {a{color:red}}",
         "@media(hover:hover);",
         "@import 'x' layer(foo);",
