@@ -111,10 +111,7 @@ pub(super) fn scroll_loop(
     output.data["last_item"] = json!(total.last);
     output.text = match until {
         Some(text) if found => found_head(text, steps, true),
-        Some(text) => format!(
-            "{} is not on the page after {steps} scrolls; stopped at {reason}",
-            quote_text(text)
-        ),
+        Some(text) => not_found_head(text, steps, reason, cap.is_some()),
         None => end_summary(&direction, step, steps, &total, (reason, cap.is_some())),
     };
     if found && let Some(text) = until {
@@ -137,6 +134,11 @@ fn cap_reason(steps: u64, expired: bool) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+fn not_found_head(text: &str, steps: u64, reason: &str, capped: bool) -> String {
+    let reason = if capped { format!("the {reason}; more may load") } else { reason.to_owned() };
+    format!("{} is not on the page after {steps} scrolls; stopped at {reason}", quote_text(text))
 }
 
 fn found_head(text: &str, steps: u64, located: bool) -> String {
