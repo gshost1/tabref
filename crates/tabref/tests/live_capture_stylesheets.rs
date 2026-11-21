@@ -12,14 +12,14 @@ use tabref_cdp::{CdpConnection, PageSession, attach_to_target, connect, list_pag
 use tabref_core::Deadline;
 use tabref_page::{arm_capture_watch, check_capture_watch};
 
-fn stylesheet() -> u16 {
+fn stylesheet(body: &str) -> u16 {
+    let body = body.to_owned();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let mut request = [0; 8192];
             let _ = stream.read(&mut request);
-            let body = "#go { visibility: visible }";
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
@@ -42,11 +42,11 @@ fn evaluate(connection: &mut CdpConnection, page: &PageSession, expression: &str
     assert!(reply.get("exceptionDetails").is_none(), "{reply}");
 }
 
-fn check_opaque_sheet(imported: bool) {
+fn check_opaque_sheet(imported: bool, body: &str, blind: bool) {
     if !common::live() {
         return;
     }
-    let css = stylesheet();
+    let css = stylesheet(body);
     let href = format!("http://127.0.0.1:{css}/style.css");
     let style = if imported {
         format!("<style>@import url('{href}');</style>")
@@ -94,12 +94,17 @@ fn check_opaque_sheet(imported: bool) {
         ),
     );
     for change in ["sheet.disabled=true", "sheet.media.mediaText='not all'"] {
+        evaluate(
+            &mut connection,
+            &page,
+            "sheet.disabled=false; sheet.media.mediaText='all'",
+        );
         let deadline = Deadline::after(30_000).unwrap();
         let watch = arm_capture_watch(&mut connection, &page, "opaque", deadline).unwrap();
-        assert!(watch.blind);
-        assert_ne!(
-            check_capture_watch(&mut connection, &page, &watch, deadline),
-            "same"
+        assert_eq!(watch.blind, blind, "{body}");
+        assert_eq!(
+            check_capture_watch(&mut connection, &page, &watch, deadline) == "same",
+            !blind
         );
         evaluate(&mut connection, &page, change);
         assert_ne!(
@@ -110,11 +115,88 @@ fn check_opaque_sheet(imported: bool) {
 }
 
 #[test]
-fn an_opaque_link_sheet_is_blind_and_never_replayed() {
-    check_opaque_sheet(false);
+fn a_safe_opaque_link_sheet_is_watched() {
+    check_opaque_sheet(false, "#go { visibility: visible }", false);
 }
 
 #[test]
-fn an_opaque_import_in_a_readable_sheet_is_blind_too() {
-    check_opaque_sheet(true);
+fn a_safe_opaque_import_in_a_readable_sheet_is_watched() {
+    check_opaque_sheet(true, "#go { visibility: visible }", false);
+}
+
+#[test]
+fn unsafe_opaque_rules_are_blind() {
+    for body in [
+        "@container(width>1px){#go{color:red}}",
+        "body:has(button){color:red}",
+        "@unknown something {#go{color:red}}",
+        "@media(hover:hover){#go{color:red}}",
+        "@media(min-resolution:2dppx){#go{color:red}}",
+        "@property --x{syntax:'*';inherits:true}",
+    ] {
+        check_opaque_sheet(false, body, true);
+    }
+}
+
+#[test]
+fn opaque_imports_are_classified_recursively() {
+    if !common::live() {
+        return;
+    }
+    for (body, blind) in [
+        ("button{color:red}", false),
+        ("body:has(button){color:red}", true),
+    ] {
+        let child = stylesheet(body);
+        check_opaque_sheet(
+            false,
+            &format!("@import url('http://127.0.0.1:{child}/child.css');"),
+            blind,
+        );
+    }
+    check_opaque_sheet(
+        false,
+        "@import url('http://127.0.0.1:1/missing.css');",
+        true,
+    );
+}
+
+#[test]
+fn a_safe_opaque_sheet_allows_daemon_read_reuse() {
+    if !common::live() {
+        return;
+    }
+    let css = stylesheet("@media(prefers-color-scheme:dark){button{color:white}}button{color:red}");
+    let html = format!(
+        "<!doctype html><link rel=stylesheet href='http://127.0.0.1:{css}/style.css'><button>Go</button>"
+    );
+    let port = common::serve(&[("/", &html)]);
+    let harness = common::harness("opaque-reuse");
+    let run = |args: &[&str]| {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_tabref"))
+            .args([
+                "--cdp",
+                &harness.browser.port.to_string(),
+                "--json",
+                "--timeout",
+                "30000",
+            ])
+            .args(args)
+            .env("TABREF_HOME", &harness.home)
+            .env_remove("TABREF_NO_DAEMON")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["open", &format!("http://127.0.0.1:{port}/")]);
+    let snap = run(&["snap"]);
+    let find = run(&["find", "Go"]);
+    assert_eq!(snap["data"]["snapshot_id"], find["data"]["snapshot_id"]);
+    run(&["daemon", "stop"]);
 }

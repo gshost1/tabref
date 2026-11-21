@@ -26,9 +26,10 @@
 //! are blind: ElementInternals can change accessibility and custom states
 //! without observable mutations, including scoped registries. Manual slots,
 //! until-found content and container queries are blind. Opaque stylesheet
-//! identity, href, disabled and media state are recorded, but unreadable
-//! rules may contain container queries, so these sheets are blind too,
-//! including imports inside readable sheets. Other stylesheet errors and oversized
+//! identity, href, disabled and media state are recorded. Top-document opaque
+//! sheets are approved by object identity only after CDP text classification,
+//! including recursive imports. Unknown rules or media features, unreadable
+//! text and opaque frame sheets are blind. Other stylesheet errors and oversized
 //! form or stylesheet state are blind rather than sampled.
 
 use serde_json::{Value, json};
@@ -40,7 +41,12 @@ use crate::{CdpConnection, PageSession};
 
 const MAX_ELEMENTS: usize = 30_000;
 
-const SCAN: &str = r"const scan = () => {
+#[path = "capture_watch_css.rs"]
+mod css;
+#[path = "capture_watch_opaque.rs"]
+mod opaque;
+
+const SCAN: &str = r"const scan = (approved = []) => {
     const roots = [];
     const sheetObjects = [];
     const animations = [];
@@ -88,8 +94,8 @@ const SCAN: &str = r"const scan = () => {
           }
         };
         try { rules(sheet.cssRules); } catch (error) {
-          if (error.name === 'SecurityError') state += ':opaque';
-          blind = true;
+          if (error.name === 'SecurityError' && realm === window && approved.some(entry => entry.sheet === sheet && entry.href === sheet.href)) state += ':opaque';
+          else blind = true;
         }
         if (blind) return;
       }
@@ -108,7 +114,7 @@ const SCAN: &str = r"const scan = () => {
         '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)',
         '(prefers-contrast: more)', '(prefers-contrast: less)', '(prefers-contrast: custom)',
         '(prefers-contrast: no-preference)', '(forced-colors: active)', '(forced-colors: none)',
-        '(orientation: portrait)', '(orientation: landscape)']) state += ':' + realm.matchMedia(query).matches;
+        '(orientation: portrait)', '(orientation: landscape)', 'screen', 'print', 'all']) state += ':' + realm.matchMedia(query).matches;
       styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
       if (blind) return;
       state += ':' + doc.defaultView.scrollX + ':' + doc.defaultView.scrollY
@@ -168,10 +174,12 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   KEY_AND_SCAN
   const old = window[key];
   if (old) old.stop();
-  const now = scan();
+  const pending = window[Symbol.for('tabref.capture-opaque')];
+  const opaque = pending?.token === TOKEN ? pending.approved ?? [] : [];
+  const now = scan(opaque);
   if (now.blind) { delete window[key]; return { blind: true }; }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
-    sheets: now.sheets, animations: now.animations, active: now.active, print: now.print, blind: now.blind };
+    sheets: now.sheets, animations: now.animations, active: now.active, print: now.print, blind: now.blind, opaque };
   const restore = [];
   watch.stop = () => {
     if (watch.dirty) return;
@@ -233,7 +241,7 @@ const CHECK: &str = r"(() => {
   if (watch.observers.some(observer => observer.takeRecords().length > 0)) watch.stop();
   if (watch.dirty) return 'mutated';
   if (watch.blind) return 'blind';
-  const now = scan();
+  const now = scan(watch.opaque);
   if (now.blind) return 'blind';
   if (now.roots.length !== watch.roots.length || now.roots.some((root, i) => root !== watch.roots[i])) return 'roots';
   if (now.sheets.length !== watch.sheets.length || now.sheets.some((sheet, i) => sheet !== watch.sheets[i])) return 'state';
@@ -261,6 +269,12 @@ pub fn arm_capture_watch(
     token: &str,
     deadline: Deadline,
 ) -> Result<CaptureWatch, AppError> {
+    if opaque::prepare(connection, session, token, deadline).is_err() {
+        return Ok(CaptureWatch {
+            token: token.to_owned(),
+            blind: true,
+        });
+    }
     let reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
     Ok(CaptureWatch {
         token: token.to_owned(),
