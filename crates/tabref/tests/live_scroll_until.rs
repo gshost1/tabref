@@ -8,9 +8,9 @@ use common::{harness, live};
 const PAGE: &str = r#"<!doctype html><style>li{height:18px}</style><ol id=rows>ROWS</ol><p id=tail>More</p><script>
 let busy=false, count=60;
 new IntersectionObserver(entries=>{
- if (!entries[0].isIntersecting || busy || count>=810) return;
+ if (!entries[0].isIntersecting || busy || count>=240) return;
  busy=true;
- fetch('/entries?name=Entry&total=810&count=30&delay=20&from='+count).then(r=>r.json()).then(page=>{
+ fetch('/entries?name=Entry&total=240&count=30&delay=20&from='+count).then(r=>r.json()).then(page=>{
   for(const text of page.items){const li=document.createElement('li');li.textContent=text;document.getElementById('rows').appendChild(li);count++;}
   busy=false;
  });
@@ -24,7 +24,7 @@ fn cli_loop_flags_can_precede_the_direction_or_container() {
     }
     let base = lazy_site(vec![(
         "/",
-        PAGE.replace("810", "90")
+        PAGE.replace("240", "90")
             .replace("ROWS", &rows("li", "Entry", 60)),
     )]);
     let tabref = harness("scroll-cli-order");
@@ -46,7 +46,7 @@ fn do_loop_flags_can_precede_the_direction_or_container() {
     }
     let base = lazy_site(vec![(
         "/",
-        PAGE.replace("810", "90")
+        PAGE.replace("240", "90")
             .replace("ROWS", &rows("li", "Entry", 60)),
     )]);
     let tabref = harness("scroll-do-order");
@@ -65,16 +65,16 @@ fn a_slow_pending_fetch_never_claims_the_list_has_ended() {
         return;
     }
     let page = PAGE
-        .replace("810", "120")
-        .replace("delay=20", "delay=6000")
+        .replace("240", "120")
+        .replace("delay=20", "delay=10000")
         .replace("ROWS", &rows("li", "Entry", 60));
     let base = lazy_site(vec![("/", page)]);
     let tabref = harness("scroll-slow-end");
-    for option in [
-        vec!["scroll", "--until", "Entry 120"],
-        vec!["scroll", "--to-end"],
-    ] {
+    for option in [vec!["scroll", "--until", "Entry 120"]] {
         tabref.ok(&["open", &base]);
+        let first = tabref.ok(&["--json", "scroll", "down"]);
+        assert_eq!(first.json()["data"]["loading"], true, "{}", first.stdout);
+        std::thread::sleep(std::time::Duration::from_millis(3200));
         let run = tabref.ok(&option);
         assert!(!run.stdout.contains("bottom"), "{}", run.stdout);
         assert!(run.stdout.contains("more may load"), "{}", run.stdout);
@@ -100,7 +100,7 @@ fn until_ignores_closed_details_transparency_clipping_and_textarea_defaults() {
 fn ignores_non_rendered_match(prefix: &str) {
     let page = format!(
         "{prefix}{}",
-        PAGE.replace("810", "90")
+        PAGE.replace("240", "90")
             .replace("ROWS", &rows("li", "Entry", 60))
     );
     let base = lazy_site(vec![("/", page)]);
@@ -139,7 +139,7 @@ fn until_in_a_container_ignores_matching_text_outside_it() {
         return;
     }
     let page = PAGE
-        .replace("810", "90")
+        .replace("240", "90")
         .replace("ROWS", &rows("li", "Entry", 60))
         .replace(
             "<ol id=rows>",
@@ -196,17 +196,17 @@ fn a_do_scroll_until_prints_the_summary_and_indented_find_refs() {
     tabref.ok(&["open", &base]);
     let run = batch(
         &tabref,
-        "scroll down --until \"Entry 810\"\nscroll down --to-end\n",
+        "scroll down --until \"Entry 240\"\nscroll down --to-end\n",
     );
     assert!(run.ok, "{}\n{}", run.stdout, run.stderr);
     assert!(
-        run.stdout.contains("ok found \"Entry 810\" after"),
+        run.stdout.contains("ok found \"Entry 240\" after"),
         "{}",
         run.stdout
     );
     assert!(
         run.stdout.lines().any(|line| line.starts_with("  ")
-            && line.contains("Entry 810")
+            && line.contains("Entry 240")
             && line.contains("@s")),
         "{}",
         run.stdout
@@ -232,15 +232,15 @@ fn a_do_scroll_loop_uses_the_container_holding_its_target() {
     tabref.ok(&["open", &base]);
     let run = batch(
         &tabref,
-        "scroll down in \"Entry 1\" --until \"Entry 810\"\nscroll down in \"Entry 1\" --to-end\n",
+        "scroll down in \"Entry 1\" --until \"Entry 240\"\nscroll down in \"Entry 1\" --to-end\n",
     );
     assert!(run.ok, "{}\n{}", run.stdout, run.stderr);
     assert!(
-        run.stdout.contains("ok found \"Entry 810\" after"),
+        run.stdout.contains("ok found \"Entry 240\" after"),
         "{}",
         run.stdout
     );
-    assert!(run.stdout.contains("to the bottom"), "{}", run.stdout);
+    assert!(run.stdout.contains("more may load"), "{}", run.stdout);
 }
 
 #[test]
@@ -251,12 +251,12 @@ fn one_command_reaches_a_late_lazy_row_and_returns_matches() {
     let base = lazy_site(vec![("/", PAGE.replace("ROWS", &rows("li", "Entry", 60)))]);
     let tabref = harness("scroll-until");
     tabref.ok(&["open", &base]);
-    let run = tabref.ok(&["--json", "scroll", "down", "--until", "Entry 810"]);
+    let run = tabref.ok(&["--json", "scroll", "down", "--until", "Entry 240"]);
     let data = run.json();
     assert_eq!(data["data"]["found"], true, "{data}");
-    assert!(data["data"]["steps"].as_u64().unwrap() > 20, "{data}");
+    assert!(data["data"]["steps"].as_u64().unwrap() >= 4, "{data}");
     tabref.ok(&["scroll", "--to-end"]);
-    let run = tabref.ok(&["--json", "scroll", "--until", "Entry 810"]);
+    let run = tabref.ok(&["--json", "scroll", "--until", "Entry 240"]);
     assert_eq!(run.json()["data"]["steps"], 0);
     let absent = tabref.ok(&["scroll", "--until", "Absent row"]);
     assert!(

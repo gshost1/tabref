@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tabref_cdp::is_timeout;
@@ -70,6 +70,7 @@ pub(super) fn scroll_loop(
             ));
         }
     };
+    let started = Instant::now();
     let deadline = deadline.capped(MAX_TIME);
     let container = container
         .map(|spec| resolve_target(session, spec, LocateIntent::Click, deadline))
@@ -101,24 +102,28 @@ pub(super) fn scroll_loop(
             break;
         }
     }
-    let reason = cap.unwrap_or(match direction.as_str() {
-        "up" => "the top",
-        "left" => "the left end",
-        "right" => "the right end",
-        _ => "the bottom",
+    let reason = cap.map(str::to_owned).unwrap_or_else(|| {
+        format!(
+            "no more loaded within {:.1}s; more may load",
+            started.elapsed().as_secs_f64()
+        )
     });
     let mut output = report(&direction, step, &total);
     output.data["steps"] = json!(steps);
     output.data["until"] = json!(until);
     output.data["found"] = json!(found);
     output.data["cap"] = json!(cap);
+    if !found && cap.is_none() {
+        output.data["end_confirmed"] = json!(false);
+        output.data["stop_reason"] = json!("no_growth");
+    }
     output.data["total_px"] = json!(step * steps as f64);
     output.data["first_item"] = json!(total.first);
     output.data["last_item"] = json!(total.last);
     output.text = match until {
         Some(text) if found => found_head(text, steps, true),
-        Some(text) => not_found_head(text, steps, reason, cap.is_some()),
-        None => end_summary(&direction, step, steps, &total, (reason, cap.is_some())),
+        Some(text) => not_found_head(text, steps, &reason, cap.is_some()),
+        None => end_summary(&direction, step, steps, &total, (&reason, cap.is_some())),
     };
     if found && let Some(text) = until {
         let matches = find::search(session, text, None, 20, false)?;
@@ -150,12 +155,12 @@ fn cap_reason(steps: u64, expired: bool) -> Option<&'static str> {
 
 fn not_found_head(text: &str, steps: u64, reason: &str, capped: bool) -> String {
     let reason = if capped {
-        format!("the {reason}; more may load")
+        format!("stopped at the {reason}; more may load")
     } else {
         reason.to_owned()
     };
     format!(
-        "{} is not on the page after {steps} scrolls; stopped at {reason}",
+        "{} is not on the page after {steps} scrolls; {reason}",
         quote_text(text)
     )
 }
@@ -187,7 +192,7 @@ fn end_summary(
     let mut head = if capped {
         format!("scrolled {direction} {steps} times, stopped at the {reason}")
     } else {
-        format!("scrolled {direction} {steps} times to {reason}")
+        format!("scrolled {direction} {steps} times")
     };
     if !suffix.is_empty() {
         head.push_str(": ");
@@ -201,6 +206,9 @@ fn end_summary(
     }
     if capped {
         head.push_str("; more may load");
+    } else {
+        head.push_str("; ");
+        head.push_str(reason);
     }
     head
 }

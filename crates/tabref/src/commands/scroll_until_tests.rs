@@ -14,8 +14,8 @@ fn capped_no_match_warns_that_more_may_load() {
         );
     }
     assert_eq!(
-        super::not_found_head("X", 2, "the bottom", false),
-        "\"X\" is not on the page after 2 scrolls; stopped at the bottom"
+        super::not_found_head("X", 2, "no more loaded within 3.2s; more may load", false),
+        "\"X\" is not on the page after 2 scrolls; no more loaded within 3.2s; more may load"
     );
 }
 
