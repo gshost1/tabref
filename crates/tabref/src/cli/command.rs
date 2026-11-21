@@ -127,8 +127,8 @@ pub(crate) enum Command {
         #[arg(long)]
         px: Option<u32>,
         /// Scroll repeatedly until this text is on the page
-        #[arg(long, value_name = "TEXT", conflicts_with = "to_end")]
-        until: Option<String>,
+        #[arg(long, value_name = "TEXT", num_args = 1.., conflicts_with = "to_end")]
+        until: Option<Vec<String>>,
         /// Scroll repeatedly until the page stops growing at its end
         #[arg(long)]
         to_end: bool,

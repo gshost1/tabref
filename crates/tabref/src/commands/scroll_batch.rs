@@ -5,6 +5,14 @@ use super::scroll_until::scroll_loop;
 use crate::commands::step_done::StepDone;
 use crate::commands::target_spec::TargetSpec;
 use crate::session::Session;
+use crate::view::node_line::quote_text;
+
+pub(super) fn quote_until_value(text: &str) -> AppError {
+    AppError::invalid_args(format!(
+        "extra value words must be one argument; quote the value: tabref scroll down --until {}",
+        quote_text(text)
+    ))
+}
 
 pub(crate) struct BatchScroll {
     pub direction: String,
@@ -17,7 +25,7 @@ pub(crate) fn parse_batch_scroll(args: &[Word]) -> Result<BatchScroll, AppError>
     let mut until = None;
     let mut to_end = false;
     let mut positional = Vec::new();
-    let mut words = args.iter();
+    let mut words = args.iter().peekable();
     while let Some(word) = words.next() {
         match word.text.as_str() {
             "--until" if !word.quoted => {
@@ -32,6 +40,14 @@ pub(crate) fn parse_batch_scroll(args: &[Word]) -> Result<BatchScroll, AppError>
                     .ok_or_else(|| {
                         AppError::invalid_args("--until needs TEXT; quote text containing spaces")
                     })?;
+                if words.peek().is_some_and(|word| word.quoted || !word.text.starts_with("--")) {
+                    let mut text = text.text.clone();
+                    while let Some(word) = words.next_if(|word| word.quoted || !word.text.starts_with("--")) {
+                        text.push(' ');
+                        text.push_str(&word.text);
+                    }
+                    return Err(quote_until_value(&text));
+                }
                 until = Some(text.text.clone());
             }
             "--to-end" if !word.quoted => {

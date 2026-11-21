@@ -20,8 +20,13 @@ pub(crate) fn run_loop(
     direction: &str,
     target: Option<&str>,
     px: Option<u32>,
-    (until, to_end): (Option<&str>, bool),
+    (until, to_end): (Option<&[String]>, bool),
 ) -> Result<Outcome, AppError> {
+    let until = match until {
+        Some([text]) => Some(text.as_str()),
+        Some(words) => return Err(super::scroll_batch::quote_until_value(&words.join(" "))),
+        None => None,
+    };
     if until.is_none() && !to_end {
         return scroll::run(session, direction, target, px);
     }
