@@ -16,10 +16,7 @@ pub(super) fn closed_popups(
 ) -> Vec<TextChange> {
     let mut closed = Vec::new();
     for popup in before {
-        if after.iter().any(|other| {
-            other["id"] == popup["id"]
-                || (other["role"] == popup["role"] && other["name"] == popup["name"])
-        }) {
+        if after.iter().any(|other| same_popup(popup, other)) {
             continue;
         }
         let Some(block) = popup["block"].as_u64() else {
@@ -43,24 +40,15 @@ pub(super) fn closed_popups(
             continue;
         };
         let items = text_lines(item_text);
-        if items.is_empty()
-            || after_blocks.iter().any(|(_, block)| match block {
-                BlockText::Readable(text) => {
-                    text_lines(text).iter().any(|line| items.contains(line))
-                }
-                _ => false,
-            })
-        {
+        if items.is_empty() {
             continue;
         }
-        if !items.is_empty() {
-            let mut lines = text_lines(text);
-            let Some(start) = lines.windows(items.len()).position(|run| run == items) else {
-                continue;
-            };
-            lines.drain(start..start + items.len());
-            *text = lines.join("\n");
-        }
+        let mut lines = text_lines(text);
+        let Some(start) = lines.windows(items.len()).position(|run| run == items) else {
+            continue;
+        };
+        lines.drain(start..start + items.len());
+        *text = lines.join("\n");
         let name = popup["name"].as_str().unwrap_or_default();
         let name = if name.is_empty() {
             String::new()
@@ -78,4 +66,23 @@ pub(super) fn closed_popups(
         )));
     }
     closed
+}
+
+fn same_popup(before: &Value, after: &Value) -> bool {
+    if before["role"] != after["role"] {
+        return false;
+    }
+    let identity = before["watch"].as_str().is_some()
+        && before["watch"] == after["watch"]
+        && before["id"] == after["id"];
+    let position = before["position"].as_str().is_some()
+        && before["position"] == after["position"]
+        && before["block"] == after["block"];
+    let name = before["name"].as_str().unwrap_or_default();
+    identity
+        || (position && before["name"] == after["name"])
+        || (!name.is_empty()
+            && before["name"] == after["name"]
+            && before["text"].as_str().is_some()
+            && before["text"] == after["text"])
 }
