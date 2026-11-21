@@ -125,6 +125,13 @@ fn mostly_edits(before: &Value, after: &Value, old: usize, new: usize) -> bool {
 fn keys(body: &Value) -> HashMap<(usize, &str), Vec<u64>> {
     let mut keys: HashMap<_, Vec<_>> = HashMap::new();
     for row in body["rows"].as_array().into_iter().flatten() {
+        if let Some((text, id)) = row[1].as_str().zip(row[0].as_u64()) {
+            for (column, cell) in text.split('\t').map(str::trim).enumerate() {
+                if !cell.is_empty() {
+                    keys.entry((column + 4, cell)).or_default().push(id);
+                }
+            }
+        }
         for column in [2, 3] {
             let key = row[column]
                 .as_str()
@@ -145,6 +152,7 @@ fn keys(body: &Value) -> HashMap<(usize, &str), Vec<u64>> {
             }
         }
     }
+    keys.retain(|(column, _), ids| *column < 4 || ids.len() == 1);
     keys
 }
 

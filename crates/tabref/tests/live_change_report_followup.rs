@@ -83,11 +83,49 @@ fn closing_a_named_dialog_with_600_native_options_is_one_summary() {
 }
 
 #[test]
-fn native_option_text_still_obeys_the_character_budget() {
+fn long_native_options_do_not_spend_the_dialog_character_budget() {
     if !live() {
         return;
     }
-    let html = address_dialog(true);
+    let html = address_dialog(false).replace("<option>C", "<option>Country number ");
+    let port = serve(&[("/", &html)]);
+    let tabref = harness("dialog-long-native-options");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+    let text = tabref.ok(&["click", "Save"]).stdout;
+    println!("LONG SELECT CLOSE: {text}");
+    assert!(text.contains("- dialog \"Address\" closed"), "{text}");
+    assert!(text.contains("+ Saved"), "{text}");
+    assert!(!text.contains("- Country number"), "{text}");
+    assert!(!text.contains("more: tabref snap"), "{text}");
+}
+
+#[test]
+fn changing_first_column_preserves_later_key_edits() {
+    if !live() {
+        return;
+    }
+    let html = r#"<!doctype html><button onclick="draw(true)">Refresh</button><table><tbody></tbody></table><script>function draw(fresh){document.querySelector('tbody').innerHTML=Array.from({length:10},(_,i)=>'<tr><td>'+(fresh?'1s':'0s')+' ago</td><td>TOK-'+(100+i)+'</td><td>'+(fresh&&i===7?'revoked':'active')+'</td></tr>').join('')}draw(false)</script>"#;
+    let port = serve(&[("/", html)]);
+    let tabref = harness("later-column-key");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+    let text = tabref.ok(&["click", "Refresh"]).stdout;
+    println!("LATER KEY REFRESH: {text}");
+    assert!(!text.contains("rows replaced"), "{text}");
+    assert!(
+        text.contains("TOK-107") && text.contains("revoked"),
+        "{text}"
+    );
+}
+
+#[test]
+fn dialog_text_and_current_selection_still_obey_the_character_budget() {
+    if !live() {
+        return;
+    }
+    let html = address_dialog(true).replace(
+        "<h2>Address</h2>",
+        &format!("<h2>Address</h2><p id=oversized>{}</p>", "x".repeat(5000)),
+    );
     let port = serve(&[("/", &html)]);
     let tabref = harness("dialog-option-budget");
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
@@ -95,7 +133,11 @@ fn native_option_text_still_obeys_the_character_budget() {
     assert!(text.contains("+ Saved"), "{text}");
     let value = tabref.ok(&["--json", "js", "window.dialogReads"]).json();
     assert_eq!(value["data"]["value"], 0, "{value}");
-    tabref.ok(&["js", "document.querySelector('select').replaceChildren(...Array.from({length:10000},()=>document.createElement('option')));document.querySelector('#toast').textContent='';window.dialogReads=0"]);
+    tabref.ok(&["js", "document.querySelector('#oversized').remove();document.querySelector('select').replaceChildren(...Array.from({length:10000},()=>document.createElement('option')));document.querySelector('#toast').textContent='';window.dialogReads=0"]);
+    tabref.ok(&["click", "Save"]);
+    let value = tabref.ok(&["--json", "js", "window.dialogReads"]).json();
+    assert_eq!(value["data"]["value"], 0, "{value}");
+    tabref.ok(&["js", "document.querySelector('select').innerHTML='<option>'+ 'x'.repeat(5000)+'</option>';window.dialogReads=0"]);
     tabref.ok(&["click", "Save"]);
     let value = tabref.ok(&["--json", "js", "window.dialogReads"]).json();
     assert_eq!(value["data"]["value"], 0, "{value}");

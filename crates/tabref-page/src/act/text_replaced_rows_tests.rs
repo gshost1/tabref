@@ -217,3 +217,49 @@ fn checkbox_first_cells_do_not_hide_the_first_text_key() {
     assert!(replacement(&before, &after).is_empty());
     assert!(compare_replies(&before,&after).iter().any(|change| matches!(change,TextChange::Changed {before,after} if before.contains("TOK-107") && after.contains("revoked"))));
 }
+
+#[test]
+fn later_unique_columns_pair_edits_but_repeated_statuses_do_not() {
+    let (mut before, mut after) = pair();
+    for (reply, offset, stamp) in [(&mut before, 0, "0s"), (&mut after, 100, "1s")] {
+        let rows: Vec<_> = (0..10)
+            .map(|n| {
+                json!([
+                    offset + n + 1,
+                    format!(
+                        "{stamp} ago\tTOK-{}\t{}",
+                        100 + n,
+                        if offset > 0 && n == 7 {
+                            "revoked"
+                        } else {
+                            "active"
+                        }
+                    ),
+                    format!("{stamp} ago"),
+                    ""
+                ])
+            })
+            .collect();
+        reply["blocks"][0][1] = json!(
+            rows.iter()
+                .map(|row| row[1].as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        reply["tables"][0]["rows"] = json!(rows);
+    }
+    assert!(replacement(&before, &after).is_empty());
+    for row in after["tables"][0]["rows"].as_array_mut().unwrap() {
+        row[1] = json!(row[1].as_str().unwrap().replace("TOK-1", "TOK-2"));
+    }
+    after["blocks"][0][1] = json!(
+        after["tables"][0]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row[1].as_str().unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert_eq!(replacement(&before, &after).len(), 1);
+}

@@ -13,21 +13,39 @@ pub(crate) const SCAN: &str = r"const scan = () => {
   const roots = [], docs = [];
   let unread = 0;
   const shown = el => (!el.checkVisibility || el.checkVisibility()) || getComputedStyle(el).display === 'contents';
-  const boundedText = (el, limit = 4096, rendered = true) => {
+  const boundedText = (el, limit = 4096, rendered = true, selectValues = false) => {
     if (!el) return null;
     const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_ALL);
-    let left = limit, nodes = 0, optionNodes = 0;
+    const selects = [];
+    let left = limit, nodes = 0, optionNodes = 0, optionChars = 0;
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node.parentElement?.closest('select')) {
+      const select = node.parentElement?.closest('select');
+      if (selectValues && node.localName === 'select' && !select) selects.push(node);
+      if (select) {
         if (++optionNodes > limit * 2) return null;
       } else if (++nodes > 1024) return null;
       if (node.nodeType === Node.TEXT_NODE) {
+        if (selectValues && select) {
+          optionChars += node.length;
+          if (optionChars > limit * 16) return null;
+          continue;
+        }
         if (node.length > left) return null;
         left -= node.length;
       }
     }
+    let selectedChars = 0;
+    for (const select of selects) {
+      for (const option of select.selectedOptions) {
+        selectedChars += option.label.length;
+        if (selectedChars > left) return null;
+      }
+    }
     const value = rendered ? el.innerText : el.textContent;
-    return typeof value === 'string' && value.length <= limit ? value : null;
+    if (typeof value !== 'string') return null;
+    let size = value.length + selectedChars;
+    for (const select of selects) size -= (rendered ? select.innerText : select.textContent).length;
+    return size <= limit ? value : null;
   };
   const visit = root => {
     const all = root.querySelectorAll('*');
@@ -98,7 +116,7 @@ pub(crate) const SCAN: &str = r"const scan = () => {
           return false;
         });
         const labels = (popup.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).slice(0, 16).map(key => boundedText(root.getElementById(key), 512, false) || '').join(' ').trim();
-        const dialogText = dialog ? boundedText(popup) : null;
+        const dialogText = dialog ? boundedText(popup, 4096, true, true) : null;
         const heading = dialog && dialogText !== null ? boundedText(Array.from(popup.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]')).find(shown), 512) : '';
         const position = [];
         for (let node = popup; node.parentNode; node = node.parentNode) {
