@@ -16,6 +16,7 @@ use crate::view::action_changes::prepare;
 use crate::view::bot_check::action_bot_check;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
+use crate::view::rows_replaced;
 
 const NOTHING_SEEN: &str = " (no visible change)";
 const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
@@ -84,7 +85,7 @@ pub(crate) fn step_report(
             if effects.url_before == page.url {
                 line.push_str("; page reloaded");
             }
-        } else if let Some(change) = step_change(&page.changes) {
+        } else if let Some(change) = step_change(&rows_replaced::changes(page)) {
             line.push_str(&format!("; {change}"));
         }
         if let Some(note) = text_check_note(page) {
@@ -149,7 +150,7 @@ fn effect_block(
         prepare(
             &captured.tree,
             known,
-            &page.changes,
+            rows_replaced::other_changes(page),
             |target| captured.dom(target).zip(captured.dom_reply(target)),
             |controls| {
                 let found = control_lines(controls);
@@ -166,14 +167,25 @@ fn effect_block(
     let changes = counted(
         prepared
             .as_ref()
-            .map_or(&page.changes, |report| &report.changes),
+            .map_or(rows_replaced::other_changes(page), |report| &report.changes),
     );
     if effects.settled.navigated {
         lines.extend(reload_head(&changes));
     } else {
         lines.extend(within_budget(&changes));
     }
-    merge(&mut data, change_data(&counted(&page.changes)));
+    lines.extend(rows_replaced::preview(page));
+    let json_changes = rows_replaced::changes(page);
+    let json_counts = counted(&json_changes);
+    let mut changes_data = change_data(&json_counts);
+    if !page.replaced_rows.is_empty() {
+        let limit = changes_data["changes"].as_array().map_or(0, Vec::len);
+        changes_data["new_rows_omitted"] = json!(rows_replaced::omitted(
+            page,
+            json_counts.iter().take(limit).map(|entry| entry.change)
+        ));
+    }
+    merge(&mut data, changes_data);
     lines.extend(text_check_note(page));
     if effects.settled.navigated {
         let report = current_page_view(session)?;

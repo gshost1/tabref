@@ -16,6 +16,8 @@ pub struct PageChanges {
     /// own budget, separate from frames and shadow roots.
     pub unchecked_text_blocks: usize,
     pub changes: Vec<TextChange>,
+    /// Whole body replacements: old row count and new rows, also appended to `changes`.
+    pub replaced_rows: Vec<(usize, Vec<String>)>,
 }
 
 impl PageChanges {

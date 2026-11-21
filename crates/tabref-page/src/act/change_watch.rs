@@ -19,10 +19,15 @@ use super::popup_close::{closed_popups, popups};
 use super::text_change::TextChange;
 use super::text_diff::{diff_page, text_lines};
 use super::text_reorder::{Cells, cells_of};
+use super::text_replaced_rows::replaced_rows;
 use super::watch_scripts::{COUNT_WATCH, READ_WATCH, SCAN, START_WATCH};
 use crate::{CdpConnection, PageSession};
 
 const TEXT_LIMIT: usize = 200_000;
+
+#[cfg(test)]
+#[path = "text_replaced_rows_tests.rs"]
+mod replacement_tests;
 
 /// Marks the page before an action and starts counting its DOM mutations.
 pub fn mark_page(
@@ -36,6 +41,7 @@ pub fn mark_page(
         title: text_field(&reply, "title"),
         blocks: text_blocks(&reply),
         popups: popups(&reply),
+        tables: reply["tables"].as_array().cloned().unwrap_or_default(),
     })
 }
 
@@ -48,7 +54,8 @@ pub fn page_changes(
     deadline: Deadline,
 ) -> Result<PageChanges, AppError> {
     let reply = run(connection, session, READ_WATCH, deadline)?;
-    let (changes, unchecked_text_blocks) = compare_watched(&mark.blocks, &mark.popups, &reply);
+    let (changes, unchecked_text_blocks, replaced_rows) =
+        compare_watched(&mark.blocks, &mark.popups, &mark.tables, &reply);
     Ok(PageChanges {
         url: text_field(&reply, "url"),
         title: text_field(&reply, "title"),
@@ -56,6 +63,7 @@ pub fn page_changes(
         unread_frames: reply.get("unread").and_then(Value::as_u64).unwrap_or(0),
         unchecked_text_blocks,
         changes,
+        replaced_rows,
     })
 }
 
@@ -109,23 +117,43 @@ fn compare_blocks(before: &TextBlocks, after: TextBlocks) -> (Vec<TextChange>, u
 
 #[cfg(test)]
 fn compare_replies(before: &Value, after: &Value) -> Vec<TextChange> {
-    compare_watched(&text_blocks(before), &popups(before), after).0
+    compare_watched(
+        &text_blocks(before),
+        &popups(before),
+        before["tables"].as_array().map_or(&[], Vec::as_slice),
+        after,
+    )
+    .0
 }
 
 fn compare_watched(
     before: &TextBlocks,
     popups_before: &[Value],
+    tables_before: &[Value],
     after: &Value,
-) -> (Vec<TextChange>, usize) {
-    let after_blocks = text_blocks(after);
+) -> (Vec<TextChange>, usize, Vec<(usize, Vec<String>)>) {
+    let mut after_blocks = text_blocks(after);
     if after_blocks.is_empty() {
-        return compare_blocks(before, after_blocks);
+        let (changes, unchecked) = compare_blocks(before, after_blocks);
+        return (changes, unchecked, Vec::new());
     }
     let mut before = before.clone();
     let mut closed = closed_popups(&mut before, &after_blocks, popups_before, &popups(after));
+    let (replaced, notices) = replaced_rows(
+        &mut before,
+        &mut after_blocks,
+        tables_before,
+        after["tables"].as_array().map_or(&[], Vec::as_slice),
+    );
+    closed.extend(notices);
     let (changes, unchecked) = compare_blocks(&before, after_blocks);
     closed.extend(changes);
-    (closed, unchecked)
+    closed.extend(
+        replaced
+            .iter()
+            .flat_map(|(_, rows)| rows.iter().cloned().map(TextChange::Added)),
+    );
+    (closed, unchecked, replaced)
 }
 
 /// How many DOM mutations the watch has counted so far; `None` when the

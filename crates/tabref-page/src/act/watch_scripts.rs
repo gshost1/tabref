@@ -94,7 +94,28 @@ pub(crate) const SCAN: &str = r"const scan = () => {
     }
     return result;
   };
-  return { roots, docs, unread, text, popups };
+  const tables = state => {
+    const result = [];
+    const id = node => {
+      if (!state.ids.has(node)) state.ids.set(node, state.nextId++);
+      return state.ids.get(node);
+    };
+    for (const [root, owner] of [[document, null], ...roots.map(root => [root, root]), ...docs.filter(([, doc]) => doc).map(([frame, doc]) => [doc, frame])]) {
+      for (const body of root.querySelectorAll('tbody,[role=rowgroup]')) {
+        const table = body.closest('table,[role=table],[role=grid],[role=treegrid]');
+        if (!table || !shown(body) || body.querySelector('table,[role=table],[role=grid],[role=treegrid]')) continue;
+        const rows = Array.from(body.children).filter(row => row.matches('tr,[role=row]') && shown(row) &&
+          !Array.from(row.children).every(cell => cell.matches('th:not([scope=row]),[role=columnheader]')));
+        if (rows.some(row => typeof row.innerText !== 'string')) continue;
+        const text = rows.map(row => [id(row), row.innerText]);
+        if (text.reduce((size, row) => size + row[1].length, 0) > LIMIT) continue;
+        const notices = Array.from(body.querySelectorAll('[role=alert],[role=status]')).filter(shown).map(node => node.innerText).filter(text => typeof text === 'string');
+        result.push({watch: state.epoch, block: owner ? id(owner) : 0, table: id(table), body_id: id(body), body: Array.from(table.querySelectorAll('tbody,[role=rowgroup]')).indexOf(body), rows: text, notices});
+      }
+    }
+    return result;
+  };
+  return { roots, docs, unread, text, popups, tables };
 };";
 
 pub(crate) const START_WATCH: &str = r"(() => {
@@ -109,7 +130,7 @@ pub(crate) const START_WATCH: &str = r"(() => {
   for (const target of [document, ...found.roots]) state.observer.observe(target, options);
   for (const [, doc] of found.docs) if (doc) state.observer.observe(doc, options);
   window[key] = state;
-  return { url: location.href, title: document.title, blocks: found.text(state), popups: found.popups(state) };
+  return { url: location.href, title: document.title, blocks: found.text(state), popups: found.popups(state), tables: found.tables(state) };
 })()";
 
 pub(crate) const READ_WATCH: &str = r"(() => {
@@ -125,7 +146,7 @@ pub(crate) const READ_WATCH: &str = r"(() => {
   const found = scan();
   const current = state || { ids: new WeakMap(), nextId: 1, epoch: null };
   const blocks = found.text(current);
-  return { url: location.href, title: document.title, mutations, unread: found.unread, blocks, popups: found.popups(current) };
+  return { url: location.href, title: document.title, mutations, unread: found.unread, blocks, popups: found.popups(current), tables: found.tables(current) };
 })()";
 
 pub(crate) const COUNT_WATCH: &str = r"(() => {

@@ -15,4 +15,5 @@ pub struct PageMark {
     pub title: String,
     pub(crate) blocks: TextBlocks,
     pub(crate) popups: Vec<serde_json::Value>,
+    pub(crate) tables: Vec<serde_json::Value>,
 }
