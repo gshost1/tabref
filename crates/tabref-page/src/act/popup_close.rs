@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde_json::Value;
 
 use super::page_mark::{BlockText, TextBlocks};
@@ -81,7 +83,16 @@ fn same_popup(before: &Value, after: &Value) -> bool {
     let name = before["name"].as_str().unwrap_or_default();
     let items = before["text"].as_str().is_some() && before["text"] == after["text"];
     let count = before["count"].as_u64().is_some() && before["count"] == after["count"];
+    let shared = position
+        && before["text"]
+            .as_str()
+            .zip(after["text"].as_str())
+            .is_some_and(|(old, new)| {
+                let remaining: HashSet<_> = text_lines(new).into_iter().collect();
+                text_lines(old).iter().any(|line| remaining.contains(line))
+            });
     identity
+        || shared
         || (position && before["name"] == after["name"] && (items || (!name.is_empty() && count)))
         || (before["block"] == after["block"] && items)
 }
