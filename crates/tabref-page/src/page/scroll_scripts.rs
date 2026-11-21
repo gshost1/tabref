@@ -9,7 +9,7 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
   const win = doc.defaultView;
   const root = doc.scrollingElement || doc.documentElement;
   const key = Symbol.for('tabref.scroll');
-  const requests = Symbol.for('tabref.scroll-request-tracker');
+  const requests = Symbol.for('tabref.scroll-request-tracker.v2');
   const recordScroll = (target, dy) => {
     if (!dy) return;
     win[Symbol.for('tabref.last-vertical-scroll')] = {
