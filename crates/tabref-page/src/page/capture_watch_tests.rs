@@ -91,7 +91,7 @@ fn read_holes_are_guarded_by_fingerprints_hooks_or_blindness() {
         "prefers-contrast",
         "forced-colors",
         "orientation: portrait",
-        "win.innerWidth, win.innerHeight",
+        "doc.defaultView.innerWidth + ':' + doc.defaultView.innerHeight",
     ] {
         assert!(check.contains(condition), "{condition}");
     }
