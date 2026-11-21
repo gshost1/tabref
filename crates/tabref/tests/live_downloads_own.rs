@@ -1,4 +1,3 @@
-#![cfg(unix)]
 //! Live regressions for downloads in a browser tabref did not launch (the
 //! user's own): tabref never caps, cancels or reports a download it did not
 //! start, a command ending does not take a running wait's folder away, a
@@ -16,8 +15,14 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use common::exports::{BIG_BYTES, REPORT, serve_exports};
+#[cfg(unix)]
 use common::own_chrome::own_chrome;
+#[cfg(windows)]
+#[path = "common/download_own_windows.rs"]
+mod own_windows;
 use common::{Harness, Scratch, live, scratch};
+#[cfg(windows)]
+use own_windows::own_chrome;
 
 struct Site {
     tabref: Harness,
