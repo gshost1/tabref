@@ -1,0 +1,16 @@
+<!doctype html><title>Shipment filters</title>
+<label>Depot <select onchange="this.value==='Reverse'?draw(120,0,true):draw(120,120)"><option>All</option><option>Recent</option><option>Reverse</option></select></label>
+<label>Owner <input oninput="draw(54,240)"></label>
+<p id=balance>Balance 10</p><p id=error role=alert></p>
+<table><thead><tr><th>Tracking</th></tr></thead><tbody id=rows></tbody></table>
+<button id=retry hidden disabled>Retry shipment</button>
+<script>
+function draw(count,offset,reverse=false) {
+ const rows=Array.from({length:count},(_,n)=>'<tr><td>TRK-'+(162000+offset+n)+'</td></tr>');
+ document.getElementById('rows').innerHTML=(reverse?rows.reverse():rows).join('');
+ document.getElementById('balance').textContent='Balance '+(offset===120?'20':'30');
+ document.getElementById('error').textContent=offset===120?'Owner required':'Owner filter applied';
+ const retry=document.getElementById('retry');retry.hidden=false;retry.disabled=false;
+}
+document.getElementById('rows').innerHTML=Array.from({length:120},(_,n)=>'<tr><td>TRK-'+(162000+n)+'</td></tr>').join('');
+</script>

@@ -150,7 +150,7 @@ fn effect_block(
             &captured.tree,
             known,
             &page.changes,
-            |target| captured.dom(target),
+            |target| captured.dom(target).zip(captured.dom_reply(target)),
             |controls| {
                 let found = control_lines(controls);
                 let (_, outside) = redrawn(&page.changes, &found, |target| captured.dom(target));
