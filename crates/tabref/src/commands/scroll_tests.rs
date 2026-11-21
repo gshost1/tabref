@@ -2,6 +2,15 @@ use tabref_page::ScrollOutcome;
 
 use super::first_line;
 
+#[test]
+fn scroll_loop_flags_parse_and_conflict() {
+    use crate::cli::Cli;
+    use clap::Parser;
+    assert!(Cli::try_parse_from(["tabref", "scroll", "--until", "Entry 810"]).is_ok());
+    assert!(Cli::try_parse_from(["tabref", "scroll", "left", "--to-end"]).is_ok());
+    assert!(Cli::try_parse_from(["tabref", "scroll", "--until", "X", "--to-end"]).is_err());
+}
+
 fn outcome(moved: bool, at_end: bool) -> ScrollOutcome {
     ScrollOutcome {
         moved,
