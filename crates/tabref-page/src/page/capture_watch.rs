@@ -19,6 +19,12 @@
 //! soon as it knows. Form state includes a checkbox's `indeterminate` and a
 //! multi-select's whole selection; focus is followed into open shadow roots
 //! and same-origin frames.
+//!
+//! Above [`MAX_ELEMENTS`] only computed visibility is skipped, not roots or
+//! observers. Visibility changes without mutations require stylesheet,
+//! viewport, interaction or animation changes, which the fingerprint also
+//! watches. Unreadable stylesheets and oversized form or stylesheet state
+//! are blind rather than sampled: an unchecked value must not mean `same`.
 
 use serde_json::{Value, json};
 use tabref_cdp::is_timeout;
@@ -36,6 +42,8 @@ const SCAN: &str = r"const scan = () => {
     let total = 0;
     let visible = 0;
     let visibility = 0;
+    let forms = 0;
+    let styleSize = 0;
     const visibilityOptions = { opacityProperty: true, visibilityProperty: true };
     const frames = 'iframe, frame, object, embed';
     const moving = root => {
@@ -51,24 +59,46 @@ const SCAN: &str = r"const scan = () => {
       }
       return false;
     };
+    const styles = (sheets, realm) => {
+      for (const sheet of sheets) {
+        state += '\u0008' + sheet.disabled + ':' + sheet.media.mediaText;
+        if (sheet.media.mediaText) state += realm.matchMedia(sheet.media.mediaText).matches;
+        const rules = list => {
+          for (const rule of list) {
+            const text = rule.cssText;
+            styleSize += text.length;
+            if (styleSize > 100_000) { blind = true; return; }
+            state += '\u0009' + text;
+            if (rule.media) state += realm.matchMedia(rule.media.mediaText).matches;
+            if (rule.styleSheet) styles([rule.styleSheet], realm);
+            else if (rule.cssRules) rules(rule.cssRules);
+            if (blind) return;
+          }
+        };
+        try { rules(sheet.cssRules); } catch (error) { blind = true; }
+        if (blind) return;
+      }
+    };
     const walk = root => {
       roots.push(root);
-      if (root.nodeType === 9 && root.getElementsByTagName('*').length > MAX_ELEMENTS - total) {
-        blind = true;
-        return;
-      }
       if (moving(root) || unreadable(root)) { blind = true; return; }
       const elements = root.querySelectorAll('*');
       total += elements.length;
-      if (total > MAX_ELEMENTS) { blind = true; return; }
+      const visibilityScan = total <= MAX_ELEMENTS;
       state += '\u0006' + (root.styleSheets?.length ?? 0) + ':' + (root.adoptedStyleSheets?.length ?? 0);
+      const doc = root.nodeType === 9 ? root : root.ownerDocument;
+      styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
+      if (blind) return;
+      state += ':' + doc.defaultView.scrollX + ':' + doc.defaultView.scrollY
+        + ':' + doc.defaultView.innerWidth + ':' + doc.defaultView.innerHeight;
       for (let index = 0; index < elements.length; index++) {
         if (blind) return;
         const el = elements[index];
-        if (el.checkVisibility(visibilityOptions)) {
+        if (visibilityScan && el.checkVisibility(visibilityOptions)) {
           visible += 1;
           visibility = (Math.imul(31, visibility) + index + 1) | 0;
         }
+        if (el.matches(':hover, :active, :fullscreen')) state += '\u000a' + index;
         if (el.shadowRoot) walk(el.shadowRoot);
         const tag = el.localName;
         if (tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed') {
@@ -76,9 +106,13 @@ const SCAN: &str = r"const scan = () => {
           try { inner = el.contentDocument; } catch (error) { inner = null; }
           if (inner) walk(inner); else blind = true;
         } else if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+          forms += 1;
+          if (forms > MAX_ELEMENTS || el.value.length > 100_000
+            || (el.options && el.options.length > MAX_ELEMENTS)) { blind = true; return; }
           state += '\u0001' + el.value + '\u0002' + (el.checked ? 1 : 0) + (el.indeterminate ? 1 : 0)
             + '\u0002' + (el.selectedIndex ?? '');
           if (el.multiple && el.selectedOptions) state += '\u0002' + [...el.selectedOptions].map(option => option.index).join(',');
+          if (state.length > 100_000) { blind = true; return; }
         }
         if (el.hasAttribute('popover')) {
           try { state += '\u0003' + (el.matches(':popover-open') ? 1 : 0); } catch (error) { blind = true; }

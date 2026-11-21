@@ -12,6 +12,7 @@ use common::{Harness, Run, live, serve};
 use serde_json::{Value, json};
 use tabref_cdp::{attach_to_target, connect, list_page_targets};
 use tabref_core::Deadline;
+use tabref_page::{arm_capture_watch, check_capture_watch};
 
 const LARGE: &str = include_str!("fixtures/action-reuse.html");
 
@@ -167,6 +168,45 @@ fn empty_and_ambiguous_locators_still_fail_without_dispatch() {
         assert!(!output.status.success());
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(value["error"]["code"], code);
+    }
+    run(&tabref, &proxy, &["daemon", "stop"], false);
+}
+
+#[test]
+fn large_pages_notice_stylesheet_changes_without_dom_mutations() {
+    if !live() {
+        return;
+    }
+    let (tabref, proxy, url) = site("action-reuse-css");
+    run(&tabref, &proxy, &["open", &url], false);
+    edit(
+        &tabref,
+        "const style=document.createElement('style'); style.textContent='#go { visibility:visible }'; document.head.append(style)",
+    );
+    let deadline = Deadline::after(30_000).unwrap();
+    let mut connection = connect(&tabref.browser.endpoint().unwrap(), deadline).unwrap();
+    let target = list_page_targets(&mut connection, deadline)
+        .unwrap()
+        .into_iter()
+        .find(|target| target.url == url)
+        .unwrap();
+    let page = attach_to_target(&mut connection, &target.target_id, deadline).unwrap();
+    for expression in [
+        "document.styleSheets[0].insertRule('#go { visibility:hidden }', 1)",
+        "document.styleSheets[0].cssRules[1].style.visibility='visible'",
+    ] {
+        let watch = arm_capture_watch(&mut connection, &page, "css", deadline).unwrap();
+        assert!(!watch.blind);
+        assert_eq!(
+            check_capture_watch(&mut connection, &page, &watch, deadline),
+            "same"
+        );
+        edit(&tabref, expression);
+        let verdict = check_capture_watch(&mut connection, &page, &watch, deadline);
+        assert!(
+            matches!(verdict.as_str(), "state" | "mutated" | "blind"),
+            "{verdict}"
+        );
     }
     run(&tabref, &proxy, &["daemon", "stop"], false);
 }

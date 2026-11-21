@@ -50,3 +50,16 @@ fn the_watch_is_armed_once_the_page_is_idle_or_the_wait_ran_out() {
         "{filled}"
     );
 }
+
+#[test]
+fn large_pages_skip_only_visibility_and_bound_unobserved_state() {
+    let filled = script(CHECK, "s1");
+    assert!(filled.contains("const visibilityScan = total <= 1000;"));
+    assert!(filled.contains("visibilityScan && el.checkVisibility"));
+    assert!(!filled.contains("total > 1000"));
+    assert!(filled.contains("styles([...(root.styleSheets"));
+    assert!(filled.contains("forms > 1000"));
+    assert!(filled.contains("state.length > 100_000"));
+    assert!(filled.contains("styleSize > 100_000"));
+    assert!(filled.contains("realm.matchMedia"));
+}
