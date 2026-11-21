@@ -13,7 +13,11 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+#[path = "common/dialog_attach.rs"]
+mod attach_checks;
 mod common;
+#[path = "common/dialog_scenarios.rs"]
+mod scenarios;
 
 use common::{harness, live, serve};
 
@@ -274,13 +278,8 @@ fn with_daemon() -> bool {
     std::env::var_os("TABREF_NO_DAEMON").is_none()
 }
 
-/// Without the daemon (always on Windows), no connection is attached when
-/// a dialog opens after a command ended, and Chrome lets no later
-/// connection see or answer it: the page stays blocked. The next command
-/// then fails when its deadline passes, and says a dialog may be the
-/// cause.
 #[test]
-fn without_the_daemon_a_dialog_after_a_command_blocks_the_page_and_the_error_says_so() {
+fn without_the_daemon_a_late_dialog_fails_fast_without_promising_a_policy_retry() {
     if !live() || with_daemon() {
         return;
     }
@@ -289,19 +288,45 @@ fn without_the_daemon_a_dialog_after_a_command_blocks_the_page_and_the_error_say
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
     tabref.ok(&["click", "Later"]);
     std::thread::sleep(std::time::Duration::from_millis(800));
-    let started = std::time::Instant::now();
-    let blocked = tabref.run(&["--json", "--timeout", "3000", "js", "1"]);
-    let took = started.elapsed();
-
-    assert!(!blocked.ok, "{}", blocked.stdout);
-    let error = &blocked.json()["error"];
-    assert_eq!(error["code"], "TIMEOUT", "{error}");
-    assert!(
-        error["suggestion"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("blocked by a dialog that opened after the last command"),
-        "{error}"
-    );
-    assert!(took.as_secs() < 10, "{took:?}");
+    for policy in [None, Some("accept"), Some("dismiss")] {
+        let mut args = vec!["--json", "--timeout", "10000"];
+        if let Some(policy) = policy {
+            args.extend(["--dialog", policy]);
+        }
+        args.extend(["js", "document.title"]);
+        let started = std::time::Instant::now();
+        let next = tabref.run(&args);
+        let elapsed = started.elapsed();
+        eprintln!(
+            "late dialog policy={policy:?}: {elapsed:?}: {}",
+            next.stdout
+        );
+        assert!(!next.ok, "{}", next.stdout);
+        assert!(
+            elapsed >= std::time::Duration::from_millis(4900)
+                && elapsed < std::time::Duration::from_millis(8500),
+            "{elapsed:?}: {}",
+            next.stderr
+        );
+        let payload = next.json();
+        let error = &payload["error"];
+        assert_eq!(error["code"], "ACTION_FAILED", "{payload}");
+        assert_eq!(
+            error["details"]["kind"], "cdp_page_unresponsive",
+            "{payload}"
+        );
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("a dialog may be open or the page is busy")
+        );
+        assert!(
+            error["suggestion"]
+                .as_str()
+                .unwrap()
+                .contains("browser window")
+        );
+        assert!(!error["suggestion"].as_str().unwrap().contains("--dialog"));
+    }
 }

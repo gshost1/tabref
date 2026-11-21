@@ -1,5 +1,7 @@
+use std::time::{Duration, Instant};
+
 use serde_json::{Value, json};
-use tabref_core::{AppError, Deadline, ErrorCode};
+use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use crate::transport::transport_error::transport_failed;
 use crate::{CdpConnection, PageSession, PageTarget};
@@ -37,8 +39,8 @@ pub fn attach_to_target(
 /// session: a JavaScript dialog that opened while no tabref connection was
 /// attached blocks the page, and a connection made after it can neither see
 /// nor answer it.
-const BLOCKED_BY_DIALOG: &str = "The page may be blocked by a dialog that opened after the last \
-    command; answer it in the browser, or retry with a longer --timeout";
+const BLOCKED_BY_DIALOG: &str = "a dialog may be open or the page is busy; answer any dialog in \
+    the browser window, or wait for the page to finish, then retry. The daemon can catch future dialogs.";
 
 /// [`attach_to_target`], also sending `follow_ups` on the new session in the
 /// same round trip as the release, so a browser that is slow to answer (one
@@ -59,19 +61,101 @@ pub fn attach_to_target_with(
     connection.note_session_tab(&session_id, target_id);
     let mut calls = vec![("Runtime.runIfWaitingForDebugger", json!({}))];
     calls.extend(follow_ups.iter().cloned());
-    connection
-        .call_all(&calls, Some(&session_id), deadline)
-        .map_err(|error| {
-            if error.code == ErrorCode::Timeout {
-                error.with_suggestion(BLOCKED_BY_DIALOG)
-            } else {
-                error
-            }
-        })?;
+    attach_calls(connection, target_id, &session_id, &calls, deadline).map_err(|error| {
+        if error.code == ErrorCode::Timeout {
+            error.with_suggestion(BLOCKED_BY_DIALOG)
+        } else {
+            error
+        }
+    })?;
     Ok(PageSession {
         target_id: target_id.to_owned(),
         session_id,
     })
+}
+
+fn attach_calls(
+    connection: &mut CdpConnection,
+    target_id: &str,
+    session_id: &str,
+    calls: &[(&str, Value)],
+    deadline: Deadline,
+) -> Result<(), AppError> {
+    let started = Instant::now();
+    let mut pending = Vec::with_capacity(calls.len());
+    let outcome = (|| {
+        for (method, params) in calls {
+            pending.push(connection.send(method, params.clone(), Some(session_id), deadline)?);
+        }
+        let first = if connection.probes_attach(target_id)
+            && calls.iter().any(|(method, _)| *method == "Page.enable")
+        {
+            deadline.capped(Duration::from_millis((deadline.timeout_ms() / 2).max(1)))
+        } else {
+            deadline
+        };
+        let mut progressed = false;
+        match attach_replies(connection, &mut pending, first, &mut progressed) {
+            Err(error)
+                if error.code == ErrorCode::Timeout
+                    && first != deadline
+                    && !deadline.is_expired() =>
+            {
+                if !progressed
+                    && connection
+                        .call(
+                            "Target.getTargetInfo",
+                            json!({ "targetId": target_id }),
+                            None,
+                            deadline.capped(Duration::from_millis(35)),
+                        )
+                        .is_ok()
+                {
+                    match attach_replies(
+                        connection,
+                        &mut pending,
+                        deadline.capped(Duration::from_millis(70)),
+                        &mut progressed,
+                    ) {
+                        Err(error)
+                            if error.code == ErrorCode::Timeout && !deadline.is_expired() =>
+                        {
+                            if !progressed {
+                                let waited_ms = started.elapsed().as_millis();
+                                return Err(AppError::new(ErrorCode::ActionFailed,
+                                            format!("Waited {waited_ms} ms for page initialization; a dialog may be open or the page is busy"))
+                                            .with_details(json!({"kind":"cdp_page_unresponsive","waited_ms":waited_ms}))
+                                            .with_disposition(DeliverySemantics::not_delivered())
+                                            .with_suggestion(BLOCKED_BY_DIALOG));
+                            }
+                        }
+                        outcome => return outcome,
+                    }
+                }
+                attach_replies(connection, &mut pending, deadline, &mut progressed)
+            }
+            outcome => outcome,
+        }
+    })();
+    for id in pending {
+        connection.abandon(id);
+    }
+    outcome
+}
+
+fn attach_replies(
+    connection: &mut CdpConnection,
+    pending: &mut Vec<u64>,
+    deadline: Deadline,
+    progressed: &mut bool,
+) -> Result<(), AppError> {
+    while !pending.is_empty() {
+        let (id, outcome) = connection.next_reply(pending, deadline)?;
+        pending.retain(|waiting| *waiting != id);
+        outcome?;
+        *progressed = true;
+    }
+    Ok(())
 }
 
 /// Opens `url` in a new background tab and returns its target id. The tab
@@ -87,7 +171,9 @@ pub fn create_background_tab(
         None,
         deadline,
     )?;
-    string_field(&result, "targetId", "Target.createTarget")
+    let target_id = string_field(&result, "targetId", "Target.createTarget")?;
+    connection.note_fresh_target(&target_id);
+    Ok(target_id)
 }
 
 /// Brings a page target to the front of its window. In a headless browser
@@ -148,3 +234,11 @@ fn string_field(result: &Value, key: &str, method: &str) -> Result<String, AppEr
 #[cfg(test)]
 #[path = "targets_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "targets_deadline_tests.rs"]
+mod deadline_tests;
+
+#[cfg(test)]
+#[path = "targets_fresh_tests.rs"]
+mod fresh_tests;

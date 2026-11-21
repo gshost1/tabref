@@ -103,7 +103,8 @@ impl ServerState {
             }
         }
         let claim = TabClaim::new(Arc::clone(&self.locks), owner, Arc::clone(cancel));
-        let session = Session::open_claimed(options, Some(claim))?;
+        let mut session = Session::open_claimed(options, Some(claim))?;
+        session.connection().set_attach_probe(false);
         downloads::begin_command(&session);
         Ok(session)
     }
