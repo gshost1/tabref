@@ -303,8 +303,8 @@ fn without_the_daemon_a_late_dialog_fails_fast_without_promising_a_policy_retry(
         );
         assert!(!next.ok, "{}", next.stdout);
         assert!(
-            elapsed >= std::time::Duration::from_millis(1900)
-                && elapsed < std::time::Duration::from_millis(6500),
+            elapsed >= std::time::Duration::from_millis(4900)
+                && elapsed < std::time::Duration::from_millis(8500),
             "{elapsed:?}: {}",
             next.stderr
         );

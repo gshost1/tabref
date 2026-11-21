@@ -91,7 +91,7 @@ fn attach_calls(
             && calls.iter().any(|(method, _)| *method == "Page.enable")
         {
             deadline.capped(Duration::from_millis(
-                (deadline.timeout_ms() / 4).clamp(1, 2000),
+                (deadline.timeout_ms() / 2).clamp(1, 5000),
             ))
         } else {
             deadline

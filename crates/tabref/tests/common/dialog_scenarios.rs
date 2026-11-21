@@ -115,7 +115,7 @@ fn busy(ms: u64, background: bool) {
         &format!("busy-{ms}-background-{background}"),
         result,
         elapsed,
-        ms <= 1000,
+        ms <= 3000,
     );
     let completed = connection
         .reply(pending, Deadline::after(5000).unwrap())
@@ -186,6 +186,14 @@ fn short_busy_cli_commands_succeed() {
     }
     busy(300, false);
     busy(1000, false);
+}
+
+#[test]
+fn a_three_second_busy_cli_command_succeeds() {
+    if !live() {
+        return;
+    }
+    busy(3000, false);
 }
 
 #[test]

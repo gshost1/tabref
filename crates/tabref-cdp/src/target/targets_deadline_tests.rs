@@ -145,7 +145,7 @@ fn staged_waits_preserve_pending_replies_and_only_fail_after_confirmation() {
                 let error = result.unwrap_err();
                 assert_eq!(error.kind(), Some("cdp_page_unresponsive"));
                 assert_eq!(error.code, ErrorCode::ActionFailed);
-                assert!(budgets.iter().any(|ms| *ms > 200 && *ms <= 250));
+                assert!(budgets.iter().any(|ms| *ms > 400 && *ms <= 500));
                 assert!(budgets.iter().any(|ms| *ms <= 35));
                 assert!(budgets.last().unwrap() <= &70);
                 assert!(
@@ -190,8 +190,8 @@ fn staged_waits_preserve_pending_replies_and_only_fail_after_confirmation() {
 }
 
 #[test]
-fn page_silence_uses_a_quarter_of_the_timeout_capped_at_two_seconds() {
-    for timeout in [400, 1000, 10000] {
+fn page_silence_uses_half_the_timeout_capped_at_five_seconds() {
+    for timeout in [400, 1000, 10000, 20000] {
         let budgets = Arc::new(Mutex::new(Vec::new()));
         let mut connection = CdpConnection::new(Box::new(Delayed {
             mode: Mode::Blocked,
@@ -209,7 +209,7 @@ fn page_silence_uses_a_quarter_of_the_timeout_capped_at_two_seconds() {
         .unwrap_err();
         assert_eq!(error.kind(), Some("cdp_page_unresponsive"));
         let first = budgets.lock().unwrap()[1];
-        let expected = (timeout / 4).min(2000);
+        let expected = (timeout / 2).min(5000);
         assert!(
             first > expected / 2 && first <= expected,
             "{first} vs {expected}"

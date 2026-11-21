@@ -109,7 +109,7 @@ fn a_busy_renderer_gets_a_possibility_not_a_dialog_diagnosis() {
         error.suggestion.as_deref().unwrap_or_default()
     );
     assert!(
-        elapsed >= Duration::from_millis(1900) && elapsed < Duration::from_millis(6500),
+        elapsed >= Duration::from_millis(4900) && elapsed < Duration::from_millis(8500),
         "{elapsed:?}: {error:?}"
     );
     assert_eq!(error.kind(), Some("cdp_page_unresponsive"));
