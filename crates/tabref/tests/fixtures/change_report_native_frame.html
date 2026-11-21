@@ -1,0 +1,4 @@
+<!doctype html><title>Ticket editor</title>
+<button onclick="document.querySelector('iframe').contentWindow.location.reload()">Reload editor</button>
+<p id=status>Editor ready</p>
+<iframe src=/native-fields title=Editor style="width:600px;height:300px" onload="if(this.dataset.loaded)document.getElementById('status').textContent='Editor reloaded';this.dataset.loaded='yes'"></iframe>

@@ -7,6 +7,7 @@ use super::view_route::ViewRoute;
 
 const MORE_ROOM: usize = 100;
 const HEADING_CHARS: usize = 100;
+const BODY_CHARS: usize = 160;
 
 /// The headings past a view's cut, as plain lines that fit in `room`
 /// characters: `## 8. Content (172 lines, --from 552)`, with no refs or
@@ -18,16 +19,20 @@ const HEADING_CHARS: usize = 100;
 pub(crate) struct CutOutline {
     pub(crate) lines: Vec<ViewLine>,
     pub(crate) sections: SectionCut,
+    pub(crate) stub_cost: usize,
 }
 
 struct Entry {
     level: u8,
     number: usize,
     line: ViewLine,
+    inline: Option<ViewLine>,
+    body_cost: usize,
 }
 
 impl CutOutline {
     /// The characters the outline costs once printed.
+    #[cfg(test)]
     pub(crate) fn cost(&self) -> usize {
         self.lines.iter().map(ViewLine::cost).sum()
     }
@@ -41,7 +46,10 @@ pub(crate) fn cut_outline(
     route: &ViewRoute,
     full: bool,
 ) -> CutOutline {
-    let entries = entries(lines, from);
+    let boundary = route
+        .to
+        .filter(|&to| lines.last().is_some_and(|line| line.number >= to));
+    let entries = entries(lines, from, boundary);
     let mut sections = SectionCut {
         count: entries.len(),
         listed: 0,
@@ -71,13 +79,31 @@ pub(crate) fn cut_outline(
             printed.push(more);
         }
     }
+    let mut spent: usize = printed.iter().map(ViewLine::cost).sum();
+    let stub_cost = spent;
+    let mut body_spent = 0;
+    let mut priority: Vec<usize> = (0..chosen.len()).collect();
+    priority.sort_by_key(|&at| (entries[chosen[at]].level, chosen[at]));
+    for at in priority {
+        let entry = &entries[chosen[at]];
+        let Some(inline) = &entry.inline else {
+            continue;
+        };
+        let cost = spent - printed[at].cost() + inline.cost();
+        if cost <= room && body_spent + entry.body_cost <= room / 2 {
+            spent = cost;
+            body_spent += entry.body_cost;
+            printed[at] = inline.clone();
+        }
+    }
     CutOutline {
         lines: printed,
         sections,
+        stub_cost,
     }
 }
 
-fn entries(lines: &[ViewLine], from: usize) -> Vec<Entry> {
+fn entries(lines: &[ViewLine], from: usize, boundary: Option<usize>) -> Vec<Entry> {
     let mut entries = Vec::new();
     for (position, line) in lines.iter().enumerate().skip(from) {
         let Some(level) = line.heading else {
@@ -101,13 +127,50 @@ fn entries(lines: &[ViewLine], from: usize) -> Vec<Entry> {
         printed.number = line.number;
         printed.heading = Some(level);
         printed.plain = Some(heading);
+        let body = &lines[position + 1..position + 1 + held];
+        let body_cost = body.iter().map(ViewLine::cost).sum();
+        let body_lines: usize = body.iter().map(|line| line.text.split('\n').count()).sum();
+        let inline = if (1..=2).contains(&body_lines)
+            && body_cost <= BODY_CHARS
+            && !has_token(&line.text)
+            && body.last().is_none_or(|line| Some(line.number) != boundary)
+            && body
+                .iter()
+                .all(|line| line.heading.is_none() && line.cut.is_none() && !has_token(&line.text))
+        {
+            let mut inline = printed.clone();
+            inline.text = format!("{hashes} {text}");
+            for line in body {
+                inline.text.push('\n');
+                inline.text.push_str(&line.printed());
+            }
+            Some(inline)
+        } else {
+            None
+        };
         entries.push(Entry {
             level,
             number: line.number,
             line: printed,
+            inline,
+            body_cost,
         });
     }
     entries
+}
+
+fn has_token(text: &str) -> bool {
+    let mut escaped = false;
+    for character in text.chars() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '[' {
+            return true;
+        }
+    }
+    false
 }
 
 /// The indexes of the entries to list, in page order: those of every level
