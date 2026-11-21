@@ -30,6 +30,20 @@ fn quoted_text_in_one_argument_reads_as_words() {
 }
 
 #[test]
+fn apostrophes_inside_words_do_not_start_target_grammar() {
+    for text in ["Don't save", "O'Reilly", "James' account"] {
+        let TargetSpec::Find(locator) = TargetSpec::from_arg(text).unwrap() else {
+            panic!("not a locator")
+        };
+        assert_eq!(locator.name.as_deref(), Some(text));
+    }
+    let TargetSpec::Find(locator) = TargetSpec::from_arg("button \"Don't save\"").unwrap() else {
+        panic!("not a locator")
+    };
+    assert_eq!(locator.name.as_deref(), Some("Don't save"));
+}
+
+#[test]
 fn a_quoted_ref_lookalike_is_a_name() {
     assert!(matches!(
         TargetSpec::from_words(&[Word::quoted("e4")]).unwrap(),
