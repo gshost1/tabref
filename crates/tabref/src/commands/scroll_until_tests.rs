@@ -4,6 +4,13 @@ use tabref_core::Deadline;
 use tabref_page::ScrollOutcome;
 
 #[test]
+fn quiet_window_duration_does_not_round_to_zero() {
+    assert!(super::quiet_reason(Duration::from_millis(3200)).contains("3.200s"));
+    assert!(super::quiet_reason(Duration::from_millis(1)).contains("0.001s"));
+    assert!(!super::quiet_reason(Duration::ZERO).contains("within 0.0"));
+}
+
+#[test]
 fn capped_no_match_warns_that_more_may_load() {
     for reason in ["60-step cap", "time cap (8 s or session deadline)"] {
         assert_eq!(

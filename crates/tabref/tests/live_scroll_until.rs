@@ -77,6 +77,38 @@ fn a_slow_pending_fetch_never_claims_the_list_has_ended() {
     let run = tabref.ok(&["scroll", "--until", "Entry 120"]);
     assert!(!run.stdout.contains("bottom"), "{}", run.stdout);
     assert!(run.stdout.contains("more may load"), "{}", run.stdout);
+    assert!(!run.stdout.contains("within 0.0s"), "{}", run.stdout);
+    let run = tabref.ok(&["--json", "scroll", "--until", "Entry 120"]);
+    assert_eq!(run.json()["data"]["end_confirmed"], false);
+    assert!(run.json()["data"]["aged_out_requests"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn a_finished_directory_confirms_the_bottom_after_all_fetches_complete() {
+    if !live() {
+        return;
+    }
+    let page = PAGE.replace("240", "90").replace("ROWS", &rows("li", "Entry", 60))
+        .replace("busy=false;\n });", "busy=false; if(page.last) document.getElementById('tail').textContent='End of directory.';\n });");
+    let base = lazy_site(vec![("/", page)]);
+    let tabref = harness("scroll-confirmed-end");
+    tabref.ok(&["open", &base]);
+    let run = tabref.ok(&["scroll", "--to-end"]);
+    assert!(
+        run.stdout.contains("stopped at the bottom"),
+        "{}",
+        run.stdout
+    );
+    assert!(!run.stdout.contains("more may load"), "{}", run.stdout);
+    let run = tabref.ok(&["--json", "scroll", "--to-end"]);
+    assert_eq!(run.json()["data"]["end_confirmed"], true);
+    assert_eq!(run.json()["data"]["aged_out_requests"], 0);
+    assert!(
+        tabref
+            .ok(&["find", "End of directory."])
+            .stdout
+            .contains("End of directory.")
+    );
 }
 
 #[test]
