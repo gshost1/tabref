@@ -90,9 +90,7 @@ fn attach_calls(
         let first = if connection.probes_attach(target_id)
             && calls.iter().any(|(method, _)| *method == "Page.enable")
         {
-            deadline.capped(Duration::from_millis(
-                (deadline.timeout_ms() / 2).clamp(1, 5000),
-            ))
+            deadline.capped(Duration::from_millis((deadline.timeout_ms() / 2).max(1)))
         } else {
             deadline
         };

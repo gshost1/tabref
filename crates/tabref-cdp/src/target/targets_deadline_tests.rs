@@ -209,7 +209,7 @@ fn page_silence_uses_half_the_timeout_capped_at_five_seconds() {
         .unwrap_err();
         assert_eq!(error.kind(), Some("cdp_page_unresponsive"));
         let first = budgets.lock().unwrap()[1];
-        let expected = (timeout / 2).min(5000);
+        let expected = timeout / 2;
         assert!(
             first > expected / 2 && first <= expected,
             "{first} vs {expected}"
