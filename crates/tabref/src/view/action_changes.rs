@@ -1,24 +1,41 @@
 use std::collections::{HashMap, HashSet};
 
+use serde_json::Value;
 use tabref_core::{AccessibilityNode, capability};
-use tabref_page::{DomTree, ElementToken, NodeKind, TextChange, escape_line, squash, subtree_text};
+use tabref_page::{
+    DomTree, ElementToken, NodeKind, TextChange, collect_clickable, escape_line, squash,
+    subtree_text,
+};
 
 pub(crate) struct ReportChanges<'a> {
     pub(crate) controls: Vec<&'a AccessibilityNode>,
     pub(crate) changes: Vec<TextChange>,
 }
 
-pub(crate) fn prepare<'a>(
+pub(crate) fn prepare<'a, 'c>(
     tree: &'a AccessibilityNode,
     known: &HashSet<String>,
     changes: &[TextChange],
-    documents: impl Fn(&str) -> Option<&'a [DomTree]>,
+    captures: impl Fn(&str) -> Option<(&'a [DomTree], &'c Value)>,
     displayed: impl FnOnce(&[&AccessibilityNode]) -> HashSet<String>,
 ) -> ReportChanges<'a> {
     let mut controls = Vec::new();
     collect(tree, known, &mut controls);
-    controls
-        .retain(|node| !native_option(node, &documents) && !passive_table_part(node, &documents));
+    let mut clickable = HashMap::new();
+    let mut checked = HashSet::new();
+    for node in &controls {
+        if matches!(node.role.as_str(), "cell" | "row")
+            && let Some(token) = token(node)
+            && checked.insert(token.target_id.clone())
+            && let Some((_, capture)) = captures(&token.target_id)
+        {
+            clickable.insert(token.target_id, collect_clickable(capture));
+        }
+    }
+    let documents = |target: &str| captures(target).map(|(docs, _)| docs);
+    controls.retain(|node| {
+        !native_option(node, &documents) && !passive_table_part(node, &documents, &clickable)
+    });
     let displayed = displayed(&controls);
     let owners: Vec<_> = controls
         .iter()
@@ -126,20 +143,19 @@ fn native_option<'a>(
 fn passive_table_part<'a>(
     node: &AccessibilityNode,
     documents: &impl Fn(&str) -> Option<&'a [DomTree]>,
+    clickable: &HashMap<String, HashSet<i64>>,
 ) -> bool {
-    if !matches!(
-        node.role.as_str(),
-        "cell" | "gridcell" | "row" | "rowheader" | "columnheader"
-    ) || [
-        capability::SET_FOCUS,
-        capability::SET_VALUE,
-        capability::TYPE_TEXT,
-        capability::SELECT,
-        capability::TOGGLE,
-        capability::PRESS_KEY,
-    ]
-    .iter()
-    .any(|action| capability::contains(&node.presentation.available_actions, action))
+    if !matches!(node.role.as_str(), "cell" | "row")
+        || [
+            capability::SET_FOCUS,
+            capability::SET_VALUE,
+            capability::TYPE_TEXT,
+            capability::SELECT,
+            capability::TOGGLE,
+            capability::PRESS_KEY,
+        ]
+        .iter()
+        .any(|action| capability::contains(&node.presentation.available_actions, action))
     {
         return false;
     }
@@ -149,6 +165,22 @@ fn passive_table_part<'a>(
     let Some(dom) = doc.node(index) else {
         return false;
     };
+    if clickable
+        .get(&doc.target_id)
+        .is_none_or(|ids| ids.contains(&dom.backend_id))
+        || dom
+            .attr("id")
+            .filter(|id| !id.is_empty())
+            .is_some_and(|id| {
+                doc.nodes.iter().any(|owner| {
+                    owner
+                        .attr("aria-activedescendant")
+                        .is_some_and(|value| value.trim() == id)
+                })
+            })
+    {
+        return false;
+    }
     dom.attr("tabindex")
         .and_then(|value| value.trim().parse::<i32>().ok())
         .is_none()
