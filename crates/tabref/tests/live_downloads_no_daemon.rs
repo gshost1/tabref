@@ -14,7 +14,16 @@ const MB: usize = 1024 * 1024;
 const FIRST: usize = 32 * 1024;
 
 fn enabled() -> bool {
-    live() && (cfg!(windows) || std::env::var_os("TABREF_NO_DAEMON").is_some())
+    if !live() {
+        return false;
+    }
+    if !cfg!(windows) && std::env::var_os("TABREF_NO_DAEMON").is_none() {
+        eprintln!(
+            "skipped: set TABREF_NO_DAEMON=1 to exercise downloads between in-process commands"
+        );
+        return false;
+    }
+    true
 }
 
 fn serve(bytes: usize, partial: bool) -> (u16, mpsc::Sender<()>, mpsc::Sender<()>) {

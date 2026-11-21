@@ -158,7 +158,10 @@ pub(crate) fn after_action(
         }
     }
     for record in &mut records {
-        name_landed(record, folder.as_deref());
+        let watched = !elsewhere.contains(&record.origin.frame_id);
+        refresh_record(record, watched, cap, folder.as_deref(), |guid| {
+            let _ = cancel_download(session.connection(), guid, deadline);
+        });
     }
     let batch = current_batch();
     let kept: Vec<KeptDownload> = records
