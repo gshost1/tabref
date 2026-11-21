@@ -1,6 +1,20 @@
 ## Key dates
 Released: Jan 24, 2017
+## Meta
+Version: 1.2.3
+Requires: Python >=3.9
+## Classifiers (3 lines, --from 87)
+## Maintainers (1 lines, --from 91)
+## Project links (1 lines, --from 93)
+## Navigation (1 lines, --from 95)
 ## License
 MIT
 ## Installation
 pip install sample
+## Requirements
+Python >=3.9
+## Statistics (1 lines, --from 103)
+## Download files (1 lines, --from 105)
+## Description (1 lines, --from 107)
+## Footer
+Published by the Example team

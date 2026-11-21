@@ -67,7 +67,78 @@ fn truncated_and_multiline_bodies_stay_stubs() {
     source[1].cut = Some("+100 chars".to_owned());
     source[3].text = "one\ntwo\nthree".to_owned();
     let result = cut_outline(&source, 0, 1_000, &options.route, false);
-    assert!(result.lines.iter().all(|line| line.text.contains("--from")));
+    assert_eq!(
+        result
+            .lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "## Truncated (1 lines, --from 1)",
+            "## Pre (1 lines, --from 3)"
+        ]
+    );
+}
+
+#[test]
+fn to_boundary_bodies_stay_stubs() {
+    let mut options = ViewOptions::snap("http://fixture.test", false, RowWindow::default());
+    options.route.to = Some(664);
+    let mut source = lines("## Key dates\nReleased: Jan 24, 2017");
+    source[0].number = 663;
+    source[1].number = 664;
+    let result = cut_outline(&source, 0, 1_000, &options.route, false);
+    assert_eq!(result.lines[0].text, "## Key dates (1 lines, --from 663)");
+    options.route.to = Some(700);
+    let result = cut_outline(&source, 0, 1_000, &options.route, false);
+    assert_eq!(result.lines[0].text, "## Key dates\nReleased: Jan 24, 2017");
+}
+
+#[test]
+fn live_refs_and_controls_stay_stubs() {
+    for body in [
+        "[e12 link Download files]",
+        "[@session:e12 Download -> /files]",
+        "[button Save]",
+        "[Download -> /files]",
+    ] {
+        assert_eq!(
+            outline(&format!("## Links\n{body}"), 1_000),
+            "## Links (1 lines, --from 1)\n"
+        );
+    }
+    assert_eq!(
+        outline("## Text\n\\[ordinary text\\]", 1_000),
+        "## Text\n\\[ordinary text\\]\n"
+    );
+}
+
+#[test]
+fn every_stub_only_heading_is_preserved_when_inlining() {
+    let source = fixture("PyPI");
+    let mut baseline = source.clone();
+    for line in &mut baseline {
+        line.cut = Some("disable inline bodies".to_owned());
+    }
+    for budget in (500..=12_000).step_by(37) {
+        let options = ViewOptions {
+            budget,
+            ..ViewOptions::snap("http://fixture.test", false, RowWindow::default())
+        };
+        let (main, _) = fit(baseline.clone(), &options, false);
+        let (branch, _) = fit(source.clone(), &options, false);
+        let main: Vec<_> = main
+            .iter()
+            .filter(|line| line.heading.is_some())
+            .map(|line| line.number)
+            .collect();
+        let branch: Vec<_> = branch
+            .iter()
+            .filter(|line| line.heading.is_some())
+            .map(|line| line.number)
+            .collect();
+        assert_eq!(main, branch, "budget {budget}");
+    }
 }
 
 fn fixture(kind: &str) -> Vec<ViewLine> {
@@ -81,8 +152,36 @@ fn fixture(kind: &str) -> Vec<ViewLine> {
     let sections = match kind {
         "PyPI" => vec![
             ("Key dates", "Released: Jan 24, 2017"),
+            ("Meta", "Version: 1.2.3\nRequires: Python >=3.9"),
+            (
+                "Classifiers",
+                "Development Status :: 5 - Production/Stable\nProgramming Language :: Python\nTopic :: Software Development",
+            ),
+            (
+                "Maintainers",
+                "[e12 link Example maintainer -> /user/example]",
+            ),
+            (
+                "Project links",
+                "[@session:e13 Homepage -> https://example.test]",
+            ),
+            ("Navigation", "[e14 link Release history -> #history]"),
             ("License", "MIT"),
             ("Installation", "pip install sample"),
+            ("Requirements", "Python >=3.9"),
+            (
+                "Statistics",
+                "This project has many releases, downloads, contributors and dependent projects. The statistics sidebar contains a detailed explanation of how download counts are collected and filtered.",
+            ),
+            (
+                "Download files",
+                "[e15 link sample-1.2.3.tar.gz -> /files/sample.tar.gz]",
+            ),
+            (
+                "Description",
+                "This example project provides a reference implementation for processing structured input documents and rendering useful output. See the complete documentation for installation options, supported platforms, and examples.",
+            ),
+            ("Footer", "Published by the Example team"),
         ],
         "RFC" => vec![
             ("Status", "Proposed Standard"),
@@ -109,15 +208,35 @@ fn fixture_output_measurements() {
     let mut pypi = String::new();
     for kind in ["PyPI", "RFC", "Wikipedia"] {
         let options = ViewOptions {
-            budget: 2_000,
+            budget: if kind == "PyPI" { 4_000 } else { 2_000 },
             ..ViewOptions::snap("http://fixture.test", false, RowWindow::default())
         };
-        let (kept, report) = fit(fixture(kind), &options, false);
+        let source = fixture(kind);
+        let mut baseline = source.clone();
+        for line in &mut baseline {
+            line.cut = Some("disable inline bodies".to_owned());
+        }
+        let (main, _) = fit(baseline, &options, false);
+        let before: String = main
+            .iter()
+            .map(|line| format!("{}\n", line.printed()))
+            .collect();
+        if kind == "PyPI" {
+            assert_eq!(
+                &before[before.find("## Key dates").unwrap()..],
+                include_str!("cut_inline_pypi_main.golden")
+            );
+        }
+        let (kept, report) = fit(source, &options, false);
         let output: String = kept
             .iter()
             .map(|line| format!("{}\n", line.printed()))
             .collect();
-        println!("{kind}: {} bytes\n{output}", output.len());
+        println!(
+            "{kind}: main {} bytes, branch {} bytes\n{output}",
+            before.len(),
+            output.len()
+        );
         assert!(report.budget_from.is_some());
         assert!(kept.iter().map(ViewLine::cost).sum::<usize>() <= options.budget);
         if kind == "PyPI" {

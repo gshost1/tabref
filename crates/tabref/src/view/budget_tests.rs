@@ -48,7 +48,7 @@ fn past_the_budget_a_marker_names_the_line_to_go_on_from_and_plain_headings_foll
         &shown[14..],
         &[
             "… lines 15-25 cut here to fit: tabref snap --from 15",
-            "## Early life\npppppppppp",
+            "## Early life (1 lines, --from 22)",
             "## Death\np",
         ]
     );
@@ -111,14 +111,17 @@ fn deeper_headings_that_do_not_all_fit_leave_every_top_level_one_listed_and_fill
             "## Part 1 (8 lines, --from 31)",
             "### Sub 1.1\nppppppppp",
             "### Sub 1.2\nppppppppp",
+            "### Sub 1.3\nppppppppp",
+            "### Sub 1.4\nppppppppp",
             "## Part 2 (8 lines, --from 40)",
+            "### Sub 2.1\nppppppppp",
             "## Part 3 (8 lines, --from 49)",
             "## Part 4 (8 lines, --from 58)",
             "## Part 5 (8 lines, --from 67)",
-            "… 18 more headings; tabref find <text> or tabref snap --from 36",
+            "… 15 more headings; tabref find <text> or tabref snap --from 43",
         ]
     );
-    assert_eq!((report.sections.count, report.sections.listed), (25, 7));
+    assert_eq!((report.sections.count, report.sections.listed), (25, 10));
     assert!(printed_cost(&kept) <= 1_800, "{}", printed_cost(&kept));
 }
 

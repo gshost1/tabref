@@ -19,6 +19,7 @@ const BODY_CHARS: usize = 160;
 pub(crate) struct CutOutline {
     pub(crate) lines: Vec<ViewLine>,
     pub(crate) sections: SectionCut,
+    pub(crate) stub_cost: usize,
 }
 
 struct Entry {
@@ -31,6 +32,7 @@ struct Entry {
 
 impl CutOutline {
     /// The characters the outline costs once printed.
+    #[cfg(test)]
     pub(crate) fn cost(&self) -> usize {
         self.lines.iter().map(ViewLine::cost).sum()
     }
@@ -44,7 +46,10 @@ pub(crate) fn cut_outline(
     route: &ViewRoute,
     full: bool,
 ) -> CutOutline {
-    let entries = entries(lines, from);
+    let boundary = route
+        .to
+        .filter(|&to| lines.last().is_some_and(|line| line.number >= to));
+    let entries = entries(lines, from, boundary);
     let mut sections = SectionCut {
         count: entries.len(),
         listed: 0,
@@ -75,6 +80,7 @@ pub(crate) fn cut_outline(
         }
     }
     let mut spent: usize = printed.iter().map(ViewLine::cost).sum();
+    let stub_cost = spent;
     let mut body_spent = 0;
     let mut priority: Vec<usize> = (0..chosen.len()).collect();
     priority.sort_by_key(|&at| (entries[chosen[at]].level, chosen[at]));
@@ -93,10 +99,11 @@ pub(crate) fn cut_outline(
     CutOutline {
         lines: printed,
         sections,
+        stub_cost,
     }
 }
 
-fn entries(lines: &[ViewLine], from: usize) -> Vec<Entry> {
+fn entries(lines: &[ViewLine], from: usize, boundary: Option<usize>) -> Vec<Entry> {
     let mut entries = Vec::new();
     for (position, line) in lines.iter().enumerate().skip(from) {
         let Some(level) = line.heading else {
@@ -125,9 +132,11 @@ fn entries(lines: &[ViewLine], from: usize) -> Vec<Entry> {
         let body_lines: usize = body.iter().map(|line| line.text.split('\n').count()).sum();
         let inline = if (1..=2).contains(&body_lines)
             && body_cost <= BODY_CHARS
+            && !has_token(&line.text)
+            && body.last().is_none_or(|line| Some(line.number) != boundary)
             && body
                 .iter()
-                .all(|line| line.heading.is_none() && line.cut.is_none())
+                .all(|line| line.heading.is_none() && line.cut.is_none() && !has_token(&line.text))
         {
             let mut inline = printed.clone();
             inline.text = format!("{hashes} {text}");
@@ -148,6 +157,20 @@ fn entries(lines: &[ViewLine], from: usize) -> Vec<Entry> {
         });
     }
     entries
+}
+
+fn has_token(text: &str) -> bool {
+    let mut escaped = false;
+    for character in text.chars() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '[' {
+            return true;
+        }
+    }
+    false
 }
 
 /// The indexes of the entries to list, in page order: those of every level
