@@ -1,14 +1,16 @@
 //! The daemon's last capture of each tab, kept so a `find`, `snap` or
 //! `read` right after an `open` or `snap` of an unchanged page does not read
-//! the whole page again. Only reading commands keep or use one; every other
-//! command clears them all, before and after it runs. A kept capture is used
+//! the whole page again. Actions may reuse one to resolve their target, but
+//! never keep one across commands. A kept capture is used
 //! only while the page's own watch says nothing changed since (see
 //! [`tabref_page::check_capture_watch`]), it is the tab's latest snapshot,
 //! and it is younger than [`MAX_AGE`]. In-process runs keep nothing, and
 //! every in-process command that is not a read writes a new page-actions
 //! stamp to the ref store, which a kept capture must still match, so an
 //! in-process hover between two daemon reads is never missed. The page
-//! script that checks the watch gets [`WATCH_WAIT`], and the one that arms
+//! script that checks the watch gets [`WATCH_WAIT`], allowing a large page's
+//! visibility scan to finish while bounding a busy page's wait; small pages
+//! return as soon as checked. The one that arms
 //! it [`ARM_WAIT`], which leaves room for its wait for an idle main thread:
 //! a page whose main thread is held (an open dialog, a long task) is not
 //! kept or reused, and the command goes on as without the cache. At most
@@ -30,7 +32,7 @@ use super::captured_snapshot::CapturedSnapshot;
 use super::ref_target::latest_snapshot_of;
 
 const MAX_AGE: Duration = Duration::from_secs(5);
-const WATCH_WAIT: Duration = Duration::from_millis(8);
+const WATCH_WAIT: Duration = Duration::from_millis(30);
 const ARM_WAIT: Duration = Duration::from_millis(IDLE_WAIT_MS + 11);
 const MAX_KEPT: usize = 4;
 const PAGE_ACTIONS: &str = "page-actions";

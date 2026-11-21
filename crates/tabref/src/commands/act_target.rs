@@ -90,10 +90,18 @@ pub(crate) fn resolve_target(
         }
         TargetSpec::Find(locator) => {
             let page = session.page()?;
-            let snapshot = snapshot_page_within_budget(session.connection(), &page, deadline)?;
-            let found = locate(&snapshot.tree, locator, intent)?;
+            let kept = session.reusable_capture();
+            let snapshot;
+            let tree = match &kept {
+                Some(captured) => &captured.tree,
+                None => {
+                    snapshot = snapshot_page_within_budget(session.connection(), &page, deadline)?;
+                    &snapshot.tree
+                }
+            };
+            let found = locate(tree, locator, intent)?;
             let mut known = HashSet::new();
-            collect_tokens(&snapshot.tree, &mut known);
+            collect_tokens(tree, &mut known);
             let target_session = session.attach(&found.token.target_id)?;
             let mut label = match &found.name {
                 Some(name) => quote_text(name),
