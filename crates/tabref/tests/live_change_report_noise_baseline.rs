@@ -92,14 +92,20 @@ this.shadowRoot.querySelector('button').onclick=()=>this.shadowRoot.querySelecto
     let tabref = harness("popup-close-roots");
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/shadow")]);
     let report = tabref.ok(&["click", "Close popup"]).stdout;
-    assert!(!report.contains("closed"), "{report}");
-    assert!(report.contains("- Arts"), "{report}");
+    assert!(
+        report.contains("- listbox \"Category\" closed (2 options)"),
+        "{report}"
+    );
+    assert!(!report.contains("- Shared"), "{report}");
     tabref.ok(&["open", &format!("http://127.0.0.1:{port}/frame")]);
     let report = tabref.ok(&["click", "Close menu"]).stdout;
-    assert!(!report.contains("closed"), "{report}");
+    assert!(
+        report.contains("- menu \"Actions\" closed (2 items)"),
+        "{report}"
+    );
     assert!(report.contains("Validation failed"), "{report}");
     assert!(report.contains("new"), "{report}");
     assert!(report.contains("Unrelated removal"), "{report}");
-    assert!(report.contains("Delete"), "{report}");
+    assert!(!report.contains("- Shared"), "{report}");
     let _ = tabref.run(&["daemon", "stop"]);
 }

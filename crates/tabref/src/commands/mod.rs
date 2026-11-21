@@ -230,7 +230,15 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
             direction,
             target,
             px,
-        } => scroll::run(session, direction, target.as_deref(), *px),
+            until,
+            to_end,
+        } => scroll::run_loop(
+            session,
+            direction,
+            target.as_deref(),
+            *px,
+            (until.as_deref(), *to_end),
+        ),
         Command::Upload { target, files } => upload::run(session, target, files),
         Command::Find { text, role } => find::run(session, &text.join(" "), role.as_deref()),
         Command::Read {

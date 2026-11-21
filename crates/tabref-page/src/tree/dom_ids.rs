@@ -7,7 +7,7 @@ use serde_json::Value;
 /// editable content. The list holds indexes into each document's nodes. A
 /// document's `<html>` and `<body>` are left out: a listener there handles
 /// clicks for the whole page and makes neither a click target.
-pub(crate) fn collect_clickable(capture: &Value) -> HashSet<i64> {
+pub fn collect_clickable(capture: &Value) -> HashSet<i64> {
     let empty = Vec::new();
     let strings = capture
         .get("strings")
