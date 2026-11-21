@@ -1,3 +1,4 @@
+pub(crate) mod action_changes;
 pub(crate) mod block_renderer;
 pub(crate) mod block_titles;
 pub(crate) mod bot_check;
