@@ -45,6 +45,13 @@ pub(super) fn replaced_rows(
                     && candidate["body_id"] == other["body_id"]
                     && candidate["body_id"] != body["body_id"]
             })
+            || new.iter().any(|candidate| {
+                candidate["watch"] == body["watch"]
+                    && candidate["block"] == body["block"]
+                    && candidate["table"] == body["table"]
+                    && candidate["body_id"] == body["body_id"]
+                    && candidate["body"] != body["body"]
+            })
         {
             continue;
         }

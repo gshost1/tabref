@@ -99,3 +99,13 @@ fn whole_body_replacements_do_not_spend_changes_on_old_rows() {
         "{changes:?}"
     );
 }
+
+#[test]
+fn inserting_a_body_before_surviving_rows_is_not_a_replacement() {
+    let (before, mut after) = pair();
+    let mut surviving = before["tables"][0].clone();
+    surviving["body"] = json!(1);
+    after["tables"].as_array_mut().unwrap().push(surviving);
+    after["blocks"][0][1] = json!("New-A\nNew-B\nOld-A\nOld-B");
+    assert!(replacement(&before, &after).is_empty());
+}

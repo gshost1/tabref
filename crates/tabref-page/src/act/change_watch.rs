@@ -25,6 +25,8 @@ use crate::{CdpConnection, PageSession};
 
 const TEXT_LIMIT: usize = 200_000;
 
+type WatchedChanges = (Vec<TextChange>, usize, Vec<(usize, Vec<String>)>);
+
 #[cfg(test)]
 #[path = "text_replaced_rows_tests.rs"]
 mod replacement_tests;
@@ -131,7 +133,7 @@ fn compare_watched(
     popups_before: &[Value],
     tables_before: &[Value],
     after: &Value,
-) -> (Vec<TextChange>, usize, Vec<(usize, Vec<String>)>) {
+) -> WatchedChanges {
     let mut after_blocks = text_blocks(after);
     if after_blocks.is_empty() {
         let (changes, unchecked) = compare_blocks(before, after_blocks);

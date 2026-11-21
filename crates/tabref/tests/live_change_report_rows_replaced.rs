@@ -65,6 +65,10 @@ fn replacements_show_new_rows_instead_of_old_removals_in_text_and_json() {
             .filter(|entry| entry["line"].as_str().unwrap().starts_with("+ TRK-"))
             .map(|entry| entry["count"].as_u64().unwrap() as usize)
             .sum();
+        println!(
+            "=== JSON {}: {shown} new rows shown, {} new_rows_omitted ===",
+            args[1], data["new_rows_omitted"]
+        );
         assert_eq!(
             shown + data["new_rows_omitted"].as_u64().unwrap() as usize,
             total,
