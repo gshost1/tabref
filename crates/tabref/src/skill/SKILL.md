@@ -10,7 +10,7 @@ See `tabref skill more` for waits, `connect` to your own Chrome, downloads, dial
 `[e9 select Size = "M" options: S | M | L]`, links their address: `[e7 Next -> <address>]`.
 Count `N items:`, `table N rows:` and repeats `(1/3)` across the whole page, not the first block.
 A cut view ends with an outline of the rest; if what you need is not shown, use its `--from N`,
-`tabref read --section "<heading>"` or `tabref find TEXT` (hidden text too). A `dialog` line at the top: click one of its buttons.
+`tabref read --section "<heading>"` or `tabref find TEXT` (hidden text too). A `dialog` line at the top: click a button.
 
 ## Act
 `click T`, `fill T VALUE` (replaces), `type T TEXT` (appends), `select T LABEL`, `check T`, `uncheck T`,
@@ -33,6 +33,6 @@ did not show what you need. It stops at the first failing step.
 `for name qty in Pen 2 Cup 5` ... `end` runs the steps per pair as `{name}` and `{qty}`.
 Pages: loop the `Next` or `2` link's address with the page number as `{n}`:
 `for n in 2 3 4`, `open "<address with {n}>"`, `find TEXT`, `end`; no address: `click "Next"` in the loop.
-Lazy list: repeat `scroll down` in a `for` loop (`for n in 1 2 3 4 5 6`), then `find TEXT`.
+Lazy list: `scroll down --until "TEXT"` or `scroll down --to-end`; if it says more may load, run it again.
 Steps: any action but `upload`, `open URL`, `expect text|gone|url X`,
 `expect T is visible|enabled|hidden|gone|value=X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
