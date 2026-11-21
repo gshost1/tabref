@@ -27,6 +27,21 @@ fn a_download_passes_the_cap_by_what_it_received_or_announced() {
 }
 
 #[test]
+fn a_guid_cannot_remove_a_partial_file_outside_the_download_folder() {
+    let root = folder("guid");
+    let dir = root.join("downloads");
+    std::fs::create_dir(&dir).unwrap();
+    let outside = root.join("victim.crdownload");
+    std::fs::write(&outside, [0; 101]).unwrap();
+    for guid in ["../victim", "..\\victim", "/victim", ""] {
+        let mut download = record(guid, 101, 0);
+        refresh_record(&mut download, true, 100, Some(&dir), |_| {});
+        assert!(outside.exists());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn a_download_past_the_cap_says_so_and_how_to_raise_it() {
     let mut capped = record("g", 2_097_152, 0);
     capped.state = DownloadState::TooLarge { cap_mb: 1 };

@@ -115,7 +115,7 @@ pub(crate) fn numbered(name: &str, copy: u32) -> String {
     }
 }
 
-fn plain_name(guid: &str) -> Option<&str> {
+pub(crate) fn plain_name(guid: &str) -> Option<&str> {
     let plain = !guid.is_empty()
         && guid
             .chars()

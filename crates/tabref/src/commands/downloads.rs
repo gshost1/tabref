@@ -20,7 +20,7 @@ use tabref_page::{
 
 use super::download_folder::{UNSAFE_FOLDER, download_cap, download_folder, launched_here};
 use super::download_ledger::{DownloadLedger, merge};
-use super::download_place::{landed_size, partial_size, place};
+use super::download_place::{landed_size, partial_size, place, plain_name};
 use super::kept_download::KeptDownload;
 use crate::session::Session;
 
@@ -288,15 +288,15 @@ fn enforce_record(
             DownloadState::Completed => {}
             _ => return,
         }
-        if let Some(dir) = folder {
+        if let Some((dir, guid)) = folder.zip(plain_name(&record.guid)) {
             let file = record
                 .path
                 .clone()
-                .unwrap_or_else(|| dir.join(&record.guid).to_string_lossy().into_owned());
-            if Path::new(&file).starts_with(dir) {
+                .unwrap_or_else(|| dir.join(guid).to_string_lossy().into_owned());
+            if Path::new(&file).parent() == Some(dir) {
                 let _ = std::fs::remove_file(file);
             }
-            let _ = std::fs::remove_file(dir.join(format!("{}.crdownload", record.guid)));
+            let _ = std::fs::remove_file(dir.join(format!("{guid}.crdownload")));
         }
         record.path = None;
         record.finish(DownloadState::TooLarge { cap_mb: cap / MB }, now_ms());
