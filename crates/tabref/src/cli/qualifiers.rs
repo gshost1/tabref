@@ -76,9 +76,17 @@ fn quote(word: &str) -> String {
     format!("\"{escaped}\"")
 }
 
+fn target_word(word: &str) -> String {
+    if word.contains(['"', '\'']) {
+        word.to_owned()
+    } else {
+        quote(word)
+    }
+}
+
 fn usage(name: &str, words: &[&str]) -> Error {
     let target = if words.len() > 1 && words[1..].iter().step_by(2).all(|word| keyword(word)) {
-        let mut parts = vec![quote(words[0])];
+        let mut parts = vec![target_word(words[0])];
         for pair in words[1..].chunks(2) {
             let operand = pair.get(1).copied().unwrap_or("row");
             let operand = if pair[0].eq_ignore_ascii_case("nth")
@@ -107,7 +115,7 @@ fn normalize(name: &str, words: &[&str]) -> Result<Option<String>, Error> {
     if words.len() <= 1 {
         return Ok(words.first().map(|word| (*word).to_owned()));
     }
-    let mut parts = vec![quote(words[0])];
+    let mut parts = vec![target_word(words[0])];
     let mut pairs = words[1..].chunks_exact(2);
     for pair in &mut pairs {
         if !keyword(pair[0])

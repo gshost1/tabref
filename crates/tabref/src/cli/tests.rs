@@ -91,6 +91,29 @@ fn one_argument_keeps_its_original_spelling() {
 }
 
 #[test]
+fn grammar_in_the_first_argument_survives_trailing_qualifiers() {
+    use crate::commands::target_spec::TargetSpec;
+
+    for first in ["button \"Edit\"", "button 'Edit'", "\"Edit\""] {
+        let cli = parse(&["click", first, "nth", "2", "in", "row"]);
+        let Command::Click { target } = &cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(target, &format!("{first} nth \"2\" in \"row\""));
+        let TargetSpec::Find(locator) = TargetSpec::from_arg(target).unwrap() else {
+            panic!("wrong target")
+        };
+        assert_eq!(locator.name.as_deref(), Some("Edit"));
+        assert_eq!(
+            locator.role.as_deref(),
+            first.starts_with("button").then_some("button")
+        );
+        assert_eq!(locator.nth, Some(2));
+        assert_eq!(locator.scope.as_deref(), Some("row"));
+    }
+}
+
+#[test]
 fn qualifiers_preserve_literal_quotes_keywords_and_backslashes() {
     use crate::commands::target_spec::TargetSpec;
 

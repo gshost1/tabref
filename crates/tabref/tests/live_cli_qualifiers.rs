@@ -21,6 +21,8 @@ fn split_qualifiers_and_multiword_find_work_like_steps() {
     for (args, title) in [
         (vec!["click", "Revoke", "in", "docs-preview-old"], "revoked"),
         (vec!["click", "Edit", "nth", "2"], "second"),
+        (vec!["click", "Edit", "nth", "1"], "first"),
+        (vec!["click", "button \"Edit\"", "nth", "2"], "second"),
         (vec!["click", "Save", "after", "Billing"], "saved"),
         (vec!["click", "Save", "before", "Shipping"], "saved"),
     ] {
