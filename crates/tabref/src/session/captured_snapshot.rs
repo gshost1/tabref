@@ -40,7 +40,7 @@ impl From<Value> for CapturedDom {
 
 impl CapturedSnapshot {
     /// The DOM reply of an individual target in the snapshot.
-    pub(super) fn dom_reply(&self, target: &str) -> Option<&Value> {
+    pub(crate) fn dom_reply(&self, target: &str) -> Option<&Value> {
         self.dom_captures.get(target).map(|capture| &capture.reply)
     }
 

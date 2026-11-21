@@ -80,7 +80,11 @@ pub(crate) const SCAN: &str = r"const scan = () => {
           return false;
         });
         const labels = (popup.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(key => root.getElementById(key)?.textContent || '').join(' ').trim();
-        result.push({ id: id(popup), block: owner ? id(owner) : 0, role,
+        const position = [];
+        for (let node = popup; node.parentNode; node = node.parentNode) {
+          position.push(Array.prototype.indexOf.call(node.parentNode.children || [], node));
+        }
+        result.push({ id: id(popup), watch: state.epoch, position: position.reverse().join('.'), block: owner ? id(owner) : 0, role,
           name: labels || popup.getAttribute('aria-label') || '', count: items.length,
           text: separate ? items.map(item => item.innerText).join('\n') : null });
       }
@@ -95,7 +99,7 @@ pub(crate) const START_WATCH: &str = r"(() => {
   const key = Symbol.for('tabref.watch');
   const old = window[key];
   if (old) old.observer.disconnect();
-  const state = { count: 0, ids: new WeakMap(), nextId: 1 };
+  const state = { count: 0, ids: new WeakMap(), nextId: 1, epoch: Math.random().toString(36) };
   state.observer = new MutationObserver(records => { state.count += records.length; });
   const found = scan();
   const options = { subtree: true, childList: true, attributes: true, characterData: true };
@@ -116,7 +120,7 @@ pub(crate) const READ_WATCH: &str = r"(() => {
     delete window[key];
   }
   const found = scan();
-  const current = state || { ids: new WeakMap(), nextId: 1 };
+  const current = state || { ids: new WeakMap(), nextId: 1, epoch: null };
   const blocks = found.text(current);
   return { url: location.href, title: document.title, mutations, unread: found.unread, blocks, popups: found.popups(current) };
 })()";

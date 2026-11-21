@@ -102,6 +102,7 @@ pub use settle::scroll_settle::scroll_and_settle;
 pub use settle::settle_outcome::SettleOutcome;
 pub use settle::state_wait::StateWait;
 pub use settle::watched_action::WatchedAction;
+pub use tree::dom_ids::collect_clickable;
 pub use tree::element_token::ElementToken;
 pub use tree::frame_skip_reason::FrameSkipReason;
 pub use tree::node_origin::NodeOrigin;

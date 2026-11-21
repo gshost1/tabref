@@ -58,6 +58,11 @@ fn shown(controls: &[&AccessibilityNode]) -> HashSet<String> {
         .collect()
 }
 
+fn capture(docs: &[DomTree]) -> Option<(&[DomTree], &serde_json::Value)> {
+    static CAPTURE: serde_json::Value = serde_json::Value::Null;
+    Some((docs, &CAPTURE))
+}
+
 #[test]
 fn native_options_are_filtered_but_aria_owned_options_are_not() {
     let docs = document(vec![
@@ -75,7 +80,7 @@ fn native_options_are_filtered_but_aria_owned_options_are_not() {
         ],
         ..Default::default()
     };
-    let report = action_changes::prepare(&tree, &HashSet::new(), &[], |_| Some(&docs), shown);
+    let report = action_changes::prepare(&tree, &HashSet::new(), &[], |_| capture(&docs), shown);
     assert_eq!(report.controls.len(), 1);
     assert_eq!(
         report.controls[0].identity.name.as_deref(),
@@ -100,7 +105,8 @@ fn only_complete_owned_added_lines_are_deduplicated() {
             after: "Value new".into(),
         },
     ];
-    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
+    let report =
+        action_changes::prepare(&tree, &HashSet::new(), &changes, |_| capture(&docs), shown);
     assert_eq!(report.changes, changes[1..]);
     assert_eq!(report.controls.len(), 1);
 }
@@ -119,7 +125,8 @@ fn an_error_matching_a_control_name_survives_and_unknown_dom_is_conservative() {
         TextChange::Added("Retry".into()),
         TextChange::Added("Retry".into()),
     ];
-    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
+    let report =
+        action_changes::prepare(&tree, &HashSet::new(), &changes, |_| capture(&docs), shown);
     assert_eq!(report.changes, changes);
     assert_eq!(
         action_changes::prepare(&tree, &HashSet::new(), &changes, |_| None, shown).changes,
@@ -149,10 +156,11 @@ fn known_controls_changed_values_and_removed_lines_remain() {
         },
         TextChange::Removed("Continue".into()),
     ];
-    let report = action_changes::prepare(&tree, &known, &changes, |_| Some(&docs), shown);
+    let report = action_changes::prepare(&tree, &known, &changes, |_| capture(&docs), shown);
     assert!(report.controls.is_empty());
     assert_eq!(report.changes, changes);
-    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
+    let report =
+        action_changes::prepare(&tree, &HashSet::new(), &changes, |_| capture(&docs), shown);
     assert_eq!(report.controls.len(), 1);
     assert_eq!(report.changes, changes[1..]);
 }
@@ -168,13 +176,13 @@ fn inaccessible_labels_invalid_tokens_and_truncated_names_keep_added_text() {
         let mut tree = control("button", &name, 2);
         let changes = vec![TextChange::Added(name)];
         assert_eq!(
-            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown)
+            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| capture(&docs), shown)
                 .changes,
             changes
         );
         tree.identity.retained_object = Some("invalid".into());
         let report =
-            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
+            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| capture(&docs), shown);
         assert_eq!(report.controls.len(), 1);
         assert_eq!(report.changes, changes);
     }
@@ -199,14 +207,88 @@ fn capped_controls_and_controls_only_in_row_summaries_keep_their_added_names() {
         children,
         ..Default::default()
     };
-    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
+    let report =
+        action_changes::prepare(&tree, &HashSet::new(), &changes, |_| capture(&docs), shown);
     assert_eq!(report.changes, [TextChange::Added("Option 8".into())]);
     let report = action_changes::prepare(
         &tree,
         &HashSet::new(),
         &changes,
-        |_| Some(&docs),
+        |_| capture(&docs),
         |_| HashSet::new(),
     );
     assert_eq!(report.changes, changes);
+}
+
+#[test]
+fn passive_table_parts_do_not_hide_their_inner_controls() {
+    for role in ["cell", "gridcell", "row", "rowheader", "columnheader"] {
+        let mut nodes = vec![
+            dom("BODY", 1, None, vec![1]),
+            dom("TD", 2, Some(0), vec![2]),
+            dom("BUTTON", 3, Some(1), vec![3]),
+            text("Open", 4, 2),
+        ];
+        nodes[1].attrs = vec![
+            ("contenteditable".into(), "false".into()),
+            ("tabindex".into(), "invalid".into()),
+            ("aria-sort".into(), "ascending".into()),
+        ];
+        let docs = document(nodes);
+        let mut tree = control(tabref_page::map_cdp_role(role), "Tracking", 2);
+        tree.presentation.available_actions = vec!["Click".into()];
+        tree.children.push(control("button", "Open", 3));
+        let changes = [TextChange::Added("Tracking".into())];
+        let report =
+            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| capture(&docs), shown);
+        assert_eq!(report.controls.len(), 1, "{role}");
+        assert_eq!(report.controls[0].role, "button");
+        assert_eq!(report.changes, changes);
+    }
+}
+
+#[test]
+fn table_parts_with_their_own_interactions_are_preserved() {
+    for (attr, value) in [
+        ("tabindex", "0"),
+        ("tabindex", "-1"),
+        ("contenteditable", "true"),
+        ("contenteditable", ""),
+        ("contenteditable", "plaintext-only"),
+        ("onclick", "save()"),
+    ] {
+        let mut nodes = vec![dom("BODY", 1, None, vec![1]), dom("TD", 2, Some(0), vec![])];
+        nodes[1].attrs.push((attr.into(), value.into()));
+        let docs = document(nodes);
+        let tree = control("cell", "Editable", 2);
+        assert_eq!(
+            action_changes::prepare(&tree, &HashSet::new(), &[], |_| capture(&docs), shown)
+                .controls
+                .len(),
+            1,
+            "{attr}"
+        );
+    }
+    let docs = document(vec![
+        dom("BODY", 1, None, vec![1]),
+        dom("TD", 2, Some(0), vec![]),
+    ]);
+    for action in ["SetFocus", "SetValue", "TypeText"] {
+        let mut tree = control("cell", "Interactive", 2);
+        tree.presentation.available_actions.push(action.into());
+        assert_eq!(
+            action_changes::prepare(&tree, &HashSet::new(), &[], |_| capture(&docs), shown)
+                .controls
+                .len(),
+            1,
+            "{action}"
+        );
+    }
+    let tree = control("cell", "Unknown", 2);
+    assert_eq!(
+        action_changes::prepare(&tree, &HashSet::new(), &[], |_| None, shown)
+            .controls
+            .len(),
+        1
+    );
 }
