@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -10,10 +12,14 @@ pub(crate) struct AxValue {
 
 impl AxValue {
     pub(crate) fn as_text(&self) -> Option<String> {
+        self.trimmed_text().map(Cow::into_owned)
+    }
+
+    pub(crate) fn trimmed_text(&self) -> Option<Cow<'_, str>> {
         let text = match self.value.as_ref()? {
-            Value::String(text) => text.trim().to_owned(),
-            Value::Bool(flag) => flag.to_string(),
-            Value::Number(number) => number.to_string(),
+            Value::String(text) => Cow::Borrowed(text.trim()),
+            Value::Bool(flag) => Cow::Borrowed(if *flag { "true" } else { "false" }),
+            Value::Number(number) => Cow::Owned(number.to_string()),
             _ => return None,
         };
         (!text.is_empty()).then_some(text)

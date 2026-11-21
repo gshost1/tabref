@@ -41,7 +41,7 @@ fn parse_document(document: &Value, strings: &Strings<'_>, target_id: &str) -> D
         nodes
             .get(name)
             .and_then(Value::as_array)
-            .cloned()
+            .map(Vec::as_slice)
             .unwrap_or_default()
     };
     let parents = column("parentIndex");
@@ -51,7 +51,7 @@ fn parse_document(document: &Value, strings: &Strings<'_>, target_id: &str) -> D
     let backends = column("backendNodeId");
     let attributes = column("attributes");
     let rare = RareData::read(nodes, strings);
-    let layouts = read_layouts(document.get("layout").unwrap_or(&Value::Null), strings);
+    let mut layouts = read_layouts(document.get("layout").unwrap_or(&Value::Null), strings);
     let mut built: Vec<DomNode> = (0..parents.len())
         .map(|index| {
             let parent = parents
@@ -70,7 +70,7 @@ fn parse_document(document: &Value, strings: &Strings<'_>, target_id: &str) -> D
                 kind,
                 backend_id: backends.get(index).and_then(Value::as_i64).unwrap_or(0),
                 attrs: read_attributes(attributes.get(index), strings),
-                layout: layouts.get(&index).cloned(),
+                layout: layouts.remove(&index),
                 form: rare.form(index),
             }
         })

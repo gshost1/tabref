@@ -60,11 +60,10 @@ pub fn build_outline_at(
 }
 
 fn flatten_root(body: &mut Block) {
-    while let [super::item::Item::Block(inner)] = body.items.as_slice() {
+    while let [super::item::Item::Block(inner)] = body.items.as_mut_slice() {
         if inner.kind != BlockKind::Generic {
             break;
         }
-        let inner = inner.clone();
-        body.items = inner.items;
+        body.items = std::mem::take(&mut inner.items);
     }
 }

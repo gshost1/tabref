@@ -149,7 +149,10 @@ def main():
     parser.add_argument("candidate", type=lambda path: Path(path).resolve())
     parser.add_argument("--chrome", default="google-chrome")
     parser.add_argument("--rounds", type=int, default=7)
-    parser.add_argument("--trace-dir", type=lambda path: Path(path).resolve())
+    parser.add_argument(
+        "--trace-dir", type=lambda path: Path(path).resolve(),
+        help="pass per-binary TABREF_TRACE paths to locally instrumented builds",
+    )
     parser.add_argument("--require-large-speedup", type=float, metavar="PERCENT")
     args = parser.parse_args()
     if args.rounds < 1:

@@ -11,7 +11,7 @@ pub(crate) fn actions_of(role: &str, node: &CdpAxNode) -> Vec<String> {
     let flag = |name: &str| node.property(name).is_some_and(|value| value.is_true());
     let editable = node
         .property("editable")
-        .and_then(|value| value.as_text())
+        .and_then(|value| value.trimmed_text())
         .is_some_and(|value| value != "false");
     let mut actions: Vec<&str> = Vec::new();
     match role {

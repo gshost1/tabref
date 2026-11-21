@@ -1,10 +1,14 @@
+use std::borrow::Cow;
+
 use serde::Deserialize;
 
 use super::ax_property::AxProperty;
-use super::ax_text::AxText;
 use super::ax_value::AxValue;
 
 /// One node of `Accessibility.getFullAXTree`.
+///
+/// Keep the text fields explicit so serde can skip unused CDP fields
+/// without buffering them for a flattened field on every node.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CdpAxNode {
@@ -13,8 +17,9 @@ pub(crate) struct CdpAxNode {
     pub(crate) ignored: bool,
     #[serde(default)]
     pub(crate) role: Option<AxValue>,
-    #[serde(flatten)]
-    pub(crate) text: AxText,
+    pub(crate) name: Option<AxValue>,
+    pub(crate) description: Option<AxValue>,
+    pub(crate) value: Option<AxValue>,
     #[serde(default)]
     pub(crate) properties: Vec<AxProperty>,
     #[serde(default)]
@@ -24,10 +29,10 @@ pub(crate) struct CdpAxNode {
 }
 
 impl CdpAxNode {
-    pub(crate) fn raw_role(&self) -> String {
+    pub(crate) fn raw_role(&self) -> Cow<'_, str> {
         self.role
             .as_ref()
-            .and_then(AxValue::as_text)
+            .and_then(AxValue::trimmed_text)
             .unwrap_or_default()
     }
 

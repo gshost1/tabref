@@ -6,7 +6,7 @@ use tabref_core::{AccessibilityNode, NodeIdentity, NodePresentation};
 
 use super::ax_value::AxValue;
 use super::cdp_ax_node::CdpAxNode;
-use super::click_promotion::promote_clickable;
+use super::click_promotion::{may_take_click, promote_clickable};
 use super::frame_context::FrameContext;
 use super::inline_run::InlineRun;
 use super::inline_text::{BlockLayout, drop_markers, line_break, merge_inline_text, seal_block};
@@ -36,7 +36,7 @@ pub(crate) fn build_frame(nodes: Vec<CdpAxNode>, context: &FrameContext<'_>) -> 
     let Some(root_id) = nodes
         .iter()
         .find(|node| !children.contains(node.node_id.as_str()))
-        .map(|node| node.node_id.clone())
+        .map(|node| node.node_id.as_str())
     else {
         return Vec::new();
     };
@@ -45,18 +45,18 @@ pub(crate) fn build_frame(nodes: Vec<CdpAxNode>, context: &FrameContext<'_>) -> 
         .map(|node| (node.node_id.as_str(), node))
         .collect();
     let mut ancestors = HashSet::new();
-    let mut roots = build_node(&root_id, &by_id, context, &mut ancestors);
+    let mut roots = build_node(root_id, &by_id, context, &mut ancestors);
     drop_markers(&mut roots);
     roots
 }
 
 type NodeIndex<'a> = HashMap<&'a str, &'a CdpAxNode>;
 
-fn build_node(
-    node_id: &str,
-    by_id: &NodeIndex<'_>,
+fn build_node<'a>(
+    node_id: &'a str,
+    by_id: &NodeIndex<'a>,
     context: &FrameContext<'_>,
-    ancestors: &mut HashSet<String>,
+    ancestors: &mut HashSet<&'a str>,
 ) -> Vec<WebNode> {
     let Some(node) = by_id.get(node_id).copied() else {
         return Vec::new();
@@ -71,7 +71,11 @@ fn build_node(
     if is_text_fragment_role(&raw_role) {
         return Vec::new();
     }
-    ancestors.insert(node_id.to_owned());
+    let role = map_cdp_role(&raw_role);
+    if !node.ignored && matches!(role, "statictext" | "textfield") {
+        return vec![convert_as(node, role, context)];
+    }
+    ancestors.insert(node_id);
     let mut children: Vec<WebNode> = node
         .child_ids
         .iter()
@@ -81,34 +85,31 @@ fn build_node(
     if node.ignored {
         return seal_block(children, lays_out_block(node.backend_dom_node_id, context));
     }
-    let mut built = convert(node, &raw_role, context);
+    let mut built = convert_as(node, role, context);
     if built
         .origin
         .as_ref()
         .is_some_and(|origin| context.dom.clickable.contains(&origin.backend_node_id))
+        && may_take_click(role, &raw_role, &built.node.presentation.available_actions)
     {
         let owns_frame = holds_frame_owner(node, by_id);
         promote_clickable(&mut built, &mut children, &raw_role, owns_frame);
     }
-    if matches!(built.node.role.as_str(), "statictext" | "textfield") {
-        children.clear();
-    } else {
-        if let Some(name) = built.node.identity.name.as_deref() {
-            children.retain(|child| {
-                !(child.node.role == "statictext"
-                    && child.node.identity.name.as_deref() == Some(name)
-                    && child.children.is_empty())
-            });
-        }
-        let block_level = lays_out_block(node.backend_dom_node_id, context);
-        let layout = BlockLayout {
-            block_level,
-            transparent: is_transparent(&built, &raw_role, block_level),
-        };
-        merge_inline_text(&mut built, &mut children, layout);
-        if is_transparent(&built, &raw_role, block_level) {
-            return seal_block(children, layout.block_level);
-        }
+    if let Some(name) = built.node.identity.name.as_deref() {
+        children.retain(|child| {
+            !(child.node.role == "statictext"
+                && child.node.identity.name.as_deref() == Some(name)
+                && child.children.is_empty())
+        });
+    }
+    let block_level = lays_out_block(node.backend_dom_node_id, context);
+    let layout = BlockLayout {
+        block_level,
+        transparent: is_transparent(&built, &raw_role, block_level),
+    };
+    merge_inline_text(&mut built, &mut children, layout);
+    if is_transparent(&built, &raw_role, block_level) {
+        return seal_block(children, layout.block_level);
     }
     drop_markers(&mut children);
     vec![WebNode { children, ..built }]
@@ -143,7 +144,10 @@ fn holds_frame_owner(node: &CdpAxNode, by_id: &NodeIndex<'_>) -> bool {
 }
 
 pub(crate) fn convert(node: &CdpAxNode, raw_role: &str, context: &FrameContext<'_>) -> WebNode {
-    let role = map_cdp_role(raw_role);
+    convert_as(node, map_cdp_role(raw_role), context)
+}
+
+fn convert_as(node: &CdpAxNode, role: &str, context: &FrameContext<'_>) -> WebNode {
     let text = |value: &Option<AxValue>| value.as_ref().and_then(AxValue::as_text);
     let origin = node.backend_dom_node_id.map(|backend_node_id| NodeOrigin {
         target_id: context.target_id.to_owned(),
@@ -162,9 +166,9 @@ pub(crate) fn convert(node: &CdpAxNode, raw_role: &str, context: &FrameContext<'
         .cloned();
     let identity = NodeIdentity {
         retained_object,
-        name: text(&node.text.name),
-        value: text(&node.text.value),
-        description: text(&node.text.description),
+        name: text(&node.name),
+        value: text(&node.value),
+        description: text(&node.description),
         dom_id,
     };
     let presentation = NodePresentation {
@@ -174,8 +178,7 @@ pub(crate) fn convert(node: &CdpAxNode, raw_role: &str, context: &FrameContext<'
     };
     let run = (role == "statictext").then(|| {
         InlineRun::Text(
-            node.text
-                .name
+            node.name
                 .as_ref()
                 .and_then(AxValue::as_untrimmed_text)
                 .unwrap_or_default(),

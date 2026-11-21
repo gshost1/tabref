@@ -88,7 +88,7 @@ fn read_converted(
     if node.ignored && !state::has_state(&built.presentation.states, state::HIDDEN) {
         built.presentation.states.push(state::HIDDEN.to_owned());
     }
-    Ok((node.ignored, raw_role, built))
+    Ok((node.ignored, raw_role.into_owned(), built))
 }
 
 #[cfg(test)]
