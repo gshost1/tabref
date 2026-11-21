@@ -3,6 +3,7 @@ use std::fs::{File, OpenOptions, TryLockError};
 use std::path::PathBuf;
 
 use tabref_core::{AppError, read_bounded, write_atomic};
+use tabref_page::DownloadState;
 
 use super::download_folder::state_name;
 use super::kept_download::KeptDownload;
@@ -90,7 +91,9 @@ pub(crate) fn merge(kept: &mut Vec<KeptDownload>, entry: KeptDownload) {
         kept.push(entry);
         return;
     };
-    if old.record.running() || !entry.record.running() {
+    if !matches!(old.record.state, DownloadState::TooLarge { .. })
+        && (old.record.running() || !entry.record.running())
+    {
         old.record = entry.record;
     }
     old.reported |= entry.reported;

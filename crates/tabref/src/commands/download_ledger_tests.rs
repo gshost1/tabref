@@ -40,3 +40,11 @@ fn only_a_finished_unreported_download_or_one_this_batch_reported_is_claimable()
     assert!(!in_batch.claimable(Some(8)));
     assert!(!in_batch.claimable(None));
 }
+
+#[test]
+fn stale_completion_events_do_not_undo_a_cap_failure() {
+    let mut kept = vec![entry("g", DownloadState::TooLarge { cap_mb: 1 }, false)];
+    merge(&mut kept, entry("g", DownloadState::Completed, false));
+    assert_eq!(kept[0].record.state, DownloadState::TooLarge { cap_mb: 1 });
+    assert!(kept[0].claimable(None));
+}

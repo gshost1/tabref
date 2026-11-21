@@ -20,7 +20,7 @@ use tabref_page::{
 
 use super::download_folder::{UNSAFE_FOLDER, download_cap, download_folder, launched_here};
 use super::download_ledger::{DownloadLedger, merge};
-use super::download_place::{landed_size, place};
+use super::download_place::{landed_size, partial_size, place};
 use super::kept_download::KeptDownload;
 use crate::session::Session;
 
@@ -123,6 +123,7 @@ pub(crate) fn after_action(
     deadline: Deadline,
     grace: Duration,
 ) -> Vec<DownloadRecord> {
+    let mut capped = reconcile(session, deadline).unwrap_or_default();
     let mut records = Vec::new();
     let noted = note_downloads(session.connection(), &mut records, deadline).unwrap_or(false);
     let heard = noted
@@ -130,7 +131,7 @@ pub(crate) fn after_action(
             && next_download_event(session.connection(), &mut records, deadline.capped(grace))
                 .unwrap_or(false));
     if !heard {
-        return records;
+        return capped;
     }
     let cap = download_cap(session);
     let folder = download_folder(session).ok().flatten();
@@ -178,10 +179,70 @@ pub(crate) fn after_action(
             merge(ledger, entry);
         }
     });
-    records
-        .into_iter()
-        .filter(|record| !elsewhere.contains(&record.origin.frame_id))
-        .collect()
+    capped.extend(
+        records
+            .into_iter()
+            .filter(|record| !elsewhere.contains(&record.origin.frame_id)),
+    );
+    capped
+}
+
+/// Rechecks downloads a previous command watched and returns unreported
+/// cap failures, marked reported, for the caller's normal download report.
+pub(crate) fn reconcile(
+    session: &mut Session,
+    deadline: Deadline,
+) -> Result<Vec<DownloadRecord>, AppError> {
+    let folder = download_folder(session)?;
+    let cap = download_cap(session);
+    DownloadLedger::of(session).with(|kept| {
+        refresh_kept(session.connection(), kept, cap, folder.as_deref(), deadline);
+        kept.iter_mut()
+            .filter_map(|entry| {
+                if entry.reported || !matches!(entry.record.state, DownloadState::TooLarge { .. }) {
+                    return None;
+                }
+                entry.reported = true;
+                entry.batch = current_batch();
+                Some(entry.record.clone())
+            })
+            .collect()
+    })
+}
+
+/// Refreshes disk state before enforcing the cap, then repeats the check
+/// immediately before naming so a file that just landed cannot bypass it.
+pub(crate) fn refresh_kept(
+    connection: &mut CdpConnection,
+    kept: &mut [KeptDownload],
+    cap: u64,
+    folder: Option<&Path>,
+    deadline: Deadline,
+) {
+    for entry in kept {
+        if entry.reported && !entry.record.running() {
+            continue;
+        }
+        refresh_record(&mut entry.record, entry.watched, cap, folder, |guid| {
+            let _ = cancel_download(connection, guid, deadline);
+        });
+    }
+}
+
+fn refresh_record(
+    record: &mut DownloadRecord,
+    watched: bool,
+    cap: u64,
+    folder: Option<&Path>,
+    mut cancel: impl FnMut(&str),
+) {
+    for _ in 0..2 {
+        land_from_disk(record, folder);
+        if watched {
+            enforce_record(record, cap, folder, &mut cancel);
+        }
+    }
+    name_landed(record, folder);
 }
 
 /// Whether the download received, or announced, more than `cap` bytes.
@@ -199,35 +260,53 @@ pub(crate) fn enforce_cap(
     folder: Option<&Path>,
     deadline: Deadline,
 ) {
-    let too_large = DownloadState::TooLarge { cap_mb: cap / MB };
-    for record in records.iter_mut().filter(|record| past_cap(record, cap)) {
-        match record.state {
-            DownloadState::InProgress => {
-                let _ = cancel_download(connection, &record.guid, deadline);
-            }
-            DownloadState::Completed => {
-                if let Some(dir) = folder {
-                    let file = record
-                        .path
-                        .clone()
-                        .unwrap_or_else(|| dir.join(&record.guid).to_string_lossy().into_owned());
-                    if Path::new(&file).starts_with(dir) {
-                        let _ = std::fs::remove_file(file);
-                    }
-                }
-                record.path = None;
-            }
-            _ => continue,
-        }
-        record.finish(too_large, now_ms());
+    for record in records {
+        enforce_record(record, cap, folder, |guid| {
+            let _ = cancel_download(connection, guid, deadline);
+        });
     }
 }
 
-/// Marks a running download finished when its file landed in `folder`,
-/// for one whose events this process never saw.
+fn enforce_record(
+    record: &mut DownloadRecord,
+    cap: u64,
+    folder: Option<&Path>,
+    mut cancel: impl FnMut(&str),
+) {
+    if past_cap(record, cap) {
+        match record.state {
+            DownloadState::InProgress => {
+                cancel(&record.guid);
+            }
+            DownloadState::Completed => {}
+            _ => return,
+        }
+        if let Some(dir) = folder {
+            let file = record
+                .path
+                .clone()
+                .unwrap_or_else(|| dir.join(&record.guid).to_string_lossy().into_owned());
+            if Path::new(&file).starts_with(dir) {
+                let _ = std::fs::remove_file(file);
+            }
+            let _ = std::fs::remove_file(dir.join(format!("{}.crdownload", record.guid)));
+        }
+        record.path = None;
+        record.finish(DownloadState::TooLarge { cap_mb: cap / MB }, now_ms());
+    }
+}
+
+/// Refreshes received bytes from the partial file and marks a download
+/// finished when its file landed, including missed completion events.
 pub(crate) fn land_from_disk(record: &mut DownloadRecord, folder: Option<&Path>) {
-    if !record.running() {
+    if !matches!(
+        record.state,
+        DownloadState::InProgress | DownloadState::Completed
+    ) {
         return;
+    }
+    if let Some(size) = folder.and_then(|dir| partial_size(dir, &record.guid)) {
+        record.bytes = record.bytes.max(size);
     }
     if let Some(size) = folder.and_then(|dir| landed_size(dir, &record.guid)) {
         record.bytes = size;

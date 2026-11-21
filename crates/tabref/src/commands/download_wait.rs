@@ -10,7 +10,7 @@ use tabref_page::{DownloadRecord, DownloadState, note_downloads};
 use super::download_folder::{download_cap, download_folder, launched_here};
 use super::download_ledger::{DownloadLedger, merge};
 use super::download_lines::{download_json, download_line};
-use super::downloads::{current_batch, enable, enforce_cap, land_from_disk, name_landed};
+use super::downloads::{current_batch, enable, refresh_kept};
 use super::kept_download::KeptDownload;
 use crate::session::Session;
 
@@ -51,33 +51,7 @@ pub(crate) fn wait_download(
                 };
                 merge(kept, entry);
             }
-            let mut watched: Vec<DownloadRecord> = kept
-                .iter()
-                .filter(|entry| entry.watched)
-                .map(|entry| entry.record.clone())
-                .collect();
-            enforce_cap(
-                session.connection(),
-                &mut watched,
-                cap,
-                folder.as_deref(),
-                deadline,
-            );
-            for record in watched {
-                merge(
-                    kept,
-                    KeptDownload {
-                        record,
-                        reported: false,
-                        watched: true,
-                        batch: None,
-                    },
-                );
-            }
-            for entry in kept.iter_mut() {
-                land_from_disk(&mut entry.record, folder.as_deref());
-                name_landed(&mut entry.record, folder.as_deref());
-            }
+            refresh_kept(session.connection(), kept, cap, folder.as_deref(), deadline);
             match kept.iter_mut().find(|entry| entry.claimable(batch)) {
                 Some(entry) => {
                     entry.reported = true;

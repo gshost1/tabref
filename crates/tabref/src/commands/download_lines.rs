@@ -5,7 +5,22 @@ use std::path::Path;
 use serde_json::{Value, json};
 use tabref_page::{DownloadRecord, DownloadState};
 
+use crate::output::outcome::Outcome;
 use crate::view::node_line::quote_text;
+
+impl Extend<DownloadRecord> for Outcome {
+    fn extend<T: IntoIterator<Item = DownloadRecord>>(&mut self, records: T) {
+        for record in records {
+            self.push_line(&download_line(&record));
+            if let Some(data) = self.data.as_object_mut() {
+                let downloads = data.entry("downloads").or_insert_with(|| json!([]));
+                if let Some(downloads) = downloads.as_array_mut() {
+                    downloads.push(download_json(&record));
+                }
+            }
+        }
+    }
+}
 
 /// One line for a download: `downloaded "report.csv" (24 bytes) -> PATH`,
 /// or that it is still running, was canceled, or passed the size cap.

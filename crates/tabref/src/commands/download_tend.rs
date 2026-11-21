@@ -10,7 +10,7 @@ use tabref_page::{DownloadRecord, DownloadState, cancel_download, note_downloads
 
 use super::download_folder::{download_cap, download_folder, launched_here};
 use super::download_ledger::{DownloadLedger, merge};
-use super::downloads::{enforce_cap, land_from_disk, name_landed};
+use super::downloads::refresh_kept;
 use super::kept_download::KeptDownload;
 use crate::session::Session;
 
@@ -34,7 +34,6 @@ pub(crate) fn tend(session: &mut Session) {
         let mut records: Vec<DownloadRecord> =
             kept.iter().map(|entry| entry.record.clone()).collect();
         let _ = note_downloads(session.connection(), &mut records, deadline);
-        let mut watched: Vec<DownloadRecord> = Vec::new();
         for record in records {
             let entry = KeptDownload {
                 record,
@@ -42,34 +41,9 @@ pub(crate) fn tend(session: &mut Session) {
                 watched: false,
                 batch: None,
             };
-            if kept
-                .iter()
-                .any(|old| old.watched && old.record.guid == entry.record.guid)
-            {
-                watched.push(entry.record.clone());
-            }
             merge(kept, entry);
         }
-        enforce_cap(
-            session.connection(),
-            &mut watched,
-            cap,
-            folder.as_deref(),
-            deadline,
-        );
-        for record in watched {
-            let capped = KeptDownload {
-                record,
-                reported: false,
-                watched: true,
-                batch: None,
-            };
-            merge(kept, capped);
-        }
-        for entry in kept.iter_mut() {
-            land_from_disk(&mut entry.record, folder.as_deref());
-            name_landed(&mut entry.record, folder.as_deref());
-        }
+        refresh_kept(session.connection(), kept, cap, folder.as_deref(), deadline);
     });
 }
 
