@@ -168,6 +168,9 @@ fn the_example_check_refuses_flags_and_steps_the_cli_does_not_take() {
         "press --bogus",
         "scroll down|T --bogus",
         "for n in 1 2; scroll --bogus",
+        "scroll down --until",
+        "scroll down --to-end --until TEXT",
+        "tabref do \"scroll down --to-end --bogus\"",
     ] {
         assert!(check_span(wrong).is_err(), "{wrong}");
     }
@@ -225,13 +228,15 @@ fn the_guide_explains_when_commands_wait_and_when_to_read_the_result() {
         "each step prints its result",
         "Snap only if the output\ndid not show what you need",
         "`STALE_REF`: use the fresh ref it printed.",
-        "repeat `scroll down` in a `for`",
+        "Lazy list: `scroll down --until \"TEXT\"` or `scroll down --to-end`",
+        "if it says more may load, run it again",
         "Commands wait for the page. Don't add sleeps.",
     ] {
         assert!(guide.contains(rule), "{rule}");
     }
     for misleading in [
         "not shell loops",
+        "for n in 1 2 3 4 5 6",
         "do not\nsnapshot again",
         "waits for the page itself",
         "unless unsure",
