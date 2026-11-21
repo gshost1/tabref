@@ -313,3 +313,42 @@ fn inline_item_text_cannot_claim_an_unrelated_whole_line() {
     assert!(changes.contains(&TextChange::Removed("Prefix Shared".into())));
     assert!(!changes.iter().any(|c| c.to_string().contains("closed")));
 }
+
+fn filtered_remount(name: &str, after_name: &str, remaining: &str) -> Vec<TextChange> {
+    let mut before = reply(
+        "Alpha\nBeta\nGamma\nDelta\nEpsilon",
+        true,
+        "listbox",
+        "Alpha\nBeta\nGamma\nDelta\nEpsilon",
+        5,
+    );
+    before["popups"][0]["name"] = json!(name);
+    let mut after = before.clone();
+    after["popups"][0]["id"] = json!(12);
+    after["popups"][0]["name"] = json!(after_name);
+    after["popups"][0]["text"] = json!(remaining);
+    after["popups"][0]["count"] = json!(remaining.lines().count());
+    after["blocks"][0][1] = json!(remaining);
+    compare_replies(&before, &after)
+}
+
+#[test]
+fn unnamed_filtered_remount_in_the_same_position_keeps_remaining_items() {
+    assert_eq!(
+        filtered_remount("", "", "Alpha\nBeta\nGamma"),
+        [
+            TextChange::Removed("Delta".into()),
+            TextChange::Removed("Epsilon".into())
+        ]
+    );
+}
+
+#[test]
+fn named_filtered_remount_in_the_same_position_keeps_remaining_items() {
+    for name in ["Results (4)", "Filtered results"] {
+        assert_eq!(
+            filtered_remount("Results (4)", name, "Alpha\nBeta\nGamma\nDelta"),
+            [TextChange::Removed("Epsilon".into())]
+        );
+    }
+}
