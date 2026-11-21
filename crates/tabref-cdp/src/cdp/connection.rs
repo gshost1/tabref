@@ -35,6 +35,7 @@ pub struct CdpConnection {
     pub(super) replies: ReplyStash,
     pub(super) dialogs: DialogAnswers,
     pub(super) health: ConnectionHealth,
+    attach_probe: bool,
 }
 
 impl CdpConnection {
@@ -47,6 +48,7 @@ impl CdpConnection {
             replies: ReplyStash::default(),
             dialogs: DialogAnswers::default(),
             health: ConnectionHealth::default(),
+            attach_probe: true,
         }
     }
 
@@ -98,6 +100,16 @@ impl CdpConnection {
     /// stays usable for the next caller.
     pub fn set_cancel(&mut self, cancel: Option<Arc<AtomicBool>>) {
         self.health.cancel = cancel;
+    }
+
+    /// Whether a silent page attach checks browser responsiveness before
+    /// using the full deadline. Persistent listeners can disable this.
+    pub fn set_attach_probe(&mut self, enabled: bool) {
+        self.attach_probe = enabled;
+    }
+
+    pub(crate) fn probes_attach(&self) -> bool {
+        self.attach_probe
     }
 
     /// Checks `guard` before every request and, while a reply or event is

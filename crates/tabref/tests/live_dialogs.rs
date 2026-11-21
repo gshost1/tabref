@@ -13,6 +13,8 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+#[path = "common/dialog_attach.rs"]
+mod attach_checks;
 mod common;
 
 use common::{harness, live, serve};
@@ -293,11 +295,19 @@ fn without_the_daemon_a_late_dialog_fails_fast_without_promising_a_policy_retry(
         let started = std::time::Instant::now();
         let next = tabref.run(&args);
         let elapsed = started.elapsed();
-        eprintln!("late dialog policy={policy:?}: {elapsed:?}: {}", next.stderr);
+        eprintln!(
+            "late dialog policy={policy:?}: {elapsed:?}: {}",
+            next.stderr
+        );
         assert!(!next.ok, "{}", next.stdout);
-        assert!(elapsed < std::time::Duration::from_millis(1500), "{elapsed:?}: {}", next.stderr);
         assert!(
-            next.stderr.contains("a dialog may be open or the page is busy")
+            elapsed < std::time::Duration::from_millis(1500),
+            "{elapsed:?}: {}",
+            next.stderr
+        );
+        assert!(
+            next.stderr
+                .contains("a dialog may be open or the page is busy")
                 && next.stderr.contains("browser window")
                 && !next.stderr.contains("--dialog"),
             "{}",
