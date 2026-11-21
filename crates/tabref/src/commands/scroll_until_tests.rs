@@ -4,6 +4,22 @@ use tabref_core::Deadline;
 use tabref_page::ScrollOutcome;
 
 #[test]
+fn capped_no_match_warns_that_more_may_load() {
+    for reason in ["60-step cap", "time cap (8 s or session deadline)"] {
+        assert_eq!(
+            super::not_found_head("X", 60, reason, true),
+            format!(
+                "\"X\" is not on the page after 60 scrolls; stopped at the {reason}; more may load"
+            )
+        );
+    }
+    assert_eq!(
+        super::not_found_head("X", 2, "the bottom", false),
+        "\"X\" is not on the page after 2 scrolls; stopped at the bottom"
+    );
+}
+
+#[test]
 fn caps_are_stops_not_destinations() {
     for reason in ["60-step cap", "time cap (8 s or session deadline)"] {
         let line = end_summary("down", 600.0, 60, &ScrollOutcome::default(), (reason, true));

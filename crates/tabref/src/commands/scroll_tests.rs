@@ -22,6 +22,7 @@ fn batch_scroll_loop_options_keep_quoted_text_and_scoped_containers() {
         "e1 --to-end",
         "down --to-end --unknown",
         "down --until X --until Y",
+        "down --until Entry 810",
     ] {
         assert!(
             super::parse_batch_scroll(&split_words(invalid).unwrap()).is_err(),

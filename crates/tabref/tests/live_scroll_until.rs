@@ -17,6 +17,91 @@ new IntersectionObserver(entries=>{
 }).observe(document.getElementById('tail'));
 </script>"#;
 
+fn ignores_non_rendered_match(prefix: &str) {
+    let page = format!(
+        "{prefix}{}",
+        PAGE.replace("810", "90")
+            .replace("ROWS", &rows("li", "Entry", 30))
+    );
+    let base = lazy_site(vec![("/", page)]);
+    let tabref = harness("scroll-visible-text");
+    tabref.ok(&["open", &base]);
+    let run = tabref.ok(&["--json", "scroll", "--until", "Entry 90"]);
+    let data = &run.json()["data"];
+    assert!(data["steps"].as_u64().unwrap() > 0, "{data}");
+    assert_eq!(data["found"], true, "{data}");
+}
+
+#[test]
+fn until_ignores_the_document_title() {
+    if live() {
+        ignores_non_rendered_match("<title>Entry 90</title>");
+    }
+}
+
+#[test]
+fn until_ignores_display_none_text() {
+    if live() {
+        ignores_non_rendered_match("<div style=display:none>Entry 90</div>");
+    }
+}
+
+#[test]
+fn until_ignores_input_values() {
+    if live() {
+        ignores_non_rendered_match("<input value='Entry 90'>");
+    }
+}
+
+#[test]
+fn until_in_a_container_ignores_matching_text_outside_it() {
+    if !live() {
+        return;
+    }
+    let page = PAGE
+        .replace("810", "90")
+        .replace("ROWS", &rows("li", "Entry", 30))
+        .replace(
+            "<ol id=rows>",
+            "<p>Entry 90</p><div style='height:320px;overflow:auto'><ol id=rows>",
+        )
+        .replace("<script>", "</div><script>");
+    let base = lazy_site(vec![("/", page)]);
+    let tabref = harness("scroll-container-text");
+    tabref.ok(&["open", &base]);
+    let run = tabref.ok(&[
+        "--json", "scroll", "down", "in", "Entry 1", "--until", "Entry 90",
+    ]);
+    assert!(
+        run.json()["data"]["steps"].as_u64().unwrap() > 0,
+        "{}",
+        run.stdout
+    );
+    assert_eq!(run.json()["data"]["found"], true);
+}
+
+#[test]
+fn unquoted_until_values_explain_how_to_quote_them_in_cli_and_do() {
+    if !live() {
+        return;
+    }
+    let base = lazy_site(vec![("/", "<p>Start</p>".into())]);
+    let tabref = harness("scroll-quote-value");
+    tabref.ok(&["open", &base]);
+    for run in [
+        tabref.run(&["scroll", "down", "--until", "Entry", "810"]),
+        batch(&tabref, "scroll down --until Entry 810\n"),
+    ] {
+        assert!(!run.ok, "{}", run.stdout);
+        assert!(
+            run.stderr
+                .contains("extra value words must be one argument; quote the value"),
+            "{}",
+            run.stderr
+        );
+    }
+}
+
 #[test]
 fn a_do_scroll_until_prints_the_summary_and_indented_find_refs() {
     if !live() {
@@ -133,4 +218,12 @@ fn a_long_page_reports_the_step_cap_without_claiming_the_end() {
     assert_eq!(run.json()["data"]["found"], false);
     assert_eq!(run.json()["data"]["cap"], "60-step cap");
     assert_eq!(run.json()["data"]["at_end"], false);
+    tabref.ok(&["open", &base]);
+    let run = tabref.ok(&["scroll", "--until", "Absent"]);
+    assert!(
+        run.stdout
+            .contains("stopped at the 60-step cap; more may load"),
+        "{}",
+        run.stdout
+    );
 }
