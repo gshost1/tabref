@@ -70,15 +70,13 @@ fn a_slow_pending_fetch_never_claims_the_list_has_ended() {
         .replace("ROWS", &rows("li", "Entry", 60));
     let base = lazy_site(vec![("/", page)]);
     let tabref = harness("scroll-slow-end");
-    for option in [vec!["scroll", "--until", "Entry 120"]] {
-        tabref.ok(&["open", &base]);
-        let first = tabref.ok(&["--json", "scroll", "down"]);
-        assert_eq!(first.json()["data"]["loading"], true, "{}", first.stdout);
-        std::thread::sleep(std::time::Duration::from_millis(3200));
-        let run = tabref.ok(&option);
-        assert!(!run.stdout.contains("bottom"), "{}", run.stdout);
-        assert!(run.stdout.contains("more may load"), "{}", run.stdout);
-    }
+    tabref.ok(&["open", &base]);
+    let first = tabref.ok(&["--json", "scroll", "down"]);
+    assert_eq!(first.json()["data"]["loading"], true, "{}", first.stdout);
+    std::thread::sleep(std::time::Duration::from_millis(3200));
+    let run = tabref.ok(&["scroll", "--until", "Entry 120"]);
+    assert!(!run.stdout.contains("bottom"), "{}", run.stdout);
+    assert!(run.stdout.contains("more may load"), "{}", run.stdout);
 }
 
 #[test]
@@ -271,12 +269,15 @@ fn shadow_text_matches_case_and_spacing_before_scrolling() {
     if !live() {
         return;
     }
-    let base = lazy_site(vec![("/", r#"<div id=host></div><script>host.attachShadow({mode:'open'}).innerHTML='<p>ALAN <b>  Turing</b></p>';</script>"#.into())]);
+    let base = lazy_site(vec![("/", r#"<div id=host></div><script>host.attachShadow({mode:'open'}).innerHTML='<p>ALAN <b>  Turing</b></p>Direct shadow';</script>"#.into())]);
     let tabref = harness("scroll-until-shadow");
     tabref.ok(&["open", &base]);
     let run = tabref.ok(&["--json", "scroll", "--until", "alan turing"]);
     assert_eq!(run.json()["data"]["steps"], 0);
     assert!(run.json()["data"]["count"].as_u64().unwrap() > 0);
+    let run = tabref.ok(&["--json", "scroll", "--until", "Direct shadow"]);
+    assert_eq!(run.json()["data"]["found"], true);
+    assert_eq!(run.json()["data"]["steps"], 0);
     let invalid = tabref.run(&["scroll", "e1", "--to-end"]);
     assert!(!invalid.ok);
     assert!(invalid.stderr.contains("not a REF"), "{}", invalid.stderr);

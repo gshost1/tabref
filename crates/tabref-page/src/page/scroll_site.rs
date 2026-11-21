@@ -136,7 +136,7 @@ const VISIBLE_TEXT: &str = r"function(needle) {
   let matched = false;
   const skipped = new Set(['HEAD','SCRIPT','STYLE','NOSCRIPT','TEMPLATE','TEXTAREA']);
   function visibleText(node) {
-    const element = node.parentElement;
+    const element = node.parentElement || node.getRootNode().host;
     if (!element || win.getComputedStyle(element).visibility !== 'visible') return '';
     for (let ancestor = element; ancestor; ancestor = parent(ancestor)) {
       const style = win.getComputedStyle(ancestor);

@@ -13,6 +13,16 @@ fn batch_scroll_loop_options_keep_quoted_text_and_scoped_containers() {
     assert_eq!(parsed.until.as_deref(), Some("Entry 810"));
     assert!(parsed.container.is_some());
     assert!(!parsed.to_end);
+    for input in [
+        "down --until \"Entry 90\" in \"Entry 1\"",
+        "--until \"Entry 90\" down in \"Entry 1\"",
+        "in \"Entry 1\" --until \"Entry 90\" down",
+    ] {
+        let parsed = super::parse_batch_scroll(&split_words(input).unwrap()).unwrap();
+        assert_eq!(parsed.direction, "down");
+        assert_eq!(parsed.until.as_deref(), Some("Entry 90"));
+        assert!(parsed.container.is_some());
+    }
     let parsed = super::parse_batch_scroll(&split_words("--to-end").unwrap()).unwrap();
     assert_eq!(parsed.direction, "down");
     assert!(parsed.to_end);
