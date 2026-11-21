@@ -226,7 +226,7 @@ fn passive_table_parts_do_not_hide_their_inner_controls() {
             ("aria-sort".into(), "ascending".into()),
         ];
         let docs = document(nodes);
-        let mut tree = control(role, "Tracking", 2);
+        let mut tree = control(tabref_page::map_cdp_role(role), "Tracking", 2);
         tree.presentation.available_actions = vec!["Click".into()];
         tree.children.push(control("button", "Open", 3));
         let changes = [TextChange::Added("Tracking".into())];

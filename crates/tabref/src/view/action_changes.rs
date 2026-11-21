@@ -127,19 +127,17 @@ fn passive_table_part<'a>(
     node: &AccessibilityNode,
     documents: &impl Fn(&str) -> Option<&'a [DomTree]>,
 ) -> bool {
-    if !matches!(
-        node.role.as_str(),
-        "cell" | "gridcell" | "row" | "rowheader" | "columnheader"
-    ) || [
-        capability::SET_FOCUS,
-        capability::SET_VALUE,
-        capability::TYPE_TEXT,
-        capability::SELECT,
-        capability::TOGGLE,
-        capability::PRESS_KEY,
-    ]
-    .iter()
-    .any(|action| capability::contains(&node.presentation.available_actions, action))
+    if !matches!(node.role.as_str(), "cell" | "row")
+        || [
+            capability::SET_FOCUS,
+            capability::SET_VALUE,
+            capability::TYPE_TEXT,
+            capability::SELECT,
+            capability::TOGGLE,
+            capability::PRESS_KEY,
+        ]
+        .iter()
+        .any(|action| capability::contains(&node.presentation.available_actions, action))
     {
         return false;
     }

@@ -79,10 +79,9 @@ fn same_popup(before: &Value, after: &Value) -> bool {
         && before["position"] == after["position"]
         && before["block"] == after["block"];
     let name = before["name"].as_str().unwrap_or_default();
+    let items = before["text"].as_str().is_some() && before["text"] == after["text"];
+    let count = before["count"].as_u64().is_some() && before["count"] == after["count"];
     identity
-        || (position && before["name"] == after["name"])
-        || (!name.is_empty()
-            && before["name"] == after["name"]
-            && before["text"].as_str().is_some()
-            && before["text"] == after["text"])
+        || (position && before["name"] == after["name"] && (items || (!name.is_empty() && count)))
+        || (before["block"] == after["block"] && items)
 }

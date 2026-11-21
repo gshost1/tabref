@@ -147,6 +147,62 @@ fn unreadable_block_does_not_claim_a_close() {
     assert!(compare_replies(&before, &Value::Null).is_empty());
 }
 
+fn remounted_after_saved(old_name: &str, new_name: &str) -> Vec<TextChange> {
+    let mut before = reply("Red\nBlue", true, "listbox", "Red\nBlue", 2);
+    before["popups"][0]["name"] = json!(old_name);
+    before["popups"][0]["position"] = json!("0.1.2");
+    let mut after = before.clone();
+    after["popups"][0]["id"] = json!(12);
+    after["popups"][0]["name"] = json!(new_name);
+    after["popups"][0]["position"] = json!("0.1.3");
+    after["blocks"][0][1] = json!("Saved\nRed\nBlue");
+    compare_replies(&before, &after)
+}
+
+#[test]
+fn unnamed_remounts_keep_their_items_when_position_changes() {
+    assert_eq!(
+        remounted_after_saved("", ""),
+        [TextChange::Added("Saved".into())]
+    );
+}
+
+#[test]
+fn named_remounts_keep_their_items_when_label_changes() {
+    assert_eq!(
+        remounted_after_saved("Results (5)", "Results (4)"),
+        [TextChange::Added("Saved".into())]
+    );
+}
+
+#[test]
+fn a_static_unnamed_menu_shifting_into_a_closed_menus_position_does_not_match() {
+    let closing = json!({"id":1,"watch":"first","block":0,"position":"0.1.0","role":"menu","name":"","text":"Rename\nDelete","count":2});
+    let static_menu = json!({"id":2,"watch":"first","block":0,"position":"0.1.1","role":"menu","name":"","text":"Other\nHelp","count":2});
+    let before =
+        json!({"blocks":[[0,"Rename\nDelete\nOther\nHelp"]],"popups":[closing,static_menu]});
+    let mut after = json!({"blocks":[[0,"Other\nHelp"]],"popups":[static_menu]});
+    after["popups"][0]["position"] = json!("0.1.0");
+    assert_eq!(
+        compare_replies(&before, &after),
+        [TextChange::Removed("menu closed (2 items)".into())]
+    );
+}
+
+#[test]
+fn matching_item_text_in_another_block_does_not_hide_a_close() {
+    let before = reply("Red\nBlue", true, "listbox", "Red\nBlue", 2);
+    let mut after = reply("", true, "listbox", "Red\nBlue", 2);
+    after["popups"][0]["id"] = json!(12);
+    after["popups"][0]["block"] = json!(2);
+    after["blocks"] = json!([[0, ""], [2, "Red\nBlue"]]);
+    assert!(
+        compare_replies(&before, &after).contains(&TextChange::Removed(
+            "listbox \"Category\" closed (2 options)".into()
+        ))
+    );
+}
+
 #[test]
 fn inline_item_text_cannot_claim_an_unrelated_whole_line() {
     let mut before = reply("Shared\nPrefix Shared", true, "listbox", "Shared", 1);
