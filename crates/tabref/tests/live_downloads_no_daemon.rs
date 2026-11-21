@@ -3,6 +3,8 @@
 mod common;
 #[path = "common/held_download.rs"]
 mod held_download;
+#[path = "common/download_pressure.rs"]
+mod pressure;
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -200,7 +202,7 @@ fn a_seventy_kilobyte_url_cannot_disable_cap_reconciliation() {
 }
 
 #[test]
-fn a_corrupt_ledger_is_a_hook_note_and_is_never_overwritten() {
+fn a_corrupt_ledger_is_quarantined_once_without_blocking_cap_changes() {
     if !enabled() {
         return;
     }
@@ -212,19 +214,26 @@ fn a_corrupt_ledger_is_a_hook_note_and_is_never_overwritten() {
         .join(format!("downloads-{}", tabref.browser.port));
     let bytes = vec![b' '; 70_000];
     std::fs::write(&path, &bytes).unwrap();
-    let next = tabref.ok(&["--json", "js", "1"]).json();
-    assert_eq!(next["data"]["value"], 1);
+    let next = tabref
+        .ok(&[
+            "--json",
+            "open",
+            "--download-max-mb",
+            "2",
+            &format!("http://127.0.0.1:{port}/"),
+        ])
+        .json();
     assert_eq!(
         next["data"]["download_reconciliation_error"]["details"]["kind"],
-        "download_ledger_unreadable"
+        "download_ledger_quarantined"
     );
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
-    let next = tabref.ok(&["click", "Continue"]);
-    assert!(
-        next.stdout
-            .contains("note: download reconciliation failed:")
-    );
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let backup = next["data"]["download_reconciliation_error"]["details"]["backup"]
+        .as_str()
+        .unwrap();
+    assert_eq!(std::fs::read(backup).unwrap(), bytes);
+    let next = tabref.ok(&["--json", "js", "1"]).json();
+    assert_eq!(next["data"]["value"], 1);
+    assert!(next["data"]["download_reconciliation_error"].is_null());
 }
 
 #[test]

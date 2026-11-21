@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use tabref_core::AppError;
 use tabref_page::DownloadRecord;
 
@@ -6,6 +8,23 @@ use crate::commands::download_ledger::DownloadLedger;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 
+thread_local! { static ERRORS: RefCell<Vec<AppError>> = const { RefCell::new(Vec::new()) }; }
+
+pub(crate) fn note_error(error: AppError) {
+    ERRORS.with_borrow_mut(|errors| {
+        if !errors.contains(&error) {
+            errors.push(error);
+        }
+    });
+}
+
+fn flush(outcome: Result<Outcome, AppError>) -> Result<Outcome, AppError> {
+    ERRORS
+        .with(|errors| std::mem::take(&mut *errors.borrow_mut()))
+        .into_iter()
+        .fold(outcome, |outcome, error| finish(outcome, Err(error)))
+}
+
 /// Reconciles only watched leftovers in an in-process command. The usual
 /// path reads the bounded local ledger without a lock or a CDP request.
 pub(crate) fn after_command(
@@ -13,10 +32,10 @@ pub(crate) fn after_command(
     outcome: Result<Outcome, AppError>,
 ) -> Result<Outcome, AppError> {
     if crate::daemon::is_daemon_process() || !DownloadLedger::of(session).pending() {
-        return outcome;
+        return flush(outcome);
     }
     let deadline = session.deadline();
-    finish(outcome, reconcile(session, deadline))
+    flush(finish(outcome, reconcile(session, deadline)))
 }
 
 fn finish(
@@ -32,7 +51,7 @@ fn finish(
                 Ok(mut outcome) => {
                     outcome.push_line(&text);
                     if let Some(data) = outcome.data.as_object_mut() {
-                        data.insert("download_reconciliation_error".into(), note);
+                        append_note(data, note);
                     }
                     Ok(outcome)
                 }
@@ -42,12 +61,28 @@ fn finish(
                         .details
                         .get_or_insert_with(|| serde_json::json!({}));
                     if let Some(details) = details.as_object_mut() {
-                        details.insert("download_reconciliation_error".into(), note);
+                        append_note(details, note);
                     }
                     Err(original)
                 }
             }
         }
+    }
+}
+
+fn append_note(data: &mut serde_json::Map<String, serde_json::Value>, note: serde_json::Value) {
+    if let Some(existing) = data
+        .get_mut("download_reconciliation_error")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        let additional = existing
+            .entry("additional_errors")
+            .or_insert_with(|| serde_json::json!([]));
+        if let Some(additional) = additional.as_array_mut() {
+            additional.push(note);
+        }
+    } else {
+        data.insert("download_reconciliation_error".into(), note);
     }
 }
 
@@ -85,6 +120,35 @@ mod tests {
     use tabref_page::{DownloadOrigin, DownloadState, DownloadTiming};
 
     use super::*;
+
+    #[test]
+    fn queued_write_failures_are_reported_once_without_losing_other_notes() {
+        let first = AppError::invalid_args("tracking full").with_details(json!({"kind":"full"}));
+        note_error(first.clone());
+        note_error(first);
+        note_error(
+            AppError::invalid_args("quarantined").with_details(json!({"backup":"saved.json"})),
+        );
+        let result = flush(Ok(Outcome::new("paid", json!({"paid":true})))).unwrap();
+        assert_eq!(result.data["paid"], true);
+        assert_eq!(
+            result.data["download_reconciliation_error"]["details"]["kind"],
+            "full"
+        );
+        assert_eq!(
+            result.data["download_reconciliation_error"]["additional_errors"][0]["details"]["backup"],
+            "saved.json"
+        );
+        assert_eq!(result.text.matches("tracking full").count(), 1);
+        let next = flush(Ok(Outcome::new("1", json!({"value":1})))).unwrap();
+        assert!(next.data["download_reconciliation_error"].is_null());
+        let original = AppError::timeout("original");
+        note_error(AppError::invalid_args("tracking full"));
+        let error = flush(Err(original.clone())).unwrap_err();
+        assert_eq!(error.code, original.code);
+        assert_eq!(error.disposition, original.disposition);
+        assert!(error.message.starts_with("original\nnote:"));
+    }
 
     fn capped() -> DownloadRecord {
         DownloadRecord {

@@ -14,7 +14,7 @@ pub(crate) fn reconcile(
     let folder = match download_folder(session) {
         Ok(folder) => folder,
         Err(mut error) => {
-            let canceled = DownloadLedger::of(session).with(|kept| {
+            let canceled = DownloadLedger::of(session).recovering_with(|kept| {
                 let mut canceled = Vec::new();
                 for entry in kept
                     .iter_mut()
@@ -47,7 +47,7 @@ pub(crate) fn reconcile(
         }
     };
     let cap = download_cap(session);
-    DownloadLedger::of(session).with(|kept| {
+    DownloadLedger::of(session).recovering_with(|kept| {
         refresh_kept(session.connection(), kept, cap, folder.as_deref(), deadline);
         kept.iter_mut()
             .filter_map(|entry| {

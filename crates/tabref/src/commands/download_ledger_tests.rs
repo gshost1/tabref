@@ -3,6 +3,9 @@ use tabref_page::{DownloadOrigin, DownloadRecord, DownloadState, DownloadTiming}
 use super::{DownloadLedger, MAX_BYTES, merge};
 use crate::commands::kept_download::KeptDownload;
 
+#[path = "download_ledger_capacity_tests.rs"]
+mod capacity;
+
 fn entry(guid: &str, state: DownloadState, reported: bool) -> KeptDownload {
     KeptDownload {
         record: DownloadRecord {

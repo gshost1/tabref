@@ -36,7 +36,7 @@ pub(crate) fn wait_download(
     let batch = current_batch();
     let ledger = DownloadLedger::of(session);
     loop {
-        let done = ledger.with(|kept| {
+        let done = ledger.recovering_with(|kept| {
             let mut records: Vec<DownloadRecord> =
                 kept.iter().map(|entry| entry.record.clone()).collect();
             let _ = note_downloads(session.connection(), &mut records, deadline);

@@ -26,7 +26,7 @@ use crate::session::Session;
 
 #[path = "download_dispatch.rs"]
 mod dispatch;
-pub(crate) use dispatch::after_command;
+pub(crate) use dispatch::{after_command, note_error};
 
 #[path = "download_cleanup.rs"]
 pub(crate) mod cleanup;
@@ -133,7 +133,10 @@ pub(crate) fn after_action(
     deadline: Deadline,
     grace: Duration,
 ) -> Vec<DownloadRecord> {
-    let mut capped = reconcile(session, deadline).unwrap_or_default();
+    let mut capped = reconcile(session, deadline).unwrap_or_else(|error| {
+        note_error(error);
+        Vec::new()
+    });
     let mut records = Vec::new();
     let noted = note_downloads(session.connection(), &mut records, deadline).unwrap_or(false);
     let heard = noted
@@ -189,11 +192,13 @@ pub(crate) fn after_action(
         })
         .collect();
     let ledger = DownloadLedger::of(session);
-    let _ = ledger.with(|ledger| {
+    if let Err(error) = ledger.recovering_with(|ledger| {
         for entry in kept {
             merge(ledger, entry);
         }
-    });
+    }) {
+        note_error(error);
+    }
     capped.extend(
         records
             .into_iter()

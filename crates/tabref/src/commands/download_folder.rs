@@ -55,7 +55,7 @@ pub(crate) fn choose_cap(session: &mut Session, megabytes: u64) -> Result<(), Ap
         let folder = download_folder(session)?;
         let cap = download_cap(session);
         let deadline = session.deadline();
-        ledger.with(|kept| {
+        if let Err(error) = ledger.recovering_with(|kept| {
             super::downloads::refresh_kept(
                 session.connection(),
                 kept,
@@ -63,7 +63,9 @@ pub(crate) fn choose_cap(session: &mut Session, megabytes: u64) -> Result<(), Ap
                 folder.as_deref(),
                 deadline,
             )
-        })?;
+        }) {
+            super::downloads::note_error(error);
+        }
     }
     let name = state_name(session, "download-cap-mb");
     session.store().write_state(&name, &megabytes.to_string())
