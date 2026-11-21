@@ -192,7 +192,7 @@ case $cmd in
     fi
     [[ $(id -u) != 0 ]] || { echo "run passes as the operator, not root" >&2; exit 2; }
     parse_set "$@"
-    if [[ -t 0 ]]; then IFS= read -rs -p "Anthropic API key for the bench: " key; echo; else IFS= read -r key; fi
+    if [[ -t 0 ]]; then IFS= read -rs -p "Anthropic API key for the bench: " key || true; echo; else IFS= read -r key || true; fi
     [[ -n $key ]] || { echo "no key" >&2; exit 2; }
     begin
     sync_files "${TABREF_BIN:-$(default_bin)}"
