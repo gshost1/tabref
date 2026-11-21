@@ -33,11 +33,17 @@ impl TargetSpec {
         if looks_like_ref(trimmed) {
             return Ok(Self::Ref(trimmed.to_owned()));
         }
-        if trimmed.contains(['"', '\'']) {
+        if has_target_grammar(trimmed) {
             return Self::from_words(&split_words(trimmed)?);
         }
         Locator::from_words(&[Word::quoted(trimmed)]).map(Self::Find)
     }
+}
+
+pub(crate) fn has_target_grammar(text: &str) -> bool {
+    text.char_indices().any(|(index, c)| {
+        matches!(c, '"' | '\'') && (index == 0 || text[..index].ends_with(char::is_whitespace))
+    })
 }
 
 /// Whether a target reads as a CSS selector (`input[type=file]`, `#id`,

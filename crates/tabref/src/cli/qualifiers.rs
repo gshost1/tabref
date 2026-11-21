@@ -1,6 +1,8 @@
-use clap::{ArgMatches, Command as ClapCommand, Error, error::ErrorKind};
+use clap::{ArgAction, ArgMatches, Command as ClapCommand, Error, error::ErrorKind};
+use tabref_page::{Locator, Word};
 
 use super::command::Command;
+use crate::commands::target_spec::{TargetSpec, has_target_grammar};
 
 const ACTIONS: &[&str] = &[
     "click",
@@ -25,7 +27,12 @@ pub(super) fn command(mut command: ClapCommand) -> ClapCommand {
             } else {
                 1
             };
-            let sub = sub.mut_arg("target", |arg| arg.index(index).num_args(1..));
+            let sub = sub.mut_arg("target", |arg| {
+                arg.index(index)
+                    .num_args(1..)
+                    .action(ArgAction::Append)
+                    .allow_negative_numbers(true)
+            });
             match *name {
                 "fill" | "type" => sub.mut_arg("text", |arg| arg.index(2)),
                 "select" => sub.mut_arg("option", |arg| arg.index(2)),
@@ -51,18 +58,41 @@ pub(super) fn target(matches: &ArgMatches) -> Result<Option<String>, Error> {
         .flatten()
         .map(String::as_str)
         .collect();
+    let value = match name {
+        "fill" | "type" => args.get_one::<String>("text"),
+        "select" => args.get_one::<String>("option"),
+        _ => None,
+    };
+    let mut context = Context {
+        name,
+        value: value.map(String::as_str),
+        direction: None,
+    };
     if name == "scroll" {
         let direction = args
             .get_one::<String>("direction")
             .map(String::as_str)
             .unwrap_or("down");
-        if !["up", "down", "left", "right"]
-            .contains(&direction.trim().to_ascii_lowercase().as_str())
-        {
+        if is_direction(direction) {
+            context.direction = Some(direction);
+            if words
+                .first()
+                .is_some_and(|word| word.eq_ignore_ascii_case("in"))
+            {
+                words.remove(0);
+                if words.is_empty() {
+                    return Err(context.usage(&["in"], "in takes a non-empty container name"));
+                }
+            }
+        } else {
             words.insert(0, direction);
         }
     }
-    normalize(name, &words)
+    normalize(&context, &words)
+}
+
+fn is_direction(word: &str) -> bool {
+    ["up", "down", "left", "right"].contains(&word.trim().to_ascii_lowercase().as_str())
 }
 
 fn keyword(word: &str) -> bool {
@@ -77,60 +107,100 @@ fn quote(word: &str) -> String {
 }
 
 fn target_word(word: &str) -> String {
-    if word.contains(['"', '\'']) {
+    if has_target_grammar(word) {
         word.to_owned()
     } else {
         quote(word)
     }
 }
 
-fn usage(name: &str, words: &[&str]) -> Error {
-    let target = if words.len() > 1 && words[1..].iter().step_by(2).all(|word| keyword(word)) {
-        let mut parts = vec![target_word(words[0])];
-        for pair in words[1..].chunks(2) {
-            let operand = pair.get(1).copied().unwrap_or("row");
-            let operand = if pair[0].eq_ignore_ascii_case("nth")
-                && !operand.parse::<usize>().is_ok_and(|n| n > 0)
-            {
-                "2"
-            } else {
-                operand
-            };
-            parts.extend([pair[0].to_owned(), quote(operand)]);
-        }
-        parts.join(" ")
-    } else {
-        quote(&words.join(" "))
-    };
-    let target = target.replace('\'', "'\\''");
-    Error::raw(
-        ErrorKind::ValueValidation,
-        format!(
-            "extra target words must be qualifier pairs (in/after/before TEXT or nth NUMBER); quote the whole target: tabref {name} '{target}'"
-        ),
-    )
+struct Context<'a> {
+    name: &'a str,
+    value: Option<&'a str>,
+    direction: Option<&'a str>,
 }
 
-fn normalize(name: &str, words: &[&str]) -> Result<Option<String>, Error> {
-    if words.len() <= 1 {
-        return Ok(words.first().map(|word| (*word).to_owned()));
+impl Context<'_> {
+    fn usage(&self, words: &[&str], reason: &str) -> Error {
+        let mut command = format!("tabref {}", self.name);
+        if let Some(direction) = self.direction {
+            command.push_str(&format!(" {direction}"));
+        }
+        command.push_str(&format!(" {}", shell_quote(&words.join(" "))));
+        if let Some(value) = self.value {
+            command.push_str(&format!(" {}", shell_quote(value)));
+        }
+        Error::raw(
+            ErrorKind::ValueValidation,
+            format!("{reason}; quote the whole target: {command}"),
+        )
     }
-    let mut parts = vec![target_word(words[0])];
-    let mut pairs = words[1..].chunks_exact(2);
+}
+
+fn shell_quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', "'\\''"))
+}
+
+fn normalize(context: &Context<'_>, words: &[&str]) -> Result<Option<String>, Error> {
+    if words.len() <= 1 {
+        return words
+            .first()
+            .map(|word| validate(context, words, (*word).to_owned()))
+            .transpose();
+    }
+    let role = Locator::from_words(&[Word::bare(words[0])])
+        .ok()
+        .is_some_and(|locator| locator.role.is_some());
+    let mut parts = vec![if role {
+        words[0].to_owned()
+    } else {
+        target_word(words[0])
+    }];
+    let start = if role && !keyword(words[1]) {
+        parts.push(quote(words[1]));
+        2
+    } else {
+        1
+    };
+    let mut pairs = words[start..].chunks_exact(2);
     for pair in &mut pairs {
         if !keyword(pair[0])
             || (pair[0].eq_ignore_ascii_case("nth")
                 && !pair[1].parse::<usize>().is_ok_and(|n| n > 0))
         {
-            return Err(usage(name, words));
+            return Err(context.usage(
+                words,
+                "expected qualifier pairs (in/after/before TEXT or nth NUMBER from 1)",
+            ));
         }
         parts.push(pair[0].to_owned());
         parts.push(quote(pair[1]));
     }
     if !pairs.remainder().is_empty() {
-        return Err(usage(name, words));
+        return Err(context.usage(
+            words,
+            "a qualifier needs an operand; otherwise join the words as one name",
+        ));
     }
-    Ok(Some(parts.join(" ")))
+    validate(context, words, parts.join(" ")).map(Some)
+}
+
+fn validate(context: &Context<'_>, words: &[&str], target: String) -> Result<String, Error> {
+    let spec =
+        TargetSpec::from_arg(&target).map_err(|error| context.usage(words, &error.message))?;
+    if let TargetSpec::Find(locator) = spec
+        && (locator
+            .name
+            .as_deref()
+            .is_some_and(|name| name.trim().is_empty())
+            || locator
+                .scope
+                .as_deref()
+                .is_some_and(|scope| scope.trim().is_empty()))
+    {
+        return Err(context.usage(words, "target names and scopes must not be empty"));
+    }
+    Ok(target)
 }
 
 pub(super) fn apply(command: &mut Command, normalized: Option<String>) -> Result<(), Error> {
@@ -159,25 +229,6 @@ pub(super) fn apply(command: &mut Command, normalized: Option<String>) -> Result
             } else if let Some(normalized) = normalized {
                 *direction = normalized;
                 *target = None;
-            }
-        }
-        Command::Upload { target, files } => {
-            let mut count = 0;
-            while count + 2 < files.len()
-                && files
-                    .get(count)
-                    .and_then(|path| path.to_str())
-                    .is_some_and(keyword)
-            {
-                count += 2;
-            }
-            if count > 0 {
-                let mut words = vec![target.as_str()];
-                words.extend(files.iter().take(count).filter_map(|path| path.to_str()));
-                if let Some(normalized) = normalize("upload", &words)? {
-                    *target = normalized;
-                }
-                files.drain(..count);
             }
         }
         _ => {}

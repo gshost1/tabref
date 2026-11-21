@@ -80,7 +80,6 @@ fn one_argument_keeps_its_original_spelling() {
         "e4",
         "button \"Save\"",
         "O'Reilly",
-        "",
     ] {
         let cli = parse(&["click", target]);
         let Command::Click { target: actual } = &cli.command else {
@@ -131,8 +130,8 @@ fn qualifiers_preserve_literal_quotes_keywords_and_backslashes() {
     let TargetSpec::Find(locator) = TargetSpec::from_arg(target).unwrap() else {
         panic!("wrong target")
     };
-    assert_eq!(locator.name.as_deref(), Some("button"));
-    assert_eq!(locator.role, None);
+    assert_eq!(locator.name, None);
+    assert_eq!(locator.role.as_deref(), Some("button"));
     assert_eq!(locator.nth, Some(2));
     assert_eq!(locator.scope.as_deref(), Some("O'Reilly \\\"Billing\\\""));
 }
@@ -166,10 +165,12 @@ fn optional_targets_options_and_upload_files_keep_their_places() {
     let Command::Upload { target, files } = &cli.command else {
         panic!("wrong command")
     };
-    assert_eq!(target, "\"File\" in \"Billing\"");
+    assert_eq!(target, "File");
     assert_eq!(
         files,
         &[
+            std::path::PathBuf::from("in"),
+            std::path::PathBuf::from("Billing"),
             std::path::PathBuf::from("one.txt"),
             std::path::PathBuf::from("two.txt")
         ]
@@ -219,14 +220,14 @@ fn invalid_qualifier_pairs_do_not_become_names() {
     assert!(
         error
             .to_string()
-            .contains("quote the whole target: tabref click '\"Edit in row extra\"'"),
+            .contains("quote the whole target: tabref click 'Edit in row extra'"),
         "{error}"
     );
     let error = Cli::try_parse_from(["tabref", "click", "Edit", "nth"]).unwrap_err();
     assert!(
         error
             .to_string()
-            .contains("quote the whole target: tabref click '\"Edit\" nth \"2\"'"),
+            .contains("quote the whole target: tabref click 'Edit nth'"),
         "{error}"
     );
 }

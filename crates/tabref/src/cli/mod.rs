@@ -4,6 +4,9 @@ mod qualifiers;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod review_tests;
+
 use clap::Parser;
 use tabref_cdp::DialogChoice;
 
