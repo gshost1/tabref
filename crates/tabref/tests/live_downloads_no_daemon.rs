@@ -214,3 +214,68 @@ fn js_without_leftovers_keeps_its_json_shape() {
     let report = tabref.ok(&["--json", "js", "1"]).json();
     assert_eq!(report["data"], serde_json::json!({ "value": 1 }));
 }
+
+#[test]
+fn a_held_over_cap_file_is_retried_by_the_next_command() {
+    if !enabled() {
+        return;
+    }
+    let (port, release, _) = serve(2 * MB, false);
+    let tabref = harness("downloads-held");
+    let outside = scratch("downloads-held");
+    let folder = outside.0.join("saved");
+    tabref.ok(&[
+        "open",
+        "--download-dir",
+        folder.to_str().unwrap(),
+        "--download-max-mb",
+        "1",
+        &format!("http://127.0.0.1:{port}/"),
+    ]);
+    assert!(
+        tabref
+            .ok(&["click", "Export"])
+            .stdout
+            .contains("still running")
+    );
+    release.send(()).unwrap();
+    await_file(&folder, 2 * MB, false);
+    let path = std::fs::read_dir(&folder)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(1 | 2);
+    }
+    let held = options.open(&path).unwrap();
+    let first = tabref.ok(&["--json", "js", "1"]).json();
+    assert_eq!(first["data"]["value"], 1);
+    let download = &first["data"]["downloads"][0];
+    assert_eq!(download["state"]["too_large"]["cap_mb"], 1);
+    if cfg!(windows) {
+        assert!(path.exists());
+        assert_eq!(download["removal_pending"], true);
+        assert_eq!(download["path"], path.to_string_lossy().as_ref());
+        let pending = tabref.ok(&["snap"]).stdout;
+        assert!(pending.contains("delete pending:"), "{pending}");
+        assert!(!pending.contains("removed"), "{pending}");
+    } else {
+        assert!(!path.exists());
+        assert_eq!(download["removal_pending"], false);
+    }
+    drop(held);
+    let next = tabref.ok(&["--json", "js", "2"]).json();
+    assert_eq!(next["data"]["value"], 2);
+    if cfg!(windows) {
+        assert_eq!(next["data"]["downloads"][0]["removal_pending"], false);
+        assert!(next["data"]["downloads"][0]["path"].is_null());
+    }
+    assert!(!path.exists());
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
+}
