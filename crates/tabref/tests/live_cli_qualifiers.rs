@@ -156,10 +156,21 @@ fn ambiguous_words_and_empty_targets_have_actionable_usage_errors() {
         ),
         (
             vec!["fill", "Email", "in", "Billing", "extra", "a@b.c"],
-            "tabref fill 'Email in Billing extra' 'a@b.c'",
+            "tabref fill '\"Email\" in \"Billing\"' 'extra a@b.c'",
         ),
         (vec!["click", "Sign", "in"], "tabref click 'Sign in'"),
-        (vec!["scroll", "e5", "e7"], "tabref scroll 'e5 e7'"),
+        (
+            vec!["scroll", "e5", "e7"],
+            "scroll takes one target: tabref scroll e5",
+        ),
+        (
+            vec!["fill", "e4", "Ada", "Lovelace"],
+            "quote the value: tabref fill e4 'Ada Lovelace'",
+        ),
+        (
+            vec!["fill", "Search", "hello", "world"],
+            "quote the value: tabref fill Search 'hello world'",
+        ),
         (vec!["click", "Edit", "nth", "-1"], "nth NUMBER from 1"),
         (vec!["click", ""], "must not be empty"),
         (vec!["click", "Edit", "in", ""], "must not be empty"),

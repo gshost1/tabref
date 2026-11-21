@@ -2,7 +2,7 @@ use clap::{ArgAction, ArgMatches, Command as ClapCommand, Error, error::ErrorKin
 use tabref_page::{Locator, Word};
 
 use super::command::Command;
-use crate::commands::target_spec::{TargetSpec, has_target_grammar};
+use crate::commands::target_spec::{TargetSpec, has_target_grammar, looks_like_ref};
 
 const ACTIONS: &[&str] = &[
     "click",
@@ -122,6 +122,22 @@ struct Context<'a> {
 
 impl Context<'_> {
     fn usage(&self, words: &[&str], reason: &str) -> Error {
+        if self.name == "scroll"
+            && self.direction.is_none()
+            && words.first().is_some_and(|word| looks_like_ref(word))
+            && words.get(1).is_some_and(|word| looks_like_ref(word))
+        {
+            return Error::raw(
+                ErrorKind::ValueValidation,
+                format!("scroll takes one target: tabref scroll {}", words[0]),
+            );
+        }
+        if let Some(hint) = self.value_hint(words) {
+            return Error::raw(
+                ErrorKind::ValueValidation,
+                format!("extra value words must be one argument; quote the value: {hint}"),
+            );
+        }
         let mut command = format!("tabref {}", self.name);
         if let Some(direction) = self.direction {
             command.push_str(&format!(" {direction}"));
@@ -134,6 +150,40 @@ impl Context<'_> {
             ErrorKind::ValueValidation,
             format!("{reason}; quote the whole target: {command}"),
         )
+    }
+
+    fn value_hint(&self, words: &[&str]) -> Option<String> {
+        let value = self.value?;
+        let target_context = Context {
+            name: self.name,
+            value: None,
+            direction: None,
+        };
+        for end in (1..words.len()).rev() {
+            if keyword(words[end]) {
+                continue;
+            }
+            let Ok(Some(target)) = normalize(&target_context, &words[..end]) else {
+                continue;
+            };
+            let target = if end == 1
+                && target
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "_-@:.".contains(c))
+            {
+                target
+            } else {
+                shell_quote(&target)
+            };
+            let mut value_words = words[end..].to_vec();
+            value_words.push(value);
+            return Some(format!(
+                "tabref {} {target} {}",
+                self.name,
+                shell_quote(&value_words.join(" "))
+            ));
+        }
+        None
     }
 }
 

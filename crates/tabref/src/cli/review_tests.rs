@@ -27,7 +27,7 @@ fn value_hints_preserve_the_last_argument_even_when_it_is_a_keyword() {
             ),
             (
                 vec![verb, "Email", "in", "Billing", "extra", "a@b.c"],
-                format!("tabref {verb} 'Email in Billing extra' 'a@b.c'"),
+                format!("tabref {verb} '\"Email\" in \"Billing\"' 'extra a@b.c'"),
             ),
         ] {
             let error = Cli::try_parse_from(std::iter::once("tabref").chain(words)).unwrap_err();
@@ -47,7 +47,10 @@ fn value_hints_preserve_the_last_argument_even_when_it_is_a_keyword() {
 fn hints_do_not_invent_operands_or_lose_scroll_arguments() {
     for (args, hint) in [
         (vec!["click", "Sign", "in"], "tabref click 'Sign in'"),
-        (vec!["scroll", "e5", "e7"], "tabref scroll 'e5 e7'"),
+        (
+            vec!["scroll", "e5", "e7"],
+            "scroll takes one target: tabref scroll e5",
+        ),
         (
             vec!["scroll", "down", "in", "Results", "extra"],
             "tabref scroll down 'Results extra'",
@@ -56,6 +59,35 @@ fn hints_do_not_invent_operands_or_lose_scroll_arguments() {
         let error = Cli::try_parse_from(std::iter::once("tabref").chain(args)).unwrap_err();
         assert!(error.to_string().contains(hint), "{error}");
         assert!(!error.to_string().contains("row"), "{error}");
+    }
+}
+
+#[test]
+fn extra_value_words_suggest_quoting_the_value_after_a_valid_target() {
+    for verb in ["fill", "type", "select"] {
+        for (tail, hint) in [
+            (vec!["e4", "Ada", "Lovelace"], "e4 'Ada Lovelace'"),
+            (vec!["Search", "hello", "world"], "Search 'hello world'"),
+            (
+                vec!["Email", "in", "Billing", "Ada", "Lovelace"],
+                "'\"Email\" in \"Billing\"' 'Ada Lovelace'",
+            ),
+        ] {
+            let error = Cli::try_parse_from(["tabref", verb].into_iter().chain(tail)).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("quote the value: tabref {verb} {hint}")),
+                "{error}"
+            );
+        }
+        let error = Cli::try_parse_from(["tabref", verb, "Search", "nth", "2"]).unwrap_err();
+        assert!(
+            error.to_string().contains(&format!(
+                "quote the whole target: tabref {verb} 'Search nth' '2'"
+            )),
+            "{error}"
+        );
     }
 }
 
