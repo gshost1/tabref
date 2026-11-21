@@ -7,7 +7,6 @@ const MAX_PATH_BYTES: usize = 1024;
 
 fn evictable(entry: &KeptDownload) -> bool {
     !entry.record.running()
-        && entry.reported
         && entry
             .cleanup
             .as_ref()
@@ -18,12 +17,15 @@ pub(super) fn encode(records: &mut Vec<KeptDownload>) -> Result<Vec<u8>, AppErro
     for entry in records.iter_mut() {
         super::bound_fields(entry);
     }
-    while records.len() > KEPT {
-        let Some(index) = records.iter().position(evictable) else {
-            break;
-        };
-        records.remove(index);
-    }
+    let mut history = records.iter().filter(|entry| evictable(entry)).count();
+    records.retain(|entry| {
+        if history > KEPT && evictable(entry) {
+            history -= 1;
+            false
+        } else {
+            true
+        }
+    });
     loop {
         let long_path = records.iter().any(|entry| {
             entry

@@ -6,6 +6,9 @@ use crate::commands::kept_download::KeptDownload;
 #[path = "download_ledger_capacity_tests.rs"]
 mod capacity;
 
+#[path = "download_ledger_retention_tests.rs"]
+mod retention;
+
 fn entry(guid: &str, state: DownloadState, reported: bool) -> KeptDownload {
     KeptDownload {
         record: DownloadRecord {
