@@ -6,12 +6,15 @@ web_seed, reset_payload, web_expectations, verify_web), web/server.py and a SHA2
 sha256 of SHA256SUMS; `verify` checks it, every listed file's hash, and that nothing else is in the folder (a
 __pycache__ or an edited file breaks it). The seal is checked before every use and again after a pass.
 SEAL is set 0.3's, written after set 0.2 was used up; SPENT_SEALS keeps the seals of sets already used up (v0.1, v0.2),
-which verify refuses even if SEAL were set back to one.
+which verify refuses even if SEAL were set back to one. A regression rerun names one spent set explicitly
+(--spent-rerun v0.2): verify then accepts exactly that set's seal (never the current SEAL, never another spent one),
+and its rows go to results-regression.jsonl, never results-web.jsonl, so they can never count as a gate result.
 Nothing here prints task content: callers report counts and file names only.
 
   python3 -I -B bench/harness/fresh.py verify <dir>     exit 0 when the seal holds, else 1 with the reason
   python3 -I -B bench/harness/fresh.py commit|discard <runs> <pass id>
                                                         staged rows of a pass into results-web.jsonl, or dropped
+  add --spent-rerun <name> to either for a regression rerun of that spent set (rows: results-regression.jsonl)
 """
 import hashlib
 import importlib.util
@@ -25,6 +28,7 @@ from pathlib import Path
 SEAL = "4aa5bccad9a75b0746131c784788402c997831d1d1464962cbcbc748eb07ad39"
 SPENT_SEALS = {"v0.1": "1067387e3e7631ff2a1d28675cb2a2391c99324a57f2fc7f5e45dbdd2fd5468a",
                "v0.2": "4603086733af2ee8a2a04c26ff3495b63a348b4c896b5689434bb523104733b3"}
+SPENT_RERUN = None
 PORT = 8793
 BASE = f"http://127.0.0.1:{PORT}"
 
@@ -35,6 +39,18 @@ class SealBroken(Exception):
 
 def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def allow_spent_rerun(name):
+    """Opt in to rerunning the named spent set for a regression check (never a gate result)."""
+    global SPENT_RERUN
+    if name not in SPENT_SEALS:
+        raise SealBroken(f"no spent set named {name!r}")
+    SPENT_RERUN = name
+
+
+def results_name():
+    return "results-regression.jsonl" if SPENT_RERUN else "results-web.jsonl"
 
 
 def fresh_dir(arg=None):
@@ -63,9 +79,12 @@ def verify(root):
     if not (root / "SHA256SUMS").is_file() or (root / "SHA256SUMS").is_symlink():
         raise SealBroken(f"no SHA256SUMS in {root}")
     digest = sha256(root / "SHA256SUMS")
-    if digest in SPENT_SEALS.values():
+    if SPENT_RERUN:
+        if digest != SPENT_SEALS[SPENT_RERUN]:
+            raise SealBroken(f"SHA256SUMS does not match the spent set {SPENT_RERUN}")
+    elif digest in SPENT_SEALS.values():
         raise SealBroken("this set is spent: its seal was already used for a judged pass")
-    if digest != SEAL:
+    elif digest != SEAL:
         raise SealBroken("SHA256SUMS does not match the seal")
     want = listed(root)
     present, dirs = set(), set()
@@ -170,12 +189,12 @@ def stage_dir(runs, pass_id):
 
 
 def commit(runs, pass_id):
-    """Append a pass's staged rows to results-web.jsonl; returns how many."""
+    """Append a pass's staged rows to results-web.jsonl (results-regression.jsonl for a rerun); returns how many."""
     rows = stage_dir(runs, check_pass_id(pass_id)) / "rows.jsonl"
     if not rows.exists():
         return 0
     lines = [x for x in rows.read_text().splitlines() if x.strip()]
-    with open(Path(runs) / "results-web.jsonl", "a") as fh:
+    with open(Path(runs) / results_name(), "a") as fh:
         fh.write("".join(x + "\n" for x in lines))
     rows.unlink()
     return len(lines)
@@ -189,6 +208,17 @@ def discard(runs, pass_id):
 
 
 def main():
+    argv = sys.argv[1:]
+    if "--spent-rerun" in argv:
+        i = argv.index("--spent-rerun")
+        if i + 1 >= len(argv):
+            raise SystemExit("--spent-rerun needs a spent set name")
+        try:
+            allow_spent_rerun(argv[i + 1])
+        except SealBroken as e:
+            raise SystemExit(str(e))
+        del argv[i:i + 2]
+    sys.argv[1:] = argv
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "verify" and len(sys.argv) == 3:
         try:
@@ -201,7 +231,7 @@ def main():
         n = (commit if cmd == "commit" else discard)(Path(sys.argv[2]), sys.argv[3])
         print(f"fresh rows {'committed' if cmd == 'commit' else 'discarded'}: {n}")
     else:
-        raise SystemExit("usage: fresh.py verify <dir> | commit <runs> <pass id> | discard <runs> <pass id>")
+        raise SystemExit("usage: fresh.py [--spent-rerun <name>] verify <dir> | commit <runs> <pass id> | discard <runs> <pass id>")
 
 
 if __name__ == "__main__":

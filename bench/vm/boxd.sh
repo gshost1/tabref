@@ -16,6 +16,8 @@
 #                                         only if the seal held. Only results-web.jsonl comes back with the results;
 #                                         the sealed output (answers, verifier text, transcripts) goes to
 #                                         bench/runs/fresh-out/<pass id>.tgz (mode 600) and nothing else of runs/.
+#                                         SPENT_RERUN=<name> (e.g. v0.2): a regression rerun of that spent set; rows go
+#                                         to results-regression.jsonl and the pass id starts with regress-.
 # Options (before the mode): --name NAME --chromium --hours N --keep (do not destroy at the end)
 #   --vcpu N --memory SIZE (default 4 and 16G, the size the Linux passes used)
 # tabref: pass TABREF_BIN=<local linux x86_64 binary> to copy it into the VM; without it tabref rows are skipped.
@@ -38,8 +40,10 @@ mode=${1:?mode: latency, replay or models}; shift || true
 if [[ $mode == sealed ]]; then
   [[ $keep == 0 ]] || { echo "--keep is not allowed with sealed: the VM would keep sealed files" >&2; exit 2; }
   : "${BENCH_FRESH_DIR:?set BENCH_FRESH_DIR to the sealed folder}"
-  python3 -I -B "$here/harness/fresh.py" verify "$BENCH_FRESH_DIR"
-  pass_id=vm-$(date -u +%Y%m%dT%H%M%SZ)
+  rerun=""; [[ -n ${SPENT_RERUN:-} ]] && rerun="--spent-rerun $SPENT_RERUN"
+  [[ $rerun == "" || $SPENT_RERUN =~ ^v[0-9.]+$ ]] || { echo "bad SPENT_RERUN" >&2; exit 2; }
+  python3 -I -B "$here/harness/fresh.py" $rerun verify "$BENCH_FRESH_DIR"
+  pass_id=vm-$(date -u +%Y%m%dT%H%M%SZ); [[ -n $rerun ]] && pass_id=regress-$SPENT_RERUN-$pass_id
 fi
 args=$(printf '%q ' "$@")
 vx() { boxd machine exec "$name" -- bash -c "$1"; }
@@ -49,7 +53,7 @@ stop_bench() {
 fetched=0
 fetch() {
   if [[ $mode == sealed ]]; then
-    vx "sudo bash -c 'rm -rf /tmp/runs-out && install -d -m 755 /tmp/runs-out && mkdir /tmp/runs-out/runs && { cp /home/bench/runs/results-web.jsonl /tmp/runs-out/runs/ 2>/dev/null || true; } && rm -f /tmp/runs.tgz && tar -C /tmp/runs-out -czf /tmp/runs.tgz runs'" || return 1
+    vx "sudo bash -c 'rm -rf /tmp/runs-out && install -d -m 755 /tmp/runs-out && mkdir /tmp/runs-out/runs && { cp /home/bench/runs/results-web.jsonl /home/bench/runs/results-regression.jsonl /tmp/runs-out/runs/ 2>/dev/null || true; } && rm -f /tmp/runs.tgz && tar -C /tmp/runs-out -czf /tmp/runs.tgz runs'" || return 1
   else
     vx "sudo test -d /home/bench/runs && sudo tar -C /home/bench --exclude=runs/fresh-staged --exclude=runs/fresh-out --exclude=runs/web-fresh -czf /tmp/runs.tgz runs" || return 1
   fi
@@ -101,16 +105,16 @@ case $mode in
     vx 'rm -rf /tmp/sealed-in && mkdir -m 700 /tmp/sealed-in'
     boxd machine cp "$tmp/fresh.tar" "$name:/tmp/sealed-in/fresh.tar"; rm -f "$tmp/fresh.tar"
     vx "sudo install -o bench -m 600 /tmp/sealed-in/fresh.tar /home/bench/fresh.tar && rm -rf /tmp/sealed-in && sudo -u bench -H bash -c 'set -e; cd; rm -rf fresh; mkdir -m 700 fresh; tar -C fresh --no-same-owner -xf fresh.tar; chmod -R u+w fresh; rm -f fresh.tar'"
-    vx "$run python3 -I -B harness/fresh.py verify /home/bench/fresh"
+    vx "$run python3 -I -B harness/fresh.py $rerun verify /home/bench/fresh"
     rc=0
     boxd machine exec --env "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$name" -- bash -c \
-      "sudo --preserve-env=ANTHROPIC_API_KEY -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin $in_b python3 -I harness/run_web.py --display xvfb --chrome $chrome --host vm $args --taskset fresh --fresh-dir /home/bench/fresh --fresh-remove-copy --fresh-pass-id $pass_id --out /home/bench/runs" || rc=$?
+      "sudo --preserve-env=ANTHROPIC_API_KEY -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin $in_b python3 -I harness/run_web.py --display xvfb --chrome $chrome --host vm $args --taskset fresh --fresh-dir /home/bench/fresh --fresh-remove-copy --fresh-pass-id $pass_id $rerun --out /home/bench/runs" || rc=$?
     stop_bench || { echo "bench processes not stopped: this pass's rows are discarded" >&2; [[ $rc == 0 ]] && rc=1; true; }
     verdict=discard
     if [[ $rc != 0 ]]; then echo "the pass exited $rc: its rows are discarded" >&2
-    elif python3 -I -B "$here/harness/fresh.py" verify "$BENCH_FRESH_DIR"; then verdict=commit
+    elif python3 -I -B "$here/harness/fresh.py" $rerun verify "$BENCH_FRESH_DIR"; then verdict=commit
     else echo "fresh seal BROKEN after the pass (original folder): this pass's rows are discarded" >&2; fi
-    vx "$run python3 -I -B harness/fresh.py $verdict /home/bench/runs $pass_id" || verdict=failed
+    vx "$run python3 -I -B harness/fresh.py $rerun $verdict /home/bench/runs $pass_id" || verdict=failed
     vx "sudo bash -c 'set -e; umask 077; d=/home/bench/runs/fresh-staged/$pass_id/sealed; mkdir -p \$d; rm -rf /tmp/sealed-out; install -d -m 700 -o \$SUDO_USER /tmp/sealed-out; tar -C \$d -czf /tmp/sealed-out/sealed.tgz .; chown \$SUDO_USER /tmp/sealed-out/sealed.tgz; rm -rf /home/bench/runs/fresh-staged /home/bench/fresh'" || echo "could not pack the sealed output" >&2
     ( umask 077; mkdir -p "$here/runs/fresh-out"; chmod 700 "$here/runs/fresh-out"
       boxd machine cp "$name:/tmp/sealed-out/sealed.tgz" "$here/runs/fresh-out/$pass_id.tgz" && chmod 600 "$here/runs/fresh-out/$pass_id.tgz" ) \
