@@ -23,6 +23,18 @@ pub(crate) struct DownloadLedger {
 }
 
 impl DownloadLedger {
+    pub(crate) fn pending(&self) -> bool {
+        self.read().iter().any(|entry| {
+            entry.watched
+                && (entry.record.running()
+                    || (!entry.reported
+                        && matches!(
+                            entry.record.state,
+                            DownloadState::Completed | DownloadState::TooLarge { .. }
+                        )))
+        })
+    }
+
     pub(crate) fn of(session: &Session) -> Self {
         let name = state_name(session, "downloads");
         let base = session.store().base_dir();
@@ -65,11 +77,15 @@ impl DownloadLedger {
             .open(&self.lock)?)
     }
 
-    fn change<T>(&self, change: impl FnOnce(&mut Vec<KeptDownload>) -> T) -> Result<T, AppError> {
-        let before: Vec<KeptDownload> = read_bounded(&self.path, MAX_BYTES)
+    fn read(&self) -> Vec<KeptDownload> {
+        read_bounded(&self.path, MAX_BYTES)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    fn change<T>(&self, change: impl FnOnce(&mut Vec<KeptDownload>) -> T) -> Result<T, AppError> {
+        let before = self.read();
         let mut records = before.clone();
         let result = change(&mut records);
         let kept = &records[records.len().saturating_sub(KEPT)..];

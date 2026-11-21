@@ -1,6 +1,6 @@
 use tabref_page::{DownloadOrigin, DownloadRecord, DownloadState, DownloadTiming};
 
-use super::merge;
+use super::{DownloadLedger, MAX_BYTES, merge};
 use crate::commands::kept_download::KeptDownload;
 
 fn entry(guid: &str, state: DownloadState, reported: bool) -> KeptDownload {
@@ -47,4 +47,69 @@ fn stale_completion_events_do_not_undo_a_cap_failure() {
     merge(&mut kept, entry("g", DownloadState::Completed, false));
     assert_eq!(kept[0].record.state, DownloadState::TooLarge { cap_mb: 1 });
     assert!(kept[0].claimable(None));
+}
+
+fn ledger(name: &str) -> DownloadLedger {
+    let root = std::env::temp_dir().join(format!("tabref-pending-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    DownloadLedger {
+        path: root.join("downloads"),
+        lock: root.join("downloads.lock"),
+    }
+}
+
+#[test]
+fn pending_only_selects_watched_running_or_unreported_finished_downloads() {
+    let ledger = ledger("states");
+    for (state, watched, reported, pending) in [
+        (DownloadState::InProgress, false, false, false),
+        (DownloadState::InProgress, true, true, true),
+        (DownloadState::Completed, true, false, true),
+        (DownloadState::Completed, true, true, false),
+        (DownloadState::TooLarge { cap_mb: 1 }, true, false, true),
+        (DownloadState::TooLarge { cap_mb: 1 }, true, true, false),
+        (DownloadState::Canceled, true, false, false),
+    ] {
+        let mut entry = entry("g", state, reported);
+        entry.watched = watched;
+        std::fs::write(&ledger.path, serde_json::to_vec(&vec![entry]).unwrap()).unwrap();
+        assert_eq!(ledger.pending(), pending, "{state:?}");
+        assert!(!ledger.lock.exists());
+    }
+    std::fs::remove_dir_all(ledger.path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn pending_fast_path_is_read_only_for_missing_empty_or_invalid_ledgers() {
+    let ledger = ledger("fast");
+    let started = std::time::Instant::now();
+    for _ in 0..1_000 {
+        assert!(!ledger.pending());
+    }
+    eprintln!(
+        "missing ledger: {:.2} us/check (1000 checks)",
+        started.elapsed().as_secs_f64() * 1_000.0
+    );
+    assert!(!ledger.path.exists());
+    for content in [
+        b"[]".to_vec(),
+        b"invalid".to_vec(),
+        vec![b' '; MAX_BYTES as usize + 1],
+    ] {
+        std::fs::write(&ledger.path, &content).unwrap();
+        assert!(!ledger.pending());
+        assert_eq!(std::fs::read(&ledger.path).unwrap(), content);
+        assert!(!ledger.lock.exists());
+    }
+    std::fs::write(&ledger.path, b"[]").unwrap();
+    let started = std::time::Instant::now();
+    for _ in 0..1_000 {
+        assert!(!ledger.pending());
+    }
+    eprintln!(
+        "empty ledger: {:.2} us/check (1000 checks)",
+        started.elapsed().as_secs_f64() * 1_000.0
+    );
+    std::fs::remove_dir_all(ledger.path.parent().unwrap()).unwrap();
 }

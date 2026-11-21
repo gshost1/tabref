@@ -24,6 +24,10 @@ use super::download_place::{landed_size, partial_size, place};
 use super::kept_download::KeptDownload;
 use crate::session::Session;
 
+#[path = "download_dispatch.rs"]
+mod dispatch;
+pub(crate) use dispatch::after_command;
+
 const LANDING: Duration = Duration::from_millis(3_000);
 const NAVIGATION_GRACE: Duration = Duration::from_millis(1_000);
 const RESTORING: u64 = 300;

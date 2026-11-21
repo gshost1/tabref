@@ -93,7 +93,7 @@ fn await_file(folder: &Path, bytes: usize, partial: bool) {
     }
 }
 
-fn follow_up(action: bool, partial: bool, bytes: usize) {
+fn follow_up(command: &[&str], partial: bool, bytes: usize) {
     let (port, release, finish) = serve(bytes, partial);
     let tabref = harness("downloads-no-daemon");
     let outside = scratch("downloads-no-daemon");
@@ -114,17 +114,22 @@ fn follow_up(action: bool, partial: bool, bytes: usize) {
     );
     release.send(()).unwrap();
     await_file(&folder, bytes, partial);
-    let next = if action {
-        tabref.run(&["click", "Continue"])
-    } else {
-        tabref.run(&["wait", "--download"])
-    };
+    let next = tabref.run(command);
     let text = format!("{}{}", next.stdout, next.stderr);
     if bytes > MB {
-        assert!(text.contains("over the 1 MB download cap"), "{text}");
-        assert!(text.contains("canceled"), "{text}");
         assert!(!text.contains("downloaded \"slow.bin\""), "{text}");
-        assert_eq!(next.ok, action, "{text}");
+        assert_eq!(next.ok, !command.contains(&"wait"), "{text}");
+        if command.contains(&"--json") {
+            let report = next.json();
+            assert_eq!(report["data"]["value"], 1);
+            let download = &report["data"]["downloads"][0];
+            assert_eq!(download["name"], "slow.bin");
+            assert_eq!(download["state"]["too_large"]["cap_mb"], 1);
+            assert!(download["path"].is_null());
+        } else {
+            assert!(text.contains("over the 1 MB download cap"), "{text}");
+            assert!(text.contains("canceled"), "{text}");
+        }
         assert!(!folder.join("slow.bin").exists());
         assert!(
             !std::fs::read_dir(&folder)
@@ -149,34 +154,60 @@ fn follow_up(action: bool, partial: bool, bytes: usize) {
 #[test]
 fn wait_removes_a_download_that_finished_over_cap_after_the_click_exited() {
     if enabled() {
-        follow_up(false, false, 2 * MB);
+        follow_up(&["wait", "--download"], false, 2 * MB);
     }
 }
 
 #[test]
 fn an_action_reports_and_removes_a_leftover_completed_download_over_cap() {
     if enabled() {
-        follow_up(true, false, 2 * MB);
+        follow_up(&["click", "Continue"], false, 2 * MB);
     }
 }
 
 #[test]
 fn an_action_cancels_a_leftover_partial_download_over_cap() {
     if enabled() {
-        follow_up(true, true, 2 * MB);
+        follow_up(&["click", "Continue"], true, 2 * MB);
     }
 }
 
 #[test]
 fn wait_cancels_a_leftover_partial_download_over_cap() {
     if enabled() {
-        follow_up(false, true, 2 * MB);
+        follow_up(&["wait", "--download"], true, 2 * MB);
     }
 }
 
 #[test]
 fn wait_still_names_a_download_that_finishes_within_the_cap() {
     if enabled() {
-        follow_up(false, false, MB / 2);
+        follow_up(&["wait", "--download"], false, MB / 2);
     }
+}
+
+#[test]
+fn snap_reports_a_leftover_completed_download_over_cap() {
+    if enabled() {
+        follow_up(&["snap"], false, 2 * MB);
+    }
+}
+
+#[test]
+fn js_reports_and_cancels_a_leftover_partial_download_in_json() {
+    if enabled() {
+        follow_up(&["--json", "js", "1"], true, 2 * MB);
+    }
+}
+
+#[test]
+fn js_without_leftovers_keeps_its_json_shape() {
+    if !enabled() {
+        return;
+    }
+    let (port, _, _) = serve(MB / 2, false);
+    let tabref = harness("downloads-no-leftovers");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+    let report = tabref.ok(&["--json", "js", "1"]).json();
+    assert_eq!(report["data"], serde_json::json!({ "value": 1 }));
 }
