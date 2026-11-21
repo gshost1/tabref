@@ -26,12 +26,29 @@ while [[ ${1:-} == --* ]]; do
   esac
 done
 mode=${1:?mode: latency, replay or models}; shift || true
+[[ $mode == models ]] && : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY for a model pass}"
+args=$(printf '%q ' "$@")
 vx() { boxd machine exec "$name" -- bash -c "$1"; }
-cleanup() { [[ $keep == 1 ]] || boxd machine remove "$name" --confirm || echo "could not remove $name: remove it by hand" >&2; }
+fetched=0
+fetch() {
+  vx "sudo test -d /home/bench/runs && sudo tar -C /home/bench -czf /tmp/runs.tgz runs" || return 1
+  mkdir -p "$here/runs/boxd-$name"
+  boxd machine cp "$name:/tmp/runs.tgz" "$here/runs/boxd-$name/runs.tgz"
+  tar -xzf "$here/runs/boxd-$name/runs.tgz" -C "$here/runs/boxd-$name"
+  fetched=1
+}
+cleanup() {
+  [[ $fetched == 1 ]] || fetch 2>/dev/null || true
+  [[ $keep == 1 ]] || boxd machine remove "$name" --confirm || echo "could not remove $name: remove it by hand" >&2
+}
 boxd machine new "$name" --delete-after "${hours}h"
 trap cleanup EXIT
 boxd machine resize "$name" --vcpu "$vcpu" --memory "$memory" -y
-until vx true 2>/dev/null; do sleep 5; done
+tries=0
+until [[ $(vx nproc 2>/dev/null) == "$vcpu" ]]; do
+  (( ++tries > 60 )) && { echo "$name did not come back with $vcpu vCPUs after the resize" >&2; exit 1; }
+  sleep 5
+done
 tmp=$(mktemp -d)
 tar -C "$here/.." --exclude='bench/runs' --exclude='__pycache__' -czf "$tmp/bench.tgz" bench
 boxd machine cp "$tmp/bench.tgz" "$name:/tmp/bench.tgz"
@@ -48,17 +65,13 @@ B=/home/bench/tabref-bench/bench
 in_b="bash -c 'cd $B && exec \"\$@\"' _"
 run="sudo -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin $in_b"
 case $mode in
-  latency) vx "$run python3 -I latency/run.py --display xvfb --chrome $chrome $*" ;;
-  replay) vx "$run python3 -I replay/run.py --display xvfb --chrome $chrome $*" ;;
+  latency) vx "$run python3 -I latency/run.py --display xvfb --chrome $chrome $args" ;;
+  replay) vx "$run python3 -I replay/run.py --display xvfb --chrome $chrome $args" ;;
   models)
-    : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY for a model pass}"
     boxd machine exec --env "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$name" -- bash -c \
-      "sudo --preserve-env=ANTHROPIC_API_KEY -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin $in_b python3 -I harness/run_web.py --display xvfb --chrome $chrome --host vm $*" ;;
+      "sudo --preserve-env=ANTHROPIC_API_KEY -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin $in_b python3 -I harness/run_web.py --display xvfb --chrome $chrome --host vm $args" ;;
   *) echo "unknown mode $mode" >&2; exit 2 ;;
 esac
-vx "sudo tar -C /home/bench -czf /tmp/runs.tgz runs"
-mkdir -p "$here/runs/boxd-$name"
-boxd machine cp "$name:/tmp/runs.tgz" "$here/runs/boxd-$name/runs.tgz"
-tar -xzf "$here/runs/boxd-$name/runs.tgz" -C "$here/runs/boxd-$name"
+fetch
 echo "results in $here/runs/boxd-$name/runs (report: BENCH_RUNS=$here/runs/boxd-$name/runs python3 -I bench/report.py all)"
 boxd machine usage "$name" 2>/dev/null | tail -5 || true
