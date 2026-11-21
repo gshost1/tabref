@@ -52,11 +52,12 @@ fn short_bodies_inline_but_empty_long_and_truncated_bodies_do_not() {
 #[test]
 fn inline_selection_prefers_shallow_then_near_and_caps_total_bodies() {
     let body = "x".repeat(100);
-    let text = format!("### Deep\n{body}\n## Near\n{body}\n## Far\n{body}");
+    let text = format!("### Deep\n{body}\n## Near\n{body}\n## Far\n{body}\n## Last\n{body}");
     let shown = outline(&text, 410);
     assert!(shown.contains(&format!("## Near\n{body}")), "{shown}");
     assert!(shown.contains(&format!("## Far\n{body}")), "{shown}");
     assert!(shown.contains("### Deep (1 lines"), "{shown}");
+    assert!(shown.contains("## Last (1 lines"), "{shown}");
 }
 
 #[test]
@@ -123,5 +124,6 @@ fn fixture_output_measurements() {
             pypi = output;
         }
     }
-    assert!(pypi.contains("## Key dates\nReleased: Jan 24, 2017\n"));
+    let outline = &pypi[pypi.find("## Key dates").unwrap()..];
+    assert_eq!(outline, include_str!("cut_inline_pypi.golden"));
 }
