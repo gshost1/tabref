@@ -3,11 +3,11 @@ use std::time::Duration;
 use serde_json::json;
 use tabref_cdp::is_timeout;
 use tabref_core::{AppError, Deadline};
-use tabref_page::{LocateIntent, ScrollOutcome};
+use tabref_page::{LocateIntent, ScrollOutcome, ScrollSite};
 
 use super::{PAGE_STEP, report, step_outcome};
+use crate::commands::act_target::{ActTarget, resolve_target};
 use crate::commands::{find, scroll, target_spec::TargetSpec};
-use crate::commands::act_target::resolve_target;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::view::node_line::quote_text;
@@ -70,7 +70,7 @@ pub(super) fn scroll_loop(
         .transpose()?;
     let mut total = ScrollOutcome::default();
     let mut steps = 0;
-    let mut found = probe_until(session, until, deadline)?;
+    let mut found = probe_until(session, container.as_ref(), until, deadline)?;
     let mut cap = None;
     while !found {
         if let Some(reason) = cap_reason(steps, deadline.is_expired()) {
@@ -89,7 +89,7 @@ pub(super) fn scroll_loop(
         let ended = stopped(&next);
         accumulate(&mut total, next);
         if !deadline.is_expired() {
-            found = probe_until(session, until, deadline)?;
+            found = probe_until(session, container.as_ref(), until, deadline)?;
         }
         if ended {
             break;
@@ -117,6 +117,12 @@ pub(super) fn scroll_loop(
     if found && let Some(text) = until {
         let matches = find::search(session, text, None, 20, false)?;
         output.text = found_head(text, steps, !matches.lines.is_empty());
+        if container.is_some() {
+            output.push_line(
+                "text matched inside the scroll container; find matches below are page-wide",
+            );
+        }
+        output.data["matches_scope"] = json!("page");
         output.data["count"] = json!(matches.count);
         output.data["matches"] = json!(matches.lines);
         for line in matches.lines.into_iter().chain(matches.more) {
@@ -137,8 +143,15 @@ fn cap_reason(steps: u64, expired: bool) -> Option<&'static str> {
 }
 
 fn not_found_head(text: &str, steps: u64, reason: &str, capped: bool) -> String {
-    let reason = if capped { format!("the {reason}; more may load") } else { reason.to_owned() };
-    format!("{} is not on the page after {steps} scrolls; stopped at {reason}", quote_text(text))
+    let reason = if capped {
+        format!("the {reason}; more may load")
+    } else {
+        reason.to_owned()
+    };
+    format!(
+        "{} is not on the page after {steps} scrolls; stopped at {reason}",
+        quote_text(text)
+    )
 }
 
 fn found_head(text: &str, steps: u64, located: bool) -> String {
@@ -212,50 +225,19 @@ fn accumulate(total: &mut ScrollOutcome, next: ScrollOutcome) {
 
 fn probe_until(
     session: &mut Session,
+    container: Option<&ActTarget>,
     until: Option<&str>,
     deadline: Deadline,
 ) -> Result<bool, AppError> {
     let Some(text) = until else { return Ok(false) };
-    let page = session.page()?;
-    let expression = format!(
-        r#"(() => {{
-      const fold = s => Array.from(s.replace(/\p{{White_Space}}+/gu,' ').replace(/^ | $/g,''), c => Array.from(c.toLowerCase())[0]).join('');
-      const needle = fold({});
-      if (!needle) return false;
-      let matched = false;
-      function scan(root) {{
-        let text = '';
-        for (const node of root.childNodes) {{
-          if (node.nodeType === 3) text += node.textContent;
-          else if (node.nodeType === 1 && !['HEAD','SCRIPT','STYLE','NOSCRIPT','TEMPLATE'].includes(node.tagName)) {{
-            if (!node.checkVisibility({{visibilityProperty:true}}) && getComputedStyle(node).display !== 'contents') continue;
-            const block = /^(ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DIV|DL|DT|DD|FIELDSET|FIGCAPTION|FIGURE|FOOTER|FORM|H[1-6]|HEADER|HR|LI|MAIN|NAV|OL|P|PRE|SECTION|TABLE|TD|TH|TR|UL)$/.test(node.tagName);
-            const child = scan(node.shadowRoot || node);
-            text += (block ? ' ' : '') + child + (block ? ' ' : '');
-          }}
-        }}
-        if (fold(text).includes(needle)) matched = true;
-        return text;
-      }}
-      scan(document);
-      return matched;
-    }})()"#,
-        json!(text)
-    );
-    let reply = match session.connection().call(
-        "Runtime.evaluate",
-        json!({"expression": expression, "returnByValue": true}),
-        Some(&page.session_id),
-        deadline,
-    ) {
-        Ok(reply) => reply,
-        Err(error) if is_timeout(&error) && deadline.is_expired() => return Ok(false),
-        Err(error) => return Err(error),
+    let (page, site) = match container {
+        Some(target) => (target.session.clone(), ScrollSite::Element(&target.token)),
+        None => (session.page()?, ScrollSite::Page),
     };
-    if reply.get("exceptionDetails").is_some() {
-        return Err(AppError::invalid_args("could not check the page text"));
+    match site.contains_visible_text(session.connection(), &page, text, deadline) {
+        Err(error) if is_timeout(&error) && deadline.is_expired() => Ok(false),
+        result => result,
     }
-    Ok(reply["result"]["value"].as_bool().unwrap_or(false))
 }
 
 #[cfg(test)]

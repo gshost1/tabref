@@ -40,9 +40,14 @@ pub(crate) fn parse_batch_scroll(args: &[Word]) -> Result<BatchScroll, AppError>
                     .ok_or_else(|| {
                         AppError::invalid_args("--until needs TEXT; quote text containing spaces")
                     })?;
-                if words.peek().is_some_and(|word| word.quoted || !word.text.starts_with("--")) {
+                if words
+                    .peek()
+                    .is_some_and(|word| word.quoted || !word.text.starts_with("--"))
+                {
                     let mut text = text.text.clone();
-                    while let Some(word) = words.next_if(|word| word.quoted || !word.text.starts_with("--")) {
+                    while let Some(word) =
+                        words.next_if(|word| word.quoted || !word.text.starts_with("--"))
+                    {
                         text.push(' ');
                         text.push_str(&word.text);
                     }
