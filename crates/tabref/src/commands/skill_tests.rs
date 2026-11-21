@@ -1,34 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 use super::run;
 use crate::cli::Cli;
-use crate::commands::batch_step::BatchStep;
 use crate::commands::do_expand::expand;
-use crate::commands::do_step::split_value;
-use crate::commands::step_words::split_steps;
-
-const STEP_VERBS: &[&str] = &[
-    "open",
-    "click",
-    "double-click",
-    "fill",
-    "type",
-    "select",
-    "check",
-    "uncheck",
-    "press",
-    "focus",
-    "hover",
-    "scroll",
-    "wait",
-    "expect",
-    "read",
-    "find",
-    "js",
-    "snap",
-];
+use crate::commands::step_words::{split_steps, split_words};
+use crate::commands::wait_condition::Condition;
 
 fn shell_words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
@@ -61,13 +39,12 @@ fn shell_words(line: &str) -> Vec<String> {
     words
 }
 
-fn inline_commands(guide: &str) -> Vec<String> {
+fn spans(guide: &str) -> Vec<String> {
     guide
         .split('`')
         .skip(1)
         .step_by(2)
         .flat_map(|span| span.split(" && "))
-        .filter(|command| command.starts_with("tabref "))
         .map(str::to_owned)
         .collect()
 }
@@ -80,42 +57,121 @@ fn heredoc_batches(guide: &str) -> Vec<String> {
         .collect()
 }
 
-fn assert_steps_parse(text: &str) {
-    let steps: Vec<BatchStep> = expand(&split_steps(text).unwrap()).unwrap();
-    assert!(!steps.is_empty(), "{text}");
-    for step in &steps {
-        assert!(
-            STEP_VERBS.contains(&step.verb().as_str()),
-            "{}",
-            step.source
-        );
-        if matches!(step.verb().as_str(), "fill" | "type" | "select") {
-            split_value(step).unwrap();
-        }
+fn variants(words: &[String]) -> Vec<Vec<String>> {
+    let mut all = vec![Vec::new()];
+    for word in words {
+        let choices: Vec<Option<&str>> = match word.strip_prefix('[') {
+            Some(rest) if word.ends_with(']') => vec![None, Some(&rest[..rest.len() - 1])],
+            _ => word.split('|').map(Some).collect(),
+        };
+        all = all
+            .into_iter()
+            .flat_map(|done| {
+                choices.iter().map(move |choice| {
+                    let mut next = done.clone();
+                    next.extend(choice.map(str::to_owned));
+                    next
+                })
+            })
+            .collect();
     }
+    all
+}
+
+fn known_verb(verb: &str) -> bool {
+    matches!(verb, "expect" | "goto")
+        || Cli::command()
+            .get_subcommands()
+            .any(|command| command.get_name() == verb)
+}
+
+fn check_command(words: &[String]) -> Result<(), String> {
+    let verb = words.first().map(String::as_str).unwrap_or_default();
+    let rest = words.get(1..).unwrap_or_default();
+    let bare_wait = verb == "wait" && !rest.first().is_some_and(|word| word.starts_with("--"));
+    if verb == "expect" || bare_wait {
+        let words = split_words(&rest.join(" ")).map_err(|error| error.message)?;
+        return Condition::from_words(&words)
+            .map(drop)
+            .map_err(|error| error.message);
+    }
+    let verb = if verb == "goto" { "open" } else { verb };
+    let args = std::iter::once("tabref")
+        .chain(std::iter::once(verb))
+        .chain(rest.iter().map(String::as_str));
+    Cli::try_parse_from(args).map_err(|error| error.to_string())?;
+    match rest {
+        [steps, ..] if verb == "do" => check_steps(steps),
+        _ => Ok(()),
+    }
+}
+
+fn check_steps(text: &str) -> Result<(), String> {
+    let steps = expand(&split_steps(text).map_err(|error| error.message)?)
+        .map_err(|error| error.message)?;
+    if steps.is_empty() {
+        return Err(format!("no steps in {text}"));
+    }
+    for step in &steps {
+        let words: Vec<String> = step.words.iter().map(|word| word.text.clone()).collect();
+        if !known_verb(&step.verb()) || step.verb() == "upload" {
+            return Err(format!("{}: not a step", step.source));
+        }
+        check_command(&words).map_err(|error| format!("{}: {error}", step.source))?;
+    }
+    Ok(())
+}
+
+fn check_span(span: &str) -> Result<(), String> {
+    if span.starts_with("for ") {
+        return check_steps(&format!("{span}\nsnap\nend"));
+    }
+    let prefixed = span.starts_with("tabref ");
+    let words = shell_words(span.strip_prefix("tabref ").unwrap_or(span));
+    let Some(verb) = words.first() else {
+        return Ok(());
+    };
+    if !prefixed && (words.len() == 1 || !known_verb(verb)) {
+        return Ok(());
+    }
+    variants(&words)
+        .iter()
+        .try_for_each(|variant| check_command(variant))
+        .map_err(|error| format!("{span}: {error}"))
 }
 
 #[test]
 fn every_command_example_in_the_guides_parses() {
     for guide in [run(None).text, run(Some("more")).text] {
-        let commands = inline_commands(&guide);
-        assert!(!commands.is_empty());
-        for command in commands {
-            let words = shell_words(&command);
-            if let Err(error) = Cli::try_parse_from(&words) {
-                panic!("{command}: {error}");
-            }
-            if let [_, verb, steps, ..] = words.as_slice()
-                && verb == "do"
-            {
-                assert_steps_parse(steps);
+        for span in spans(&guide) {
+            if let Err(error) = check_span(&span) {
+                panic!("{error}");
             }
         }
         for batch in heredoc_batches(&guide) {
-            Cli::try_parse_from(["tabref", "do"]).unwrap();
-            assert_steps_parse(&batch);
+            if let Err(error) = check_steps(&batch) {
+                panic!("{error}");
+            }
         }
     }
+}
+
+#[test]
+fn the_example_check_refuses_flags_and_steps_the_cli_does_not_take() {
+    for wrong in [
+        "tabref do 'for p in 2 3; open --bogus ?p={p}; end'",
+        "tabref do 'find --exact TEXT'",
+        "tabref do 'check --force \"I agree\"'",
+        "tabref do 'upload T FILE'",
+        "tabref do 'expect'",
+        "tabref CMD --help",
+        "press --bogus",
+        "scroll down|T --bogus",
+        "for n in 1 2; scroll --bogus",
+    ] {
+        assert!(check_span(wrong).is_err(), "{wrong}");
+    }
+    assert!(check_steps("fill \"Name\" Ada\nfrobnicate x").is_err());
 }
 
 #[test]
@@ -129,7 +185,7 @@ fn the_guide_explains_how_to_start_chrome_when_needed() {
 #[test]
 fn the_guide_stays_short_and_points_to_the_rare_commands() {
     let guide = run(None).text;
-    assert!(guide.len() <= 1_800, "{} bytes", guide.len());
+    assert!(guide.len() <= 2_048, "{} bytes", guide.len());
     assert!(guide.contains("tabref skill more` for waits, `connect` to your own Chrome"));
     let more = run(Some("more")).text;
     for rare in [
@@ -140,6 +196,10 @@ fn the_guide_stays_short_and_points_to_the_rare_commands() {
         "wait --download",
         "tabref tabs",
         "tabref js",
+        "`focus T`",
+        "`double-click T`",
+        "`press KEY [T]`",
+        "`tabref read` prints the main text",
     ] {
         assert!(more.contains(rare), "{rare}");
         assert!(!guide.contains(rare), "{rare} belongs in skill more");
@@ -163,6 +223,8 @@ fn the_guide_explains_when_commands_wait_and_when_to_read_the_result() {
         "read that instead of taking a snapshot",
         "in one `tabref do`",
         "each step prints its result",
+        "Snap only if the output\ndid not show what you need",
+        "`STALE_REF`: use the fresh ref it printed.",
         "repeat `scroll down` in a `for`",
         "Commands wait for the page. Don't add sleeps.",
     ] {
@@ -172,6 +234,8 @@ fn the_guide_explains_when_commands_wait_and_when_to_read_the_result() {
         "not shell loops",
         "do not\nsnapshot again",
         "waits for the page itself",
+        "unless unsure",
+        "for the rest: run it",
     ] {
         assert!(!guide.contains(misleading), "{misleading}");
     }
@@ -185,7 +249,7 @@ fn the_batch_example_fills_checks_and_submits_in_one_call() {
     let verbs: Vec<String> = split_steps(&batches[0])
         .unwrap()
         .iter()
-        .map(BatchStep::verb)
+        .map(|step| step.verb())
         .collect();
     assert!(
         verbs.iter().filter(|verb| *verb == "fill").count() >= 2,
@@ -197,14 +261,28 @@ fn the_batch_example_fills_checks_and_submits_in_one_call() {
 }
 
 #[test]
-fn the_guide_loops_pages_in_one_call() {
+fn the_guide_loops_pairs_and_pages_without_a_fixed_address() {
     let guide = run(None).text;
-    let paging = inline_commands(&guide)
+    let loops: Vec<String> = spans(&guide)
         .into_iter()
-        .find(|command| command.contains("open ?p={p}"))
-        .unwrap_or_else(|| panic!("no paging loop in the guide"));
-    assert!(paging.starts_with("tabref do 'for p in"), "{paging}");
-    assert!(paging.contains("; find "), "{paging}");
+        .filter(|span| span.starts_with("for "))
+        .collect();
+    assert!(
+        loops.iter().any(|span| {
+            let names = span.split(" in ").next().unwrap_or_default();
+            names.split(' ').count() == 3
+        }),
+        "{loops:?}"
+    );
+    let paging = guide
+        .lines()
+        .find(|line| line.starts_with("Pages:"))
+        .unwrap_or_default();
+    assert!(paging.contains("link's address"), "{paging}");
+    assert!(guide.contains("`open \"<address with {n}>\"`"));
+    for fixed in ["?p=", "?page=", "&page="] {
+        assert!(!guide.contains(fixed), "{fixed}");
+    }
 }
 
 #[test]
@@ -217,6 +295,11 @@ fn the_guide_keeps_the_forms_a_model_copies() {
         "tabref read --section \"<heading>\"",
         "`\"Edit\" in \"<row text>\"`",
         "`upload T FILE`",
+        "repeats `(1/3)`",
+        "`type T TEXT` (appends)",
+        "(hidden text too)",
+        "`\"Reply\" after \"<text>\"`",
+        "`[e7 Next -> <address>]`",
     ] {
         assert!(guide.contains(form), "{form}");
     }
@@ -225,7 +308,7 @@ fn the_guide_keeps_the_forms_a_model_copies() {
 #[test]
 fn the_guide_leaves_error_fixes_to_the_error_lines() {
     let guide = run(None).text;
-    for code in ["ELEMENT_NOT_FOUND", "AMBIGUOUS_TARGET", "STALE_REF"] {
+    for code in ["ELEMENT_NOT_FOUND", "AMBIGUOUS_TARGET"] {
         assert!(!guide.contains(code), "{code}");
     }
 }

@@ -19,7 +19,7 @@ quits the browser `--launch` started (never one tabref did not start).
 Only when the user asks for their own browser: `tabref connect --user-chrome` (opt-in; it drives their
 logged-in Chrome and its sessions); `tabref connect --off` stops.
 
-Apps built on Chrome (Electron, reached with `--cdp PORT`): `open`, `open --new-tab` and `close` are refused,
+Apps built on Chrome (Electron, reached with `--cdp PORT`): `open URL`, `open --new-tab URL` and `close` are refused,
 as the windows are the app; read and act with snap, click and fill (js to read).
 
 A slice of a long view: `tabref snap --from 1 --to 40` prints lines 1-40 (`read` takes both too).
@@ -32,6 +32,6 @@ and `--json` (the `{version, ok, command, data|error}` envelope). Each command's
 
 Tabs: `tabref tabs`, `tabref tab N`, `tabref open --new-tab URL`. `tabref js "EXPR"` returns a page value as JSON.
 
-Links show their address: `[e7 Edit -> /admin/7/edit]` (open it or click the ref). Dates and times take plain
-values (`2027-07-31`, `14:30`). Single commands take the same target words, value last:
+More actions: `focus T`, `double-click T`, `press KEY [T]` (the key in T). `tabref read` prints the main text.
+Dates and times take plain values (`2027-07-31`, `14:30`). Single commands take the same target words, value last:
 `tabref fill "Email" in "Billing" a@b.c`.
