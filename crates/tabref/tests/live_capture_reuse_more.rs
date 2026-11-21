@@ -353,14 +353,14 @@ fn a_late_closed_shadow_root_is_not_replayed() {
 }
 
 #[test]
-fn an_oversized_page_is_never_kept() {
+fn excessive_form_state_is_never_kept() {
     if !live() {
         return;
     }
     let tabref = common::harness("reuse-oversized");
     let html = format!(
         "<!doctype html><h1>Large page</h1>{}",
-        "<span>Row</span>".repeat(1_200)
+        "<input aria-label=Value>".repeat(1_200)
     );
     let port = serve(&[("/", &html)]);
     let opened = run(

@@ -50,3 +50,92 @@ fn the_watch_is_armed_once_the_page_is_idle_or_the_wait_ran_out() {
         "{filled}"
     );
 }
+
+#[test]
+fn every_kept_page_scans_visibility_and_bounds_unobserved_state() {
+    let filled = script(CHECK, "s1");
+    assert!(filled.contains("if (total > 30000) { blind = true; return; }"));
+    assert!(filled.contains("if (el.checkVisibility(visibilityOptions))"));
+    assert!(filled.contains("styles([...(root.styleSheets"));
+    assert!(filled.contains("forms > 1_000"));
+    assert!(filled.contains("state.length > 100_000"));
+    assert!(filled.contains("styleSize > 100_000"));
+    assert!(filled.contains("realm.matchMedia"));
+}
+
+#[test]
+fn unobserved_form_animation_and_internals_changes_are_guarded() {
+    let check = script(CHECK, "s1");
+    assert!(check.contains("el.validity.valid, el.validationMessage"));
+    assert!(check.contains("entry.animation !== old.animation"));
+    assert!(check.contains("entry.playState !== old.playState"));
+    assert!(check.contains("entry.currentTime !== old.currentTime"));
+    assert!(check.contains("now.animations.length !== watch.animations.length"));
+    assert!(check.contains("tag.includes('-') && el.matches(':defined')"));
+    let arm = script(ARM, "s1");
+    for method in ["'attachInternals'", "'define'", "'upgrade'"] {
+        assert!(arm.contains(method));
+    }
+}
+
+#[test]
+fn read_holes_are_guarded_by_fingerprints_hooks_or_blindness() {
+    let check = script(CHECK, "s1");
+    for condition in [
+        "text.startsWith('@container')",
+        "root.slotAssignment === 'manual'",
+        "el.getAttribute('hidden') === 'until-found'",
+        "error.name === 'SecurityError'",
+        "prefers-color-scheme",
+        "prefers-reduced-motion",
+        "prefers-contrast",
+        "forced-colors",
+        "orientation: portrait",
+        "doc.defaultView.innerWidth + ':' + doc.defaultView.innerHeight",
+    ] {
+        assert!(check.contains(condition), "{condition}");
+    }
+    let arm = script(ARM, "s1");
+    for hook in [
+        "'registerProperty'",
+        "'assign'",
+        "realm.FontFaceSet.prototype",
+        "'loadingdone'",
+    ] {
+        assert!(arm.contains(hook), "{hook}");
+    }
+}
+
+#[test]
+fn supported_pseudo_states_are_matched_by_node_and_selector() {
+    let check = script(CHECK, "s1");
+    for selector in [
+        ":focus-visible",
+        ":focus-within",
+        ":user-invalid",
+        ":user-valid",
+        ":autofill",
+        ":indeterminate",
+        ":checked",
+        ":modal",
+        ":open",
+        ":popover-open",
+        ":target",
+        ":target-within",
+        ":placeholder-shown",
+        ":blank",
+        ":playing",
+        ":paused",
+        ":seeking",
+        ":buffering",
+        ":stalled",
+        ":muted",
+        ":volume-locked",
+        ":picture-in-picture",
+    ] {
+        assert!(check.contains(selector), "{selector}");
+    }
+    assert!(check.contains("realm.CSS.supports('selector(' + selector + ')')"));
+    assert!(check.contains("states.push(el)"));
+    assert!(check.contains("node !== watch.states[i]"));
+}
