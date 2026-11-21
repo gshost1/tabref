@@ -34,12 +34,11 @@ pub(crate) fn run_request(
     let mut options = commands::session_options(&cli);
     options.stdin = request.stdin;
     let reads = commands::only_reads(&cli.command);
-    if !reads {
-        state.captures.clear();
-    }
     let mut session = state.checkout(&options, cancel)?;
     if reads {
         session.keep_captures(Arc::clone(&state.captures));
+    } else {
+        session.reuse_captures(Arc::clone(&state.captures));
     }
     let outcome = commands::dispatch_cli(&mut session, &cli);
     if !reads {
