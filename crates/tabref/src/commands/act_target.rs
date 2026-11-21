@@ -59,6 +59,17 @@ pub(crate) fn resolve_target(
     intent: LocateIntent,
     deadline: Deadline,
 ) -> Result<ActTarget, AppError> {
+    let result = resolve_first_target(session, spec, intent, deadline);
+    session.resolved_target();
+    result
+}
+
+fn resolve_first_target(
+    session: &mut Session,
+    spec: &TargetSpec,
+    intent: LocateIntent,
+    deadline: Deadline,
+) -> Result<ActTarget, AppError> {
     match spec {
         TargetSpec::Ref(text) => {
             let (mut target, hidden) = match intent {

@@ -37,7 +37,21 @@ pub(crate) fn run_request(
     let mut session = state.checkout(&options, cancel)?;
     if reads {
         session.keep_captures(Arc::clone(&state.captures));
-    } else {
+    } else if matches!(
+        cli.command,
+        Command::Click { .. }
+            | Command::DoubleClick { .. }
+            | Command::Fill { .. }
+            | Command::Type { .. }
+            | Command::Select { .. }
+            | Command::Check { .. }
+            | Command::Uncheck { .. }
+            | Command::Press { .. }
+            | Command::Focus { .. }
+            | Command::Hover { .. }
+            | Command::Scroll { .. }
+            | Command::Upload { .. }
+    ) {
         session.reuse_captures(Arc::clone(&state.captures));
     }
     let outcome = commands::dispatch_cli(&mut session, &cli);

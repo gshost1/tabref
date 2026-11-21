@@ -1,7 +1,8 @@
 //! The daemon's last capture of each tab, kept so a `find`, `snap` or
 //! `read` right after an `open` or `snap` of an unchanged page does not read
 //! the whole page again. Actions may reuse one to resolve their target, but
-//! never keep one across commands. A kept capture is used
+//! only for their first target resolution and never keep one across commands.
+//! Batches have no capture access. A kept capture is used
 //! only while the page's own watch says nothing changed since (see
 //! [`tabref_page::check_capture_watch`]), it is the tab's latest snapshot,
 //! and it is younger than [`MAX_AGE`]. In-process runs keep nothing, and
@@ -55,9 +56,16 @@ struct Kept {
 pub(super) struct CaptureAccess {
     cache: Arc<CaptureCache>,
     keep: bool,
+    resolved: bool,
 }
 
 impl CaptureAccess {
+    fn resolve(&mut self) {
+        if !self.keep {
+            self.resolved = true;
+        }
+    }
+
     fn writable(&self) -> Option<&Arc<CaptureCache>> {
         self.keep.then_some(&self.cache)
     }
@@ -111,7 +119,19 @@ impl Session {
     /// Lets this command reuse captures without arming watches or keeping
     /// any captures it reads itself.
     pub(crate) fn reuse_captures(&mut self, cache: Arc<CaptureCache>) {
-        self.captures = Some(CaptureAccess { cache, keep: false });
+        self.captures = Some(CaptureAccess {
+            cache,
+            keep: false,
+            resolved: false,
+        });
+    }
+
+    /// Ends reuse-only access after the first target resolution, including
+    /// a ref or a resolution that failed.
+    pub(crate) fn resolved_target(&mut self) {
+        if let Some(access) = &mut self.captures {
+            access.resolve();
+        }
     }
 
     /// Whether this command keeps its captures for the next one to reuse.
@@ -137,7 +157,11 @@ impl Session {
     /// as it is now. A capture found stale is forgotten. If the check
     /// times out, this command reads fresh and the next one can check again.
     pub(crate) fn reusable_capture(&mut self) -> Option<Arc<CapturedSnapshot>> {
-        let cache = Arc::clone(&self.captures.as_ref()?.cache);
+        let access = self.captures.as_ref()?;
+        if access.resolved {
+            return None;
+        }
+        let cache = Arc::clone(&access.cache);
         let page = self.page().ok()?;
         let key = self.capture_key(&page);
         let kept = cache.take(&key)?;
@@ -230,6 +254,7 @@ mod tests {
         let access = CaptureAccess {
             cache: Arc::clone(&cache),
             keep: false,
+            resolved: false,
         };
         assert!(Arc::ptr_eq(&access.cache, &cache));
         assert!(access.writable().is_none());
@@ -241,11 +266,27 @@ mod tests {
         let access = CaptureAccess {
             cache: Arc::clone(&cache),
             keep: true,
+            resolved: false,
         };
         assert!(
             access
                 .writable()
                 .is_some_and(|writable| Arc::ptr_eq(writable, &cache))
         );
+    }
+
+    #[test]
+    fn only_reuse_only_access_is_spent_by_target_resolution() {
+        for keep in [false, true] {
+            let mut access = CaptureAccess {
+                cache: Arc::new(CaptureCache::default()),
+                keep,
+                resolved: false,
+            };
+            access.resolve();
+            assert_eq!(access.resolved, !keep);
+            access.resolve();
+            assert_eq!(access.resolved, !keep);
+        }
     }
 }

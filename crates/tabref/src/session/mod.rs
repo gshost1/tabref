@@ -55,7 +55,8 @@ use user_chrome_record::{choice_in_use, opt_in_guard};
 /// starts a new [`CommandScope`] for each, so the connection, the attached
 /// sessions and the domains they enabled are paid for once. A daemon command
 /// that only reads may also keep captures; actions may reuse one to resolve
-/// their target, but never keep one across commands (see [`capture_cache::CaptureCache`]).
+/// their first target, but never keep one across commands; batches cannot
+/// reuse captures (see [`capture_cache::CaptureCache`]).
 pub(crate) struct Session {
     connection: CdpConnection,
     browser: ReachedBrowser,

@@ -34,7 +34,12 @@ constructor(){super();this.ins=this.attachInternals();this.ins.states.add('fixed
 fn run(harness: &Harness, args: &[&str], fresh: bool) -> Run {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tabref"));
     command
-        .args(["--cdp", &harness.browser.port.to_string(), "--timeout", "30000"])
+        .args([
+            "--cdp",
+            &harness.browser.port.to_string(),
+            "--timeout",
+            "30000",
+        ])
         .args(args)
         .env("TABREF_HOME", &harness.home)
         .env_remove("TABREF_NO_DAEMON");
@@ -60,22 +65,35 @@ fn evaluate(harness: &Harness, expression: &str) -> Value {
         .find(|target| target.url.starts_with("http://127.0.0.1:"))
         .unwrap();
     let page = attach_to_target(&mut connection, &target.target_id, deadline).unwrap();
-    let reply = connection.call(
-        "Runtime.evaluate",
-        json!({"expression":expression,"awaitPromise":true,"returnByValue":true}),
-        Some(&page.session_id), deadline,
-    ).unwrap();
+    let reply = connection
+        .call(
+            "Runtime.evaluate",
+            json!({"expression":expression,"awaitPromise":true,"returnByValue":true}),
+            Some(&page.session_id),
+            deadline,
+        )
+        .unwrap();
     assert!(reply.get("exceptionDetails").is_none(), "{reply}");
     reply["result"]["value"].clone()
 }
 
 fn setup(html: &str, large: bool, edit: &str) -> Harness {
     let harness = common::harness("capture-safety");
-    let html = format!("<!doctype html><html><head><title>Safety</title></head><body>{html}{}{}</body></html>",
-        if large { "<span></span>".repeat(1_500) } else { String::new() },
-        "<script>window.picked='';</script>");
+    let html = format!(
+        "<!doctype html><html><head><title>Safety</title></head><body>{html}{}{}</body></html>",
+        if large {
+            "<span></span>".repeat(1_500)
+        } else {
+            String::new()
+        },
+        "<script>window.picked='';</script>"
+    );
     let port = common::serve(&[("/", &html)]);
-    run(&harness, &["open", &format!("http://127.0.0.1:{port}/")], false);
+    run(
+        &harness,
+        &["open", &format!("http://127.0.0.1:{port}/")],
+        false,
+    );
     run(&harness, &["snap"], false);
     evaluate(&harness, edit);
     harness
@@ -101,87 +119,141 @@ fn compare_view(html: &str, large: bool, edit: &str, command: &str, needle: &str
     if command == "read" {
         assert_eq!(reused.stdout, fresh.stdout, "reuse printed a stale read");
     } else {
-        assert!(fresh.stdout.contains(needle), "fresh baseline: {}", fresh.stdout);
-        assert!(reused.stdout.contains(needle), "reuse printed a stale snap: {}", reused.stdout);
+        assert!(
+            fresh.stdout.contains(needle),
+            "fresh baseline: {}",
+            fresh.stdout
+        );
+        assert!(
+            reused.stdout.contains(needle),
+            "reuse printed a stale snap: {}",
+            reused.stdout
+        );
     }
 }
 
 #[test]
 fn finished_fill_animation_click_matches_fresh() {
-    if common::live() { compare_click(ANIMATED, true, ANIMATE, "Remove"); }
+    if common::live() {
+        compare_click(ANIMATED, true, ANIMATE, "Remove");
+    }
 }
 
 #[test]
 fn finished_fill_animation_snap_matches_fresh() {
-    if common::live() { compare_view(ANIMATED, true, ANIMATE, "snap", "button Remove]"); }
+    if common::live() {
+        compare_view(ANIMATED, true, ANIMATE, "snap", "button Remove]");
+    }
 }
 
 #[test]
 fn finished_fill_animation_read_matches_fresh() {
-    if common::live() { compare_view(ANIMATED, true, ANIMATE, "read", ""); }
+    if common::live() {
+        compare_view(ANIMATED, true, ANIMATE, "read", "");
+    }
 }
 
 #[test]
 fn custom_validity_click_matches_fresh() {
-    if common::live() { compare_click(VALIDITY, true, INVALID, "Send"); }
+    if common::live() {
+        compare_click(VALIDITY, true, INVALID, "Send");
+    }
 }
 
 #[test]
 fn custom_validity_snap_matches_fresh() {
-    if common::live() { compare_view(VALIDITY, true, INVALID, "snap", "button Send]"); }
+    if common::live() {
+        compare_view(VALIDITY, true, INVALID, "snap", "button Send]");
+    }
 }
 
 #[test]
 fn custom_validity_read_matches_fresh() {
-    if common::live() { compare_view(VALIDITY, true, INVALID, "read", ""); }
+    if common::live() {
+        compare_view(VALIDITY, true, INVALID, "read", "");
+    }
 }
 
 #[test]
 fn internals_labels_click_matches_fresh() {
-    if common::live() { compare_click(INTERNALS, false, SWAP, "Delete"); }
+    if common::live() {
+        compare_click(INTERNALS, false, SWAP, "Delete");
+    }
 }
 
 #[test]
 fn internals_labels_snap_matches_fresh() {
-    if !common::live() { return; }
+    if !common::live() {
+        return;
+    }
     let harness = setup(INTERNALS, false, SWAP);
     let reused = run(&harness, &["snap"], false);
     let fresh = run(&harness, &["snap"], true);
     run(&harness, &["daemon", "stop"], false);
-    let labels = |run: &Run| run.stdout.find("button Delete").unwrap() < run.stdout.find("button Keep").unwrap();
-    assert_eq!(labels(&reused), labels(&fresh), "internals labels were stale");
+    let labels = |run: &Run| {
+        run.stdout.find("button Delete").unwrap() < run.stdout.find("button Keep").unwrap()
+    };
+    assert_eq!(
+        labels(&reused),
+        labels(&fresh),
+        "internals labels were stale"
+    );
 }
 
 #[test]
 fn internals_states_click_matches_fresh() {
-    if common::live() { compare_click(STATES, false, "state.ins.states.delete('fixed')", "Delete"); }
+    if common::live() {
+        compare_click(STATES, false, "state.ins.states.delete('fixed')", "Delete");
+    }
 }
 
 #[test]
 fn internals_states_snap_matches_fresh() {
-    if common::live() { compare_view(STATES, false, "state.ins.states.delete('fixed')", "snap", "button Delete]"); }
+    if common::live() {
+        compare_view(
+            STATES,
+            false,
+            "state.ins.states.delete('fixed')",
+            "snap",
+            "button Delete]",
+        );
+    }
 }
 
 #[test]
 fn a_batch_never_reuses_the_pre_batch_capture() {
-    if !common::live() { return; }
-    let html = format!("{VALIDITY}<button id=toggle onmousedown=\"event.preventDefault()\" onclick=\"field.setCustomValidity('bad')\">Toggle</button>");
+    if !common::live() {
+        return;
+    }
+    let html = format!(
+        "{VALIDITY}<button id=toggle onmousedown=\"event.preventDefault()\" onclick=\"field.setCustomValidity('bad')\">Toggle</button>"
+    );
     let harness = setup(&html, true, "true");
     run(&harness, &["hover", "Toggle"], false);
     run(&harness, &["snap"], false);
     let report = run(&harness, &["do", "click Toggle; click Send"], false);
     let picked = evaluate(&harness, "picked");
     run(&harness, &["daemon", "stop"], false);
-    assert_eq!(picked, "b", "batch reused a pre-action capture: {}", report.stdout);
+    assert_eq!(
+        picked, "b",
+        "batch reused a pre-action capture: {}",
+        report.stdout
+    );
 }
 
 #[test]
 fn wait_for_uses_the_current_validity_state() {
-    if !common::live() { return; }
+    if !common::live() {
+        return;
+    }
     let harness = setup(VALIDITY, true, INVALID);
     let reused = run(&harness, &["wait", "--text", "Send"], false);
     let fresh = run(&harness, &["wait", "--text", "Send"], true);
     run(&harness, &["daemon", "stop"], false);
     assert!(fresh.stdout.contains("button \"Send\""), "{}", fresh.stdout);
-    assert!(reused.stdout.contains("button \"Send\""), "stale wait: {}", reused.stdout);
+    assert!(
+        reused.stdout.contains("button \"Send\""),
+        "stale wait: {}",
+        reused.stdout
+    );
 }

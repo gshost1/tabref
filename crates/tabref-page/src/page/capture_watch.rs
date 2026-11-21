@@ -20,10 +20,11 @@
 //! multi-select's whole selection; focus is followed into open shadow roots
 //! and same-origin frames.
 //!
-//! Above [`MAX_ELEMENTS`] only computed visibility is skipped, not roots or
-//! observers. Visibility changes without mutations require stylesheet,
-//! viewport, interaction or animation changes, which the fingerprint also
-//! watches. Cross-origin rules cannot be edited by page script: opaque
+//! Every element's visibility is checked; pages above [`MAX_ELEMENTS`] are
+//! blind. Form validity and finished fill animations are watched too, since
+//! they can change rendering without mutations. Upgraded custom elements
+//! are blind: ElementInternals can change accessibility and custom states
+//! without observable mutations. Cross-origin rules cannot be edited by page script: opaque
 //! sheets are watched by identity, href, disabled and media state, including
 //! imports inside readable sheets. Other stylesheet errors and oversized
 //! form or stylesheet state are blind rather than sampled.
@@ -35,11 +36,12 @@ use tabref_core::{AppError, Deadline};
 use super::evaluate::evaluate_quietly;
 use crate::{CdpConnection, PageSession};
 
-const MAX_ELEMENTS: usize = 1_000;
+const MAX_ELEMENTS: usize = 30_000;
 
 const SCAN: &str = r"const scan = () => {
     const roots = [];
     const sheetObjects = [];
+    const animations = [];
     let blind = false;
     let state = '';
     let total = 0;
@@ -51,7 +53,10 @@ const SCAN: &str = r"const scan = () => {
     const frames = 'iframe, frame, object, embed';
     const moving = root => {
       try {
-        return root.getAnimations().some(animation => animation.pending || animation.playState === 'running');
+        const entries = root.getAnimations().map(animation => ({ animation,
+          playState: animation.playState, currentTime: animation.currentTime }));
+        animations.push(...entries);
+        return entries.some(entry => entry.animation.pending || entry.playState === 'running');
       } catch (error) { return true; }
     };
     const unreadable = root => {
@@ -91,7 +96,7 @@ const SCAN: &str = r"const scan = () => {
       if (moving(root) || unreadable(root)) { blind = true; return; }
       const elements = root.querySelectorAll('*');
       total += elements.length;
-      const visibilityScan = total <= MAX_ELEMENTS;
+      if (total > MAX_ELEMENTS) { blind = true; return; }
       state += '\u0006' + (root.styleSheets?.length ?? 0) + ':' + (root.adoptedStyleSheets?.length ?? 0);
       const doc = root.nodeType === 9 ? root : root.ownerDocument;
       styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
@@ -101,23 +106,25 @@ const SCAN: &str = r"const scan = () => {
       for (let index = 0; index < elements.length; index++) {
         if (blind) return;
         const el = elements[index];
-        if (visibilityScan && el.checkVisibility(visibilityOptions)) {
+        if (el.checkVisibility(visibilityOptions)) {
           visible += 1;
           visibility = (Math.imul(31, visibility) + index + 1) | 0;
         }
         if (el.matches(':hover, :active, :fullscreen')) state += '\u000a' + index;
         if (el.shadowRoot) walk(el.shadowRoot);
         const tag = el.localName;
+        if (tag.includes('-') && doc.defaultView.customElements.get(tag)) { blind = true; return; }
         if (tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed') {
           let inner = null;
           try { inner = el.contentDocument; } catch (error) { inner = null; }
           if (inner) walk(inner); else blind = true;
         } else if (tag === 'input' || tag === 'textarea' || tag === 'select') {
           forms += 1;
-          if (forms > MAX_ELEMENTS || el.value.length > 100_000
-            || (el.options && el.options.length > MAX_ELEMENTS)) { blind = true; return; }
+          if (forms > 1_000 || el.value.length > 100_000
+            || (el.options && el.options.length > 1_000)) { blind = true; return; }
           state += '\u0001' + el.value + '\u0002' + (el.checked ? 1 : 0) + (el.indeterminate ? 1 : 0)
             + '\u0002' + (el.selectedIndex ?? '');
+          state += '\u0002' + JSON.stringify([el.validity.valid, el.validationMessage]);
           if (el.multiple && el.selectedOptions) state += '\u0002' + [...el.selectedOptions].map(option => option.index).join(',');
           if (state.length > 100_000) { blind = true; return; }
         }
@@ -139,7 +146,7 @@ const SCAN: &str = r"const scan = () => {
     const box = document.documentElement;
     const place = [location.href, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio,
       box ? box.scrollWidth : 0, box ? box.scrollHeight : 0].join('\u0004');
-    return { roots, sheets: sheetObjects, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
+    return { roots, sheets: sheetObjects, animations, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
   };";
 
 /// How long the arm script waits for an idle main thread before it arms
@@ -154,7 +161,7 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   const now = scan();
   if (now.blind) { delete window[key]; return { blind: true }; }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
-    sheets: now.sheets, active: now.active, print: now.print, blind: now.blind };
+    sheets: now.sheets, animations: now.animations, active: now.active, print: now.print, blind: now.blind };
   const restore = [];
   watch.stop = () => {
     if (watch.dirty) return;
@@ -181,6 +188,7 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
       if (root.nodeType !== 9) continue;
       const realm = root.defaultView;
       wrap(realm.Element.prototype, 'attachShadow');
+      wrap(realm.HTMLElement.prototype, 'attachInternals');
       wrap(realm.CustomElementRegistry.prototype, 'define');
       wrap(realm.CustomElementRegistry.prototype, 'upgrade');
     }
@@ -213,6 +221,10 @@ const CHECK: &str = r"(() => {
   if (now.blind) return 'blind';
   if (now.roots.length !== watch.roots.length || now.roots.some((root, i) => root !== watch.roots[i])) return 'roots';
   if (now.sheets.length !== watch.sheets.length || now.sheets.some((sheet, i) => sheet !== watch.sheets[i])) return 'state';
+  if (now.animations.length !== watch.animations.length || now.animations.some((entry, i) => {
+    const old = watch.animations[i];
+    return entry.animation !== old.animation || entry.playState !== old.playState || entry.currentTime !== old.currentTime;
+  })) return 'state';
   if (now.active !== watch.active) return 'focus';
   if (now.print !== watch.print) return 'state';
   return 'same';
