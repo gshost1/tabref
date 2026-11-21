@@ -30,7 +30,7 @@ vx() { boxd machine exec "$name" -- bash -c "$1"; }
 cleanup() { [[ $keep == 1 ]] || boxd machine remove "$name" --confirm || echo "could not remove $name: remove it by hand" >&2; }
 boxd machine new "$name" --delete-after "${hours}h"
 trap cleanup EXIT
-boxd machine resize "$name" --vcpu "$vcpu" --memory "$memory"
+boxd machine resize "$name" --vcpu "$vcpu" --memory "$memory" -y
 until vx true 2>/dev/null; do sleep 5; done
 tmp=$(mktemp -d)
 tar -C "$here/.." --exclude='bench/runs' --exclude='__pycache__' -czf "$tmp/bench.tgz" bench
