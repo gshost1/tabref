@@ -9,7 +9,7 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
   const win = doc.defaultView;
   const root = doc.scrollingElement || doc.documentElement;
   const key = Symbol.for('tabref.scroll');
-  const requests = Symbol.for('tabref.scroll-request-tracker');
+  const requests = Symbol.for('tabref.scroll-request-tracker.v2');
   const recordScroll = (target, dy) => {
     if (!dy) return;
     win[Symbol.for('tabref.last-vertical-scroll')] = {
@@ -26,7 +26,7 @@ pub(crate) const PRELUDE: &str = r"const anchor = this && this.nodeType === 1 ? 
   const grown = (state) => (state.dy ? state.target.scrollHeight : state.target.scrollWidth) > state.extent + 1;
   const pool = (state) => grown(state) ? state.added.concat(state.swapped) : state.added;";
 
-pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews, requestMaxAge) {
+pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews, requestMaxAge, watchEnd) {
   PRELUDE
   WATCH_REQUESTS
   const scrolls = (el) => {
@@ -59,22 +59,24 @@ pub(crate) const SCROLL: &str = r"function(dx, dy, nearViews, requestMaxAge) {
   const view = target === root ? (dy ? win.innerHeight : win.innerWidth)
     : (dy ? target.clientHeight : target.clientWidth);
   const before = left(target, dx, dy);
-  if (before >= 1 && before - Math.abs(dy || dx) <= view * nearViews) {
+  if ((before >= 1 && before - Math.abs(dy || dx) <= view * nearViews) || (watchEnd && before < 1)) {
     win[key] = { target, dx, dy, planned: true };
     return { moved: false, near: true, atEnd: false, hidden };
   }
   const moved = anchor || target !== root || before >= 1 ? shift(target) : false;
   return { moved, near: false, atEnd: left(target, dx, dy) < 2, hidden,
-    pending: win[requests].hasPending() };
+    pending: win[requests].hasPending(), agedOut: win[requests].agedOut() };
 }";
 
 pub(crate) const WATCH_REQUESTS: &str = r"if (!win[requests]) {
   const pending = new Set();
+  const expired = new Set();
   const hasPending = () => {
     const cutoff = win.performance.now() - requestMaxAge;
     for (const request of pending) {
       if (request.started > cutoff) break;
       pending.delete(request);
+      expired.add(request);
     }
     return pending.size > 0;
   };
@@ -82,7 +84,7 @@ pub(crate) const WATCH_REQUESTS: &str = r"if (!win[requests]) {
     hasPending();
     const request = { started: win.performance.now() };
     pending.add(request);
-    return () => pending.delete(request);
+    return () => { pending.delete(request); expired.delete(request); };
   };
   const fetch = win.fetch;
   const send = win.XMLHttpRequest.prototype.send;
@@ -106,7 +108,7 @@ pub(crate) const WATCH_REQUESTS: &str = r"if (!win[requests]) {
     if (shadow.mode === 'open') win[key]?.observeShadow?.(shadow);
     return shadow;
   };
-  win[requests] = { hasPending };
+  win[requests] = { hasPending, agedOut: () => expired.size };
 }";
 
 pub(crate) const WATCH: &str = r"function() {
@@ -225,6 +227,7 @@ pub(crate) const READ: &str = r"function(budget, lineChars) {
     lines, more,
     mutations: state.mutations,
     pending: win[requests].hasPending(),
+    agedOut: win[requests].agedOut(),
     grew: grown(state),
     atEnd: left(state.target, state.dx, state.dy) < 2,
   };

@@ -30,6 +30,7 @@ pub(crate) struct ScrollStep {
     pub(crate) at_end: bool,
     pub(crate) hidden: bool,
     pub(crate) pending: bool,
+    pub(crate) aged_out_requests: u64,
 }
 
 /// What the watch saw so far: DOM mutations inside the scrolled target,
@@ -55,6 +56,7 @@ pub(crate) struct ScrollLoaded {
     pub(crate) grew: bool,
     pub(crate) at_end: bool,
     pub(crate) pending: bool,
+    pub(crate) aged_out_requests: u64,
 }
 
 fn run(
@@ -91,7 +93,7 @@ pub(crate) fn scroll_step(
     connection: &mut CdpConnection,
     session: &PageSession,
     site: ScrollSite<'_>,
-    delta: (f64, f64),
+    (delta, watch_end): ((f64, f64), bool),
     deadline: Deadline,
 ) -> Result<ScrollStep, AppError> {
     let arguments = [
@@ -99,6 +101,7 @@ pub(crate) fn scroll_step(
         json!(delta.1),
         json!(NEAR_VIEWS),
         json!(REQUEST_MAX_AGE_MS),
+        json!(watch_end),
     ];
     let reply = run(connection, session, site, (SCROLL, &arguments), deadline)?;
     Ok(ScrollStep {
@@ -107,6 +110,7 @@ pub(crate) fn scroll_step(
         at_end: flag(&reply, "atEnd"),
         hidden: flag(&reply, "hidden"),
         pending: flag(&reply, "pending"),
+        aged_out_requests: number(&reply, "agedOut"),
     })
 }
 
@@ -195,5 +199,6 @@ pub(crate) fn read_loaded(
         grew: flag(&reply, "grew"),
         at_end: flag(&reply, "atEnd"),
         pending: flag(&reply, "pending"),
+        aged_out_requests: number(&reply, "agedOut"),
     }))
 }
