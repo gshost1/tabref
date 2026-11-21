@@ -71,6 +71,7 @@ pub(crate) const SCAN: &str = r"const scan = () => {
         if (popup.parentElement?.closest('[role=listbox],[role=menu],[popover]')) continue;
         const role = popup.getAttribute('role') === 'listbox' || popup.querySelector('[role=option]') ? 'listbox' : 'menu';
         const items = Array.from(popup.querySelectorAll('[role=option],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio]')).filter(shown);
+        if (!items.length) continue;
         const separate = items.every(item => {
           for (let node = item; node; node = node.parentElement) {
             if (!['block', 'list-item', 'flow-root'].includes(getComputedStyle(node).display)) return false;

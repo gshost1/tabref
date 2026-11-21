@@ -16,7 +16,10 @@ pub(super) fn closed_popups(
 ) -> Vec<TextChange> {
     let mut closed = Vec::new();
     for popup in before {
-        if after.iter().any(|other| other["id"] == popup["id"]) {
+        if after.iter().any(|other| {
+            other["id"] == popup["id"]
+                || (other["role"] == popup["role"] && other["name"] == popup["name"])
+        }) {
             continue;
         }
         let Some(block) = popup["block"].as_u64() else {
@@ -40,6 +43,16 @@ pub(super) fn closed_popups(
             continue;
         };
         let items = text_lines(item_text);
+        if items.is_empty()
+            || after_blocks.iter().any(|(_, block)| match block {
+                BlockText::Readable(text) => {
+                    text_lines(text).iter().any(|line| items.contains(line))
+                }
+                _ => false,
+            })
+        {
+            continue;
+        }
         if !items.is_empty() {
             let mut lines = text_lines(text);
             let Some(start) = lines.windows(items.len()).position(|run| run == items) else {

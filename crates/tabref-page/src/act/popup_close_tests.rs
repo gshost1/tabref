@@ -63,17 +63,42 @@ fn duplicate_text_outside_the_popup_is_not_swallowed() {
 }
 
 #[test]
-fn empty_menu_closes_and_open_popup_does_not() {
+fn empty_menu_and_open_popup_do_not_claim_a_close() {
     let before = reply("Keep", true, "menu", "", 0);
     let after = reply("Keep", false, "menu", "", 0);
-    assert_eq!(
-        compare_replies(&before, &after)
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>(),
-        ["- menu \"Category\" closed (0 items)"]
-    );
+    assert!(compare_replies(&before, &after).is_empty());
     assert!(compare_replies(&before, &before).is_empty());
+}
+
+#[test]
+fn remounted_or_renumbered_popups_do_not_close() {
+    let before = reply(
+        "Alpha\nBeta\nGamma",
+        true,
+        "listbox",
+        "Alpha\nBeta\nGamma",
+        3,
+    );
+    let mut after = before.clone();
+    after["popups"][0]["id"] = json!(12);
+    assert!(compare_replies(&before, &after).is_empty());
+    after["blocks"][0][1] = json!("Delta");
+    after["popups"][0]["text"] = json!("Delta");
+    let changes = compare_replies(&before, &after);
+    assert!(
+        !changes
+            .iter()
+            .any(|change| change.to_string().contains("closed")),
+        "{changes:?}"
+    );
+}
+
+#[test]
+fn surviving_item_text_prevents_a_close_even_without_popup_metadata() {
+    let before = reply("Alpha\nBeta", true, "listbox", "Alpha\nBeta", 2);
+    let after = reply("Beta", false, "listbox", "", 0);
+    let changes = compare_replies(&before, &after);
+    assert_eq!(changes, [TextChange::Removed("Alpha".into())]);
 }
 
 #[test]
