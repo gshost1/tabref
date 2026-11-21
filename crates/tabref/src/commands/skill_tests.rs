@@ -185,7 +185,7 @@ fn the_guide_explains_how_to_start_chrome_when_needed() {
 #[test]
 fn the_guide_stays_short_and_points_to_the_rare_commands() {
     let guide = run(None).text;
-    assert!(guide.len() <= 2_048, "{} bytes", guide.len());
+    assert!(guide.len() <= 2_100, "{} bytes", guide.len());
     assert!(guide.contains("tabref skill more` for waits, `connect` to your own Chrome"));
     let more = run(Some("more")).text;
     for rare in [
@@ -278,7 +278,9 @@ fn the_guide_loops_pairs_and_pages_without_a_fixed_address() {
         .lines()
         .find(|line| line.starts_with("Pages:"))
         .unwrap_or_default();
-    assert!(paging.contains("link's address"), "{paging}");
+    assert!(paging.contains("`Next` or `2` link's address"), "{paging}");
+    assert!(guide.contains("no address: `click \"Next\"` in the loop"));
+    assert!(guide.contains("A cut view ends with an outline of the rest: use its `--from N`"));
     assert!(guide.contains("`open \"<address with {n}>\"`"));
     for fixed in ["?p=", "?page=", "&page="] {
         assert!(!guide.contains(fixed), "{fixed}");

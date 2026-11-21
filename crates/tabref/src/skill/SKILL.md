@@ -9,7 +9,7 @@ See `tabref skill more` for waits, `connect` to your own Chrome, downloads, dial
 `tabref snap`: one line per block; controls show refs: `[e5 button Save]`,
 `[e9 select Size = "M" options: S | M | L]`, links their address: `[e7 Next -> <address>]`.
 Count `N items:`, `table N rows:` and repeats `(1/3)` across the whole page, not the first block.
-If what you need is not shown, use the outline's `--from N`, `tabref read --section "<heading>"`
+A cut view ends with an outline of the rest: use its `--from N`, `tabref read --section "<heading>"`
 or `tabref find TEXT` (hidden text too). A `dialog` line at the top: click one of its buttons.
 
 ## Act
@@ -31,8 +31,8 @@ did not show what you need. It stops at the first failing step.
     EOF
 
 `for name qty in Pen 2 Cup 5` ... `end` runs the steps per pair as `{name}` and `{qty}`.
-Pages: loop the Next or 2 link's address with the page number as `{n}`:
-`for n in 2 3 4`, `open "<address with {n}>"`, `find TEXT`, `end`.
+Pages: loop the `Next` or `2` link's address with the page number as `{n}`:
+`for n in 2 3 4`, `open "<address with {n}>"`, `find TEXT`, `end`; no address: `click "Next"` in the loop.
 Lazy list: repeat `scroll down` in a `for` loop (`for n in 1 2 3 4 5 6`), then `find TEXT`.
 Steps: any action but `upload`, `open URL`, `expect text|gone|url X`,
 `expect T is visible|enabled|hidden|gone|value=X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
