@@ -210,3 +210,76 @@ fn capped_controls_and_controls_only_in_row_summaries_keep_their_added_names() {
     );
     assert_eq!(report.changes, changes);
 }
+
+#[test]
+fn passive_table_parts_do_not_hide_their_inner_controls() {
+    for role in ["cell", "gridcell", "row", "rowheader", "columnheader"] {
+        let mut nodes = vec![
+            dom("BODY", 1, None, vec![1]),
+            dom("TD", 2, Some(0), vec![2]),
+            dom("BUTTON", 3, Some(1), vec![3]),
+            text("Open", 4, 2),
+        ];
+        nodes[1].attrs = vec![
+            ("contenteditable".into(), "false".into()),
+            ("tabindex".into(), "invalid".into()),
+            ("aria-sort".into(), "ascending".into()),
+        ];
+        let docs = document(nodes);
+        let mut tree = control(role, "Tracking", 2);
+        tree.presentation.available_actions = vec!["Click".into()];
+        tree.children.push(control("button", "Open", 3));
+        let changes = [TextChange::Added("Tracking".into())];
+        let report =
+            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
+        assert_eq!(report.controls.len(), 1, "{role}");
+        assert_eq!(report.controls[0].role, "button");
+        assert_eq!(report.changes, changes);
+    }
+}
+
+#[test]
+fn table_parts_with_their_own_interactions_are_preserved() {
+    for (attr, value) in [
+        ("tabindex", "0"),
+        ("tabindex", "-1"),
+        ("contenteditable", "true"),
+        ("contenteditable", ""),
+        ("contenteditable", "plaintext-only"),
+        ("onclick", "save()"),
+    ] {
+        let mut nodes = vec![dom("BODY", 1, None, vec![1]), dom("TD", 2, Some(0), vec![])];
+        nodes[1].attrs.push((attr.into(), value.into()));
+        let docs = document(nodes);
+        let tree = control("cell", "Editable", 2);
+        assert_eq!(
+            action_changes::prepare(&tree, &HashSet::new(), &[], |_| Some(&docs), shown)
+                .controls
+                .len(),
+            1,
+            "{attr}"
+        );
+    }
+    let docs = document(vec![
+        dom("BODY", 1, None, vec![1]),
+        dom("TD", 2, Some(0), vec![]),
+    ]);
+    for action in ["SetFocus", "SetValue", "TypeText"] {
+        let mut tree = control("cell", "Interactive", 2);
+        tree.presentation.available_actions.push(action.into());
+        assert_eq!(
+            action_changes::prepare(&tree, &HashSet::new(), &[], |_| Some(&docs), shown)
+                .controls
+                .len(),
+            1,
+            "{action}"
+        );
+    }
+    let tree = control("cell", "Unknown", 2);
+    assert_eq!(
+        action_changes::prepare(&tree, &HashSet::new(), &[], |_| None, shown)
+            .controls
+            .len(),
+        1
+    );
+}

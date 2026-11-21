@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use tabref_core::AccessibilityNode;
+use tabref_core::{AccessibilityNode, capability};
 use tabref_page::{DomTree, ElementToken, NodeKind, TextChange, escape_line, squash, subtree_text};
 
 pub(crate) struct ReportChanges<'a> {
@@ -17,7 +17,8 @@ pub(crate) fn prepare<'a>(
 ) -> ReportChanges<'a> {
     let mut controls = Vec::new();
     collect(tree, known, &mut controls);
-    controls.retain(|node| !native_option(node, &documents));
+    controls
+        .retain(|node| !native_option(node, &documents) && !passive_table_part(node, &documents));
     let displayed = displayed(&controls);
     let owners: Vec<_> = controls
         .iter()
@@ -120,6 +121,44 @@ fn native_option<'a>(
             .iter()
             .skip(1)
             .any(|at| doc.node(*at).is_some_and(|node| node.tag() == "SELECT"))
+}
+
+fn passive_table_part<'a>(
+    node: &AccessibilityNode,
+    documents: &impl Fn(&str) -> Option<&'a [DomTree]>,
+) -> bool {
+    if !matches!(
+        node.role.as_str(),
+        "cell" | "gridcell" | "row" | "rowheader" | "columnheader"
+    ) || [
+        capability::SET_FOCUS,
+        capability::SET_VALUE,
+        capability::TYPE_TEXT,
+        capability::SELECT,
+        capability::TOGGLE,
+        capability::PRESS_KEY,
+    ]
+    .iter()
+    .any(|action| capability::contains(&node.presentation.available_actions, action))
+    {
+        return false;
+    }
+    let Some((doc, index)) = location(node, documents) else {
+        return false;
+    };
+    let Some(dom) = doc.node(index) else {
+        return false;
+    };
+    dom.attr("tabindex")
+        .and_then(|value| value.trim().parse::<i32>().ok())
+        .is_none()
+        && !dom.attr("contenteditable").is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "" | "true" | "plaintext-only"
+            )
+        })
+        && dom.attr("onclick").is_none()
 }
 
 struct Owner<'a> {
