@@ -1,4 +1,11 @@
 pub(crate) mod command;
+mod qualifiers;
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod review_tests;
 
 use clap::Parser;
 use tabref_cdp::DialogChoice;
@@ -12,7 +19,7 @@ use command::Command;
 /// ("Save"). Commands talk to Chrome over the DevTools protocol.
 #[derive(Debug, Parser)]
 #[command(name = "tabref", version, max_term_width = 100)]
-pub(crate) struct Cli {
+pub(crate) struct ParsedCli {
     /// DevTools endpoint: a port, http://127.0.0.1:PORT or the browser's ws:// URL
     #[arg(long, global = true, env = "TABREF_CDP", value_name = "ENDPOINT")]
     pub(crate) cdp: Option<String>,
@@ -42,7 +49,7 @@ pub(crate) struct Cli {
 const TIMEOUT_MS: u64 = 10_000;
 const DO_TIMEOUT_MS: u64 = 120_000;
 
-impl Cli {
+impl ParsedCli {
     /// The command's deadline: `--timeout`, else 10 s, or 120 s for `do`.
     pub(crate) fn timeout_ms(&self) -> u64 {
         self.timeout.unwrap_or(match self.command {
@@ -51,6 +58,50 @@ impl Cli {
         })
     }
 }
+
+#[derive(Debug)]
+pub(crate) struct Cli(ParsedCli);
+
+impl std::ops::Deref for Cli {
+    type Target = ParsedCli;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Cli {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl clap::CommandFactory for Cli {
+    fn command() -> clap::Command {
+        qualifiers::command(ParsedCli::command())
+    }
+
+    fn command_for_update() -> clap::Command {
+        qualifiers::command(ParsedCli::command_for_update())
+    }
+}
+
+impl clap::FromArgMatches for Cli {
+    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
+        let normalized = qualifiers::target(matches)?;
+        let mut cli = ParsedCli::from_arg_matches(matches)?;
+        qualifiers::apply(&mut cli.command, normalized)?;
+        Ok(Self(cli))
+    }
+
+    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
+        let normalized = qualifiers::target(matches)?;
+        self.0.update_from_arg_matches(matches)?;
+        qualifiers::apply(&mut self.command, normalized)
+    }
+}
+
+impl Parser for Cli {}
 
 fn dialog_choice(text: &str) -> Result<DialogChoice, String> {
     DialogChoice::parse(text).ok_or_else(|| {
