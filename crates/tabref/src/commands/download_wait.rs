@@ -49,6 +49,7 @@ pub(crate) fn wait_download(
                     watched: new && ours,
                     batch: None,
                     cleanup: None,
+                    cap_bytes: Some(cap),
                 };
                 merge(kept, entry);
             }

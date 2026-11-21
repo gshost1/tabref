@@ -29,7 +29,9 @@ pub(crate) struct DownloadLedger {
 
 impl DownloadLedger {
     pub(crate) fn pending(&self) -> bool {
-        let records = self.read();
+        let Ok(records) = self.read() else {
+            return true;
+        };
         let now = now_ms();
         if records.iter().any(|entry| expired(entry, now)) {
             let _ = self.try_with(|kept| kept.retain(|entry| !expired(entry, now)));
@@ -92,17 +94,34 @@ impl DownloadLedger {
             .open(&self.lock)?)
     }
 
-    fn read(&self) -> Vec<KeptDownload> {
-        read_bounded(&self.path, MAX_BYTES)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+    fn read(&self) -> Result<Vec<KeptDownload>, AppError> {
+        let bytes = match read_bounded(&self.path, MAX_BYTES) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(self.unreadable(error)),
+        };
+        serde_json::from_slice(&bytes).map_err(|error| self.unreadable(error))
+    }
+
+    fn unreadable(&self, error: impl std::fmt::Display) -> AppError {
+        AppError::invalid_args(format!("Cannot read download ledger {}: {error}; repair it or move it aside before retrying download tracking", self.path.display()))
+            .with_details(serde_json::json!({"kind":"download_ledger_unreadable", "path":self.path}))
     }
 
     fn change<T>(&self, change: impl FnOnce(&mut Vec<KeptDownload>) -> T) -> Result<T, AppError> {
-        let before = self.read();
+        let before = self.read()?;
         let mut records = before.clone();
         let result = change(&mut records);
+        records.retain(|entry| {
+            !entry.reported
+                || entry
+                    .cleanup
+                    .as_ref()
+                    .is_none_or(|cleanup| cleanup.abandoned_paths.is_empty())
+        });
+        for entry in &mut records {
+            bound_fields(entry);
+        }
         let kept = &records[records.len().saturating_sub(KEPT)..];
         if kept != before.as_slice() {
             if kept.is_empty() {
@@ -113,10 +132,37 @@ impl DownloadLedger {
                     _ => {}
                 }
             } else {
-                write_atomic(&self.path, serde_json::to_string(kept)?.as_bytes())?;
+                let bytes = serde_json::to_vec(kept)?;
+                if bytes.len() as u64 > MAX_BYTES {
+                    return Err(self.unreadable(
+                        "updated records exceed the 64 KiB limit; existing records were preserved",
+                    ));
+                }
+                write_atomic(&self.path, &bytes)?;
             }
         }
         Ok(result)
+    }
+}
+
+fn bound_fields(entry: &mut KeptDownload) {
+    for field in [
+        &mut entry.record.origin.url,
+        &mut entry.record.origin.suggested_name,
+        &mut entry.record.origin.frame_id,
+    ] {
+        let mut size = 0;
+        let end = field.char_indices().find_map(|(index, ch)| {
+            size += match ch {
+                '"' | '\\' => 2,
+                '\u{0}'..='\u{1f}' => 6,
+                _ => ch.len_utf8(),
+            };
+            (size > 256).then_some(index)
+        });
+        if let Some(end) = end {
+            field.truncate(end);
+        }
     }
 }
 
@@ -131,6 +177,9 @@ pub(crate) fn merge(kept: &mut Vec<KeptDownload>, entry: KeptDownload) {
         kept.push(entry);
         return;
     };
+    if old.record.running() {
+        old.cap_bytes = entry.cap_bytes.or(old.cap_bytes);
+    }
     if !matches!(old.record.state, DownloadState::TooLarge { .. })
         && (old.record.running() || !entry.record.running())
     {

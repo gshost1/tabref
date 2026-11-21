@@ -49,7 +49,12 @@ pub(crate) fn download_line(record: &DownloadRecord) -> String {
         (DownloadState::Canceled, _) => format!("download {name} was canceled"),
         (DownloadState::TooLarge { cap_mb }, _) => {
             let cleanup = super::downloads::cleanup::lookup(record).unwrap_or_default();
-            let action = if !cleanup.pending_paths.is_empty() {
+            let action = if !cleanup.abandoned_paths.is_empty() {
+                format!(
+                    "could not remove {}; remove it by hand",
+                    cleanup.abandoned_paths.join(", ")
+                )
+            } else if !cleanup.pending_paths.is_empty() {
                 format!("delete pending: {}", cleanup.pending_paths.join(", "))
             } else if cleanup.completed_before_cap {
                 if cleanup.removal_verified {
@@ -81,6 +86,9 @@ pub(crate) fn download_json(record: &DownloadRecord) -> Value {
     if let Some(cleanup) = super::downloads::cleanup::lookup(record) {
         data["completed_before_cap"] = json!(cleanup.completed_before_cap);
         data["removal_pending"] = json!(!cleanup.pending_paths.is_empty());
+        if !cleanup.abandoned_paths.is_empty() {
+            data["removal_failed_paths"] = json!(cleanup.abandoned_paths);
+        }
     }
     data
 }

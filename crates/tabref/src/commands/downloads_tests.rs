@@ -3,6 +3,20 @@ use tabref_page::{DownloadOrigin, DownloadRecord, DownloadState, DownloadTiming}
 use super::{past_cap, refresh_record};
 use crate::commands::download_lines::{download_line, file_name};
 
+struct NoRequests;
+impl tabref_cdp::CdpTransport for NoRequests {
+    fn send_text(
+        &mut self,
+        _: &str,
+        _: tabref_core::Deadline,
+    ) -> Result<(), tabref_core::AppError> {
+        panic!("unexpected request")
+    }
+    fn receive_text(&mut self, _: tabref_core::Deadline) -> Result<String, tabref_core::AppError> {
+        panic!("unexpected receive")
+    }
+}
+
 fn record(guid: &str, bytes: u64, expected: u64) -> DownloadRecord {
     DownloadRecord {
         guid: guid.to_owned(),
@@ -24,6 +38,31 @@ fn a_download_passes_the_cap_by_what_it_received_or_announced() {
     assert!(!past_cap(&record("g", 10, 0), 100));
     assert!(past_cap(&record("g", 101, 0), 100));
     assert!(past_cap(&record("g", 10, 2_000), 100));
+}
+
+#[test]
+fn lowering_the_cap_does_not_remove_an_unclaimed_completed_download() {
+    let dir = folder("lowered-cap");
+    let path = dir.join("big.bin");
+    std::fs::write(&path, [0; 500]).unwrap();
+    let mut download = record("lower-cap", 500, 0);
+    download.state = DownloadState::Completed;
+    download.path = Some(path.to_string_lossy().into_owned());
+    let mut kept = vec![crate::commands::kept_download::KeptDownload {
+        record: download,
+        reported: false,
+        watched: true,
+        batch: None,
+        cleanup: None,
+        cap_bytes: Some(1000),
+    }];
+    let mut connection = tabref_cdp::CdpConnection::new(Box::new(NoRequests));
+    let deadline = tabref_core::Deadline::after(1000).unwrap();
+    super::refresh_kept(&mut connection, &mut kept, 1000, Some(&dir), deadline);
+    super::refresh_kept(&mut connection, &mut kept, 100, Some(&dir), deadline);
+    assert!(path.exists());
+    assert_eq!(kept[0].record.state, DownloadState::Completed);
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

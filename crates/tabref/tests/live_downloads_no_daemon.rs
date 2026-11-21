@@ -27,6 +27,14 @@ fn enabled() -> bool {
 }
 
 fn serve(bytes: usize, partial: bool) -> (u16, mpsc::Sender<()>, mpsc::Sender<()>) {
+    serve_path(bytes, partial, false)
+}
+
+fn serve_path(
+    bytes: usize,
+    partial: bool,
+    long_url: bool,
+) -> (u16, mpsc::Sender<()>, mpsc::Sender<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let (release, released) = mpsc::channel();
@@ -37,10 +45,19 @@ fn serve(bytes: usize, partial: bool) -> (u16, mpsc::Sender<()>, mpsc::Sender<()
             let Ok(mut stream) = stream else { break };
             let gates = Arc::clone(&gates);
             std::thread::spawn(move || {
-                let mut request = [0; 4096];
-                let count = stream.read(&mut request).unwrap_or(0);
-                let request = String::from_utf8_lossy(&request[..count]);
-                if request.starts_with("GET /slow ") {
+                let mut request = Vec::new();
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n")
+                    && request.len() < 131_072
+                {
+                    let mut chunk = [0; 4096];
+                    let count = stream.read(&mut chunk).unwrap_or(0);
+                    if count == 0 {
+                        return;
+                    }
+                    request.extend_from_slice(&chunk[..count]);
+                }
+                let request = String::from_utf8_lossy(&request);
+                if request.starts_with("GET /slow") {
                     let headers = b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=slow.bin\r\nConnection: close\r\n\r\n";
                     if stream.write_all(headers).is_err()
                         || stream.write_all(&vec![1; FIRST]).is_err()
@@ -60,7 +77,14 @@ fn serve(bytes: usize, partial: bool) -> (u16, mpsc::Sender<()>, mpsc::Sender<()
                         let _ = gates.1.recv_timeout(Duration::from_secs(30));
                     }
                 } else {
-                    let page = "<!doctype html><title>Downloads</title><a href='/slow'>Export</a><button>Continue</button>";
+                    let query = if long_url {
+                        format!("?{}", "x".repeat(70_000))
+                    } else {
+                        String::new()
+                    };
+                    let page = format!(
+                        "<!doctype html><title>Downloads</title><a href='/slow{query}'>Export</a><button>Continue</button>"
+                    );
                     let reply = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
                         page.len()
@@ -93,7 +117,16 @@ fn await_file(folder: &Path, bytes: usize, partial: bool) {
 }
 
 fn follow_up(command: &[&str], partial: bool, bytes: usize) {
-    let (port, release, finish) = serve(bytes, partial);
+    follow_up_server(command, partial, bytes, serve(bytes, partial));
+}
+
+fn follow_up_server(
+    command: &[&str],
+    partial: bool,
+    bytes: usize,
+    server: (u16, mpsc::Sender<()>, mpsc::Sender<()>),
+) {
+    let (port, release, finish) = server;
     let tabref = harness("downloads-no-daemon");
     let outside = scratch("downloads-no-daemon");
     let folder = outside.0.join("saved");
@@ -150,6 +183,89 @@ fn follow_up(command: &[&str], partial: bool, bytes: usize) {
         );
     }
     let _ = finish.send(());
+}
+
+#[test]
+fn a_seventy_kilobyte_url_cannot_disable_cap_reconciliation() {
+    if enabled() {
+        follow_up_server(
+            &["--json", "js", "1"],
+            true,
+            2 * MB,
+            serve_path(2 * MB, true, true),
+        );
+    }
+}
+
+#[test]
+fn a_corrupt_ledger_is_a_hook_note_and_is_never_overwritten() {
+    if !enabled() {
+        return;
+    }
+    let (port, _, _) = serve(MB / 2, false);
+    let tabref = harness("downloads-corrupt");
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+    let path = tabref
+        .home
+        .join(format!("downloads-{}", tabref.browser.port));
+    let bytes = vec![b' '; 70_000];
+    std::fs::write(&path, &bytes).unwrap();
+    let next = tabref.ok(&["--json", "js", "1"]).json();
+    assert_eq!(next["data"]["value"], 1);
+    assert_eq!(
+        next["data"]["download_reconciliation_error"]["details"]["kind"],
+        "download_ledger_unreadable"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let next = tabref.ok(&["click", "Continue"]);
+    assert!(
+        next.stdout
+            .contains("note: download reconciliation failed:")
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
+#[cfg(unix)]
+fn an_unsafe_folder_does_not_prevent_canceling_watched_transfers() {
+    if !enabled() {
+        return;
+    }
+    let (port, release, _finish) = serve(2 * MB, true);
+    let tabref = harness("downloads-unsafe-cancel");
+    let outside = scratch("downloads-unsafe-cancel");
+    let folder = outside.0.join("saved");
+    tabref.ok(&[
+        "open",
+        "--download-dir",
+        folder.to_str().unwrap(),
+        "--download-max-mb",
+        "1",
+        &format!("http://127.0.0.1:{port}/"),
+    ]);
+    tabref.ok(&["click", "Export"]);
+    release.send(()).unwrap();
+    await_file(&folder, 2 * MB, true);
+    let moved = outside.0.join("original");
+    std::fs::rename(&folder, &moved).unwrap();
+    std::os::unix::fs::symlink(&tabref.home, &folder).unwrap();
+    let next = tabref.ok(&["--json", "js", "1"]).json();
+    assert_eq!(next["data"]["value"], 1);
+    assert!(next["data"]["download_reconciliation_error"].is_object());
+    let ledger = std::fs::read_dir(&tabref.home)
+        .unwrap()
+        .flatten()
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("downloads-")
+                && !entry.file_name().to_string_lossy().ends_with(".lock")
+        })
+        .unwrap();
+    let kept: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(ledger.path()).unwrap()).unwrap();
+    assert_eq!(kept[0]["record"]["state"], "canceled", "{kept}");
 }
 
 #[test]

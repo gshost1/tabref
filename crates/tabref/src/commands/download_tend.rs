@@ -41,6 +41,7 @@ pub(crate) fn tend(session: &mut Session) {
                 watched: false,
                 batch: None,
                 cleanup: None,
+                cap_bytes: Some(cap),
             };
             merge(kept, entry);
         }

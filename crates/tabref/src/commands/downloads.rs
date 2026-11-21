@@ -31,6 +31,10 @@ pub(crate) use dispatch::after_command;
 #[path = "download_cleanup.rs"]
 pub(crate) mod cleanup;
 
+#[path = "download_reconcile.rs"]
+mod reconciliation;
+pub(crate) use reconciliation::reconcile;
+
 const LANDING: Duration = Duration::from_millis(3_000);
 const NAVIGATION_GRACE: Duration = Duration::from_millis(1_000);
 const RESTORING: u64 = 300;
@@ -180,6 +184,7 @@ pub(crate) fn after_action(
                 watched: here,
                 batch: batch.filter(|_| here),
                 cleanup: cleanup::lookup(record),
+                cap_bytes: Some(cap),
             }
         })
         .collect();
@@ -195,29 +200,6 @@ pub(crate) fn after_action(
             .filter(|record| !elsewhere.contains(&record.origin.frame_id)),
     );
     capped
-}
-
-/// Rechecks downloads a previous command watched and returns unreported
-/// cap failures, marked reported, for the caller's normal download report.
-pub(crate) fn reconcile(
-    session: &mut Session,
-    deadline: Deadline,
-) -> Result<Vec<DownloadRecord>, AppError> {
-    let folder = download_folder(session)?;
-    let cap = download_cap(session);
-    DownloadLedger::of(session).with(|kept| {
-        refresh_kept(session.connection(), kept, cap, folder.as_deref(), deadline);
-        kept.iter_mut()
-            .filter_map(|entry| {
-                if entry.reported || !matches!(entry.record.state, DownloadState::TooLarge { .. }) {
-                    return None;
-                }
-                entry.reported = true;
-                entry.batch = current_batch();
-                Some(entry.record.clone())
-            })
-            .collect()
-    })
 }
 
 /// Refreshes disk state before enforcing the cap, then repeats the check
@@ -238,9 +220,21 @@ pub(crate) fn refresh_kept(
         if entry.reported && !entry.record.running() && !pending {
             continue;
         }
-        refresh_record(&mut entry.record, entry.watched, cap, folder, |guid| {
-            let _ = cancel_download(connection, guid, deadline);
-        });
+        let effective_cap = if entry.record.running() {
+            cap
+        } else {
+            entry.cap_bytes.unwrap_or(u64::MAX)
+        };
+        entry.cap_bytes = Some(effective_cap);
+        refresh_record(
+            &mut entry.record,
+            entry.watched,
+            effective_cap,
+            folder,
+            |guid| {
+                let _ = cancel_download(connection, guid, deadline);
+            },
+        );
         entry.cleanup = cleanup::lookup(&entry.record);
         if pending {
             entry.reported = false;

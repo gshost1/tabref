@@ -21,6 +21,7 @@ fn entry(guid: &str, state: DownloadState, reported: bool) -> KeptDownload {
         watched: false,
         batch: None,
         cleanup: None,
+        cap_bytes: None,
     }
 }
 
@@ -102,7 +103,7 @@ fn pending_fast_path_is_read_only_for_missing_empty_or_invalid_ledgers() {
         vec![b' '; MAX_BYTES as usize + 1],
     ] {
         std::fs::write(&ledger.path, &content).unwrap();
-        assert!(!ledger.pending());
+        assert_eq!(ledger.pending(), content != b"[]");
         assert_eq!(std::fs::read(&ledger.path).unwrap(), content);
         assert!(!ledger.lock.exists());
     }
@@ -139,9 +140,90 @@ fn abandoned_running_watches_expire_without_expiring_pending_removals() {
         completed_before_cap: true,
         pending_paths: vec!["held".into()],
         removal_verified: false,
+        ..Default::default()
     });
     std::fs::write(&ledger.path, serde_json::to_vec(&vec![cleanup]).unwrap()).unwrap();
     assert!(ledger.pending());
     assert!(ledger.path.exists());
+    std::fs::remove_dir_all(ledger.path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn unreadable_or_oversized_ledgers_are_not_overwritten() {
+    let ledger = ledger("corrupt");
+    for content in [b"invalid".to_vec(), vec![b' '; MAX_BYTES as usize + 1]] {
+        std::fs::write(&ledger.path, &content).unwrap();
+        assert!(
+            ledger
+                .with(|kept| kept.push(entry("new", DownloadState::InProgress, false)))
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&ledger.path).unwrap(), content);
+        assert!(ledger.pending());
+    }
+    std::fs::remove_dir_all(ledger.path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn page_controlled_fields_are_bounded_without_splitting_utf8() {
+    let ledger = ledger("long-fields");
+    ledger
+        .with(|kept| {
+            for n in 0..50 {
+                let mut download = entry(&format!("g{n}"), DownloadState::InProgress, false);
+                download.record.origin.url = "é".repeat(35_000);
+                download.record.origin.suggested_name = "名".repeat(1000);
+                merge(kept, download);
+            }
+        })
+        .unwrap();
+    assert!(std::fs::metadata(&ledger.path).unwrap().len() <= MAX_BYTES);
+    let saved: Vec<KeptDownload> =
+        serde_json::from_slice(&std::fs::read(&ledger.path).unwrap()).unwrap();
+    assert_eq!(saved.len(), 50);
+    assert!(saved[0].record.origin.url.len() <= 256);
+    std::fs::remove_dir_all(ledger.path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn completion_uses_the_latest_running_cap_but_duplicate_events_do_not_change_it() {
+    let mut running = entry("cap-change", DownloadState::InProgress, false);
+    running.cap_bytes = Some(1000);
+    let mut kept = vec![running];
+    let mut finished = entry("cap-change", DownloadState::Completed, false);
+    finished.cap_bytes = Some(100);
+    merge(&mut kept, finished.clone());
+    assert_eq!(kept[0].cap_bytes, Some(100));
+    finished.cap_bytes = Some(10);
+    merge(&mut kept, finished);
+    assert_eq!(kept[0].cap_bytes, Some(100));
+}
+
+#[test]
+fn an_unreadable_ledger_is_not_passed_to_a_mutation_and_manual_cleanup_is_dropped_once_reported() {
+    let ledger = ledger("unreadable");
+    std::fs::create_dir(&ledger.path).unwrap();
+    assert!(ledger.pending());
+    assert!(
+        ledger
+            .with(|_| panic!("must not mutate unreadable data"))
+            .is_err()
+    );
+    std::fs::remove_dir(&ledger.path).unwrap();
+    ledger
+        .with(|kept| {
+            let mut download = entry("manual", DownloadState::TooLarge { cap_mb: 1 }, false);
+            download.watched = true;
+            download.cleanup = Some(crate::commands::downloads::cleanup::CapCleanup {
+                abandoned_paths: vec!["manual-file".into()],
+                ..Default::default()
+            });
+            kept.push(download);
+        })
+        .unwrap();
+    assert!(ledger.pending());
+    ledger.with(|kept| kept[0].reported = true).unwrap();
+    assert!(!ledger.pending());
+    assert!(!ledger.path.exists());
     std::fs::remove_dir_all(ledger.path.parent().unwrap()).unwrap();
 }

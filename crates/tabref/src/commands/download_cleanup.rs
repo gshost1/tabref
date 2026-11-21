@@ -13,6 +13,12 @@ pub(crate) struct CapCleanup {
     pub(crate) pending_paths: Vec<String>,
     #[serde(default)]
     pub(crate) removal_verified: bool,
+    #[serde(default)]
+    pub(crate) failed_tries: u32,
+    #[serde(default)]
+    pub(crate) first_failed_ms: Option<u64>,
+    #[serde(default)]
+    pub(crate) abandoned_paths: Vec<String>,
 }
 
 thread_local! {
@@ -81,6 +87,7 @@ pub(crate) fn enforce(
                 completed_before_cap,
                 pending_paths: paths,
                 removal_verified,
+                ..CapCleanup::default()
             }
         }
         DownloadState::TooLarge { .. } => match lookup(record) {
@@ -98,7 +105,20 @@ pub(crate) fn enforce(
             Err(error) => error.kind() != std::io::ErrorKind::NotFound,
         }
     });
-    record.path = cleanup.pending_paths.first().cloned();
+    if !cleanup.pending_paths.is_empty() {
+        cleanup.failed_tries = cleanup.failed_tries.saturating_add(1);
+        let first = *cleanup
+            .first_failed_ms
+            .get_or_insert_with(|| record.timing.finished_ms.unwrap_or_else(now_ms));
+        if cleanup.failed_tries >= 20 || now_ms().saturating_sub(first) >= 24 * 60 * 60 * 1000 {
+            cleanup.abandoned_paths = std::mem::take(&mut cleanup.pending_paths);
+        }
+    }
+    record.path = cleanup
+        .pending_paths
+        .first()
+        .or_else(|| cleanup.abandoned_paths.first())
+        .cloned();
     remember(record, Some(cleanup));
 }
 

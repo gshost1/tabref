@@ -70,3 +70,39 @@ fn completed_files_are_removed_and_running_downloads_are_canceled() {
         assert_eq!(record.path, None);
     }
 }
+
+#[test]
+fn permanently_blocked_removal_eventually_requests_manual_cleanup() {
+    let dir = std::env::temp_dir().join(format!("tabref-cleanup-permanent-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("permanent")).unwrap();
+    let mut record = record("permanent");
+    for _ in 0..20 {
+        enforce(&mut record, 1_048_576, Some(&dir), |_| {});
+    }
+    let line = download_line(&record);
+    assert!(
+        line.contains("could not remove") && line.contains("remove it by hand"),
+        "{line}"
+    );
+    assert_eq!(download_json(&record)["removal_pending"], false);
+    assert!(dir.join("permanent").exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_day_old_failed_removal_requests_manual_cleanup() {
+    let dir = std::env::temp_dir().join(format!("tabref-cleanup-aged-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("aged")).unwrap();
+    let mut record = record("aged");
+    enforce(&mut record, 1_048_576, Some(&dir), |_| {});
+    let mut cleanup = lookup(&record).unwrap();
+    cleanup.first_failed_ms = Some(tabref_page::now_ms() - 24 * 60 * 60 * 1000 - 1000);
+    remember(&record, Some(cleanup));
+    enforce(&mut record, 1_048_576, Some(&dir), |_| {});
+    assert!(download_line(&record).contains("remove it by hand"));
+    assert_eq!(lookup(&record).unwrap().failed_tries, 2);
+    assert!(lookup(&record).unwrap().pending_paths.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
