@@ -23,8 +23,10 @@
 //! Above [`MAX_ELEMENTS`] only computed visibility is skipped, not roots or
 //! observers. Visibility changes without mutations require stylesheet,
 //! viewport, interaction or animation changes, which the fingerprint also
-//! watches. Unreadable stylesheets and oversized form or stylesheet state
-//! are blind rather than sampled: an unchecked value must not mean `same`.
+//! watches. Cross-origin rules cannot be edited by page script: opaque
+//! sheets are watched by identity, href, disabled and media state, including
+//! imports inside readable sheets. Other stylesheet errors and oversized
+//! form or stylesheet state are blind rather than sampled.
 
 use serde_json::{Value, json};
 use tabref_cdp::is_timeout;
@@ -37,6 +39,7 @@ const MAX_ELEMENTS: usize = 1_000;
 
 const SCAN: &str = r"const scan = () => {
     const roots = [];
+    const sheetObjects = [];
     let blind = false;
     let state = '';
     let total = 0;
@@ -61,7 +64,8 @@ const SCAN: &str = r"const scan = () => {
     };
     const styles = (sheets, realm) => {
       for (const sheet of sheets) {
-        state += '\u0008' + sheet.disabled + ':' + sheet.media.mediaText;
+        sheetObjects.push(sheet, sheet.ownerNode, sheet.ownerRule);
+        state += '\u0008' + JSON.stringify([sheet.href, sheet.disabled, sheet.media.mediaText]);
         if (sheet.media.mediaText) state += realm.matchMedia(sheet.media.mediaText).matches;
         const rules = list => {
           for (const rule of list) {
@@ -75,7 +79,10 @@ const SCAN: &str = r"const scan = () => {
             if (blind) return;
           }
         };
-        try { rules(sheet.cssRules); } catch (error) { blind = true; }
+        try { rules(sheet.cssRules); } catch (error) {
+          if (error.name === 'SecurityError') state += ':opaque';
+          else blind = true;
+        }
         if (blind) return;
       }
     };
@@ -132,7 +139,7 @@ const SCAN: &str = r"const scan = () => {
     const box = document.documentElement;
     const place = [location.href, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio,
       box ? box.scrollWidth : 0, box ? box.scrollHeight : 0].join('\u0004');
-    return { roots, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
+    return { roots, sheets: sheetObjects, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
   };";
 
 /// How long the arm script waits for an idle main thread before it arms
@@ -147,7 +154,7 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   const now = scan();
   if (now.blind) { delete window[key]; return { blind: true }; }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
-    active: now.active, print: now.print, blind: now.blind };
+    sheets: now.sheets, active: now.active, print: now.print, blind: now.blind };
   const restore = [];
   watch.stop = () => {
     if (watch.dirty) return;
@@ -205,6 +212,7 @@ const CHECK: &str = r"(() => {
   const now = scan();
   if (now.blind) return 'blind';
   if (now.roots.length !== watch.roots.length || now.roots.some((root, i) => root !== watch.roots[i])) return 'roots';
+  if (now.sheets.length !== watch.sheets.length || now.sheets.some((sheet, i) => sheet !== watch.sheets[i])) return 'state';
   if (now.active !== watch.active) return 'focus';
   if (now.print !== watch.print) return 'state';
   return 'same';
