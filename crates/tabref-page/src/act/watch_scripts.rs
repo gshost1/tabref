@@ -13,6 +13,20 @@ pub(crate) const SCAN: &str = r"const scan = () => {
   const roots = [], docs = [];
   let unread = 0;
   const shown = el => (!el.checkVisibility || el.checkVisibility()) || getComputedStyle(el).display === 'contents';
+  const boundedText = (el, limit = 4096, rendered = true) => {
+    if (!el) return null;
+    const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_ALL);
+    let left = limit, nodes = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (++nodes > 1024) return null;
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (node.length > left) return null;
+        left -= node.length;
+      }
+    }
+    const value = rendered ? el.innerText : el.textContent;
+    return typeof value === 'string' && value.length <= limit ? value : null;
+  };
   const visit = root => {
     const all = root.querySelectorAll('*');
     for (let at = 0; at < all.length; at++) {
@@ -72,7 +86,7 @@ pub(crate) const SCAN: &str = r"const scan = () => {
         if (!dialog && popup.parentElement?.closest('[role=listbox],[role=menu],[popover]')) continue;
         const role = dialog ? (popup.getAttribute('role') === 'alertdialog' ? 'alertdialog' : 'dialog') :
           popup.getAttribute('role') === 'listbox' || popup.querySelector('[role=option]') ? 'listbox' : 'menu';
-        const items = Array.from(popup.querySelectorAll('[role=option],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio]')).filter(shown);
+        const items = dialog ? [] : Array.from(popup.querySelectorAll('[role=option],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio]')).filter(shown);
         if (!dialog && !items.length) continue;
         const separate = items.every(item => {
           for (let node = item; node; node = node.parentElement) {
@@ -81,15 +95,16 @@ pub(crate) const SCAN: &str = r"const scan = () => {
           }
           return false;
         });
-        const labels = (popup.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(key => root.getElementById(key)?.textContent || '').join(' ').trim();
-        const heading = dialog ? Array.from(popup.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]')).find(shown)?.innerText : '';
+        const labels = (popup.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).slice(0, 16).map(key => boundedText(root.getElementById(key), 512, false) || '').join(' ').trim();
+        const dialogText = dialog ? boundedText(popup) : null;
+        const heading = dialog && dialogText !== null ? boundedText(Array.from(popup.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]')).find(shown), 512) : '';
         const position = [];
         for (let node = popup; node.parentNode; node = node.parentNode) {
           position.push(Array.prototype.indexOf.call(node.parentNode.children || [], node));
         }
         result.push({ id: id(popup), watch: state.epoch, position: position.reverse().join('.'), block: owner ? id(owner) : 0, role,
           name: labels || popup.getAttribute('aria-label') || heading || '', count: items.length,
-          text: dialog ? popup.innerText : separate ? items.map(item => item.innerText).join('\n') : null });
+          text: dialog ? dialogText : separate ? items.map(item => item.innerText).join('\n') : null });
       }
     }
     return result;
@@ -104,13 +119,28 @@ pub(crate) const SCAN: &str = r"const scan = () => {
       for (const body of root.querySelectorAll('tbody,[role=rowgroup]')) {
         const table = body.closest('table,[role=table],[role=grid],[role=treegrid]');
         if (!table || !shown(body) || body.querySelector('table,[role=table],[role=grid],[role=treegrid]')) continue;
+        const metadata = {watch: state.epoch, block: owner ? id(owner) : 0, table: id(table), body_id: id(body), body: Array.from(table.querySelectorAll('tbody,[role=rowgroup]')).indexOf(body)};
+        if (body.children.length > 200) {
+          result.push({...metadata, count: body.children.length, rows: null});
+          continue;
+        }
         const rows = Array.from(body.children).filter(row => row.matches('tr,[role=row]') && shown(row) &&
           !Array.from(row.children).every(cell => cell.matches('th:not([scope=row]),[role=columnheader]')));
-        if (rows.some(row => typeof row.innerText !== 'string')) continue;
-        const text = rows.map(row => [id(row), row.innerText]);
-        if (text.reduce((size, row) => size + row[1].length, 0) > LIMIT) continue;
-        const notices = Array.from(body.querySelectorAll('[role=alert],[role=status]')).filter(shown).map(node => node.innerText).filter(text => typeof text === 'string');
-        result.push({watch: state.epoch, block: owner ? id(owner) : 0, table: id(table), body_id: id(body), body: Array.from(table.querySelectorAll('tbody,[role=rowgroup]')).indexOf(body), rows: text, notices});
+        const text = [];
+        let room = LIMIT, complete = true;
+        for (const row of rows) {
+          const value = boundedText(row, Math.min(4096, room));
+          const key = boundedText(row.querySelector('th[scope=row],[role=rowheader]') || row.firstElementChild, 512);
+          if (value === null || key === null) { complete = false; break; }
+          room -= value.length;
+          text.push([id(row), value, key.trim().replace(/\s+/g, ' '), row.id || row.getAttribute('data-row-key') || row.getAttribute('data-id') || '']);
+        }
+        if (!complete) continue;
+        const alerts = body.querySelectorAll('[role=alert],[role=status]');
+        if (alerts.length > 200) continue;
+        const notices = Array.from(alerts).filter(shown).map(node => boundedText(node));
+        if (notices.some(value => value === null)) continue;
+        result.push({...metadata, count: rows.length, rows: text, notices});
       }
     }
     return result;

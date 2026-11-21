@@ -175,15 +175,10 @@ fn effect_block(
         lines.extend(within_budget(&changes));
     }
     lines.extend(rows_replaced::preview(page));
-    let json_changes = rows_replaced::changes(page);
-    let json_counts = counted(&json_changes);
+    let json_counts = counted(rows_replaced::other_changes(page));
     let mut changes_data = change_data(&json_counts);
-    if !page.replaced_rows.is_empty() {
-        let limit = changes_data["changes"].as_array().map_or(0, Vec::len);
-        changes_data["new_rows_omitted"] = json!(rows_replaced::omitted(
-            page,
-            json_counts.iter().take(limit).map(|entry| entry.change)
-        ));
+    if let Some(rows) = rows_replaced::data(page) {
+        changes_data["rows_replaced"] = rows;
     }
     merge(&mut data, changes_data);
     lines.extend(text_check_note(page));

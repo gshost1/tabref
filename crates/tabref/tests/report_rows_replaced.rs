@@ -12,7 +12,13 @@ fn previews_are_five_rows_and_other_changes_are_not_removed() {
     changes.extend(rows.iter().cloned().map(TextChange::Added));
     let page = PageChanges {
         changes,
-        replaced_rows: vec![(10, rows)],
+        replaced_rows: vec![(
+            10,
+            rows.into_iter()
+                .enumerate()
+                .map(|(id, text)| (id as u64, text))
+                .collect(),
+        )],
         ..Default::default()
     };
     assert_eq!(
@@ -24,7 +30,7 @@ fn previews_are_five_rows_and_other_changes_are_not_removed() {
     assert_eq!(preview[0], "- 10 rows replaced, 8 new");
     assert_eq!(preview[5], "  New 4");
     assert_eq!(preview[6], "  (+3 more: tabref snap)");
-    assert_eq!(rows_replaced::omitted(&page, page.changes[..4].iter()), 5);
+    assert_eq!(rows_replaced::data(&page).unwrap()["omitted"], 0);
     assert_eq!(rows_replaced::changes(&page).len(), 10);
 }
 
@@ -32,12 +38,40 @@ fn previews_are_five_rows_and_other_changes_are_not_removed() {
 fn empty_reports_and_duplicate_rows_have_exact_omission_counts() {
     let page = PageChanges::default();
     assert!(rows_replaced::preview(&page).is_empty());
-    assert_eq!(rows_replaced::omitted(&page, std::iter::empty()), 0);
+    assert!(rows_replaced::data(&page).is_none());
     let page = PageChanges {
-        replaced_rows: vec![(3, vec!["Shared".into(), "Shared".into(), "Other".into()])],
+        replaced_rows: vec![(
+            3,
+            vec![
+                (1, "Shared".into()),
+                (2, "Shared".into()),
+                (3, "Other".into()),
+            ],
+        )],
         ..Default::default()
     };
-    let shown = [TextChange::Added("Shared".into())];
-    assert_eq!(rows_replaced::omitted(&page, shown.iter()), 1);
-    assert_eq!(rows_replaced::omitted(&page, std::iter::empty()), 3);
+    let data = rows_replaced::data(&page).unwrap();
+    assert_eq!(data["omitted"], 0);
+    assert_eq!(data["preview"][0]["id"], 1);
+    assert_eq!(data["preview"][1]["id"], 2);
+}
+
+#[test]
+fn toast_text_cannot_change_row_identity_or_omission_counts() {
+    let rows: Vec<_> = (0..51).map(|id| (id, "Saved".to_owned())).collect();
+    let mut changes = vec![TextChange::Added("Saved".into())];
+    changes.extend(rows.iter().map(|(_, text)| TextChange::Added(text.clone())));
+    let page = PageChanges {
+        changes,
+        replaced_rows: vec![(51, rows)],
+        ..Default::default()
+    };
+    let data = rows_replaced::data(&page).unwrap();
+    assert_eq!(data["preview"].as_array().unwrap().len(), 50);
+    assert_eq!(data["preview"][49]["id"], 49);
+    assert_eq!(data["omitted"], 1);
+    assert_eq!(
+        rows_replaced::other_changes(&page),
+        [TextChange::Added("Saved".into())]
+    );
 }

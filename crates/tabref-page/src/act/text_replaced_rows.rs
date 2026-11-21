@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
+use super::page_changes::ReplacedRows;
 use super::page_mark::{BlockText, TextBlocks};
 use super::text_change::TextChange;
 use super::text_diff::{diff_page, text_lines};
@@ -12,7 +13,7 @@ pub(super) fn replaced_rows(
     after: &mut TextBlocks,
     old: &[Value],
     new: &[Value],
-) -> (Vec<(usize, Vec<String>)>, Vec<TextChange>) {
+) -> (ReplacedRows, Vec<TextChange>) {
     let mut found = Vec::new();
     let mut notices_changed = Vec::new();
     for body in old {
@@ -61,6 +62,7 @@ pub(super) fn replaced_rows(
         let ids: HashSet<_> = new_rows.iter().map(|(id, _)| id).collect();
         let texts: HashSet<_> = new_rows.iter().map(|(_, text)| text).collect();
         if old_rows.is_empty()
+            || mostly_edits(body, other, old_rows.len(), new_rows.len())
             || old_rows
                 .iter()
                 .any(|(id, text)| ids.contains(id) || texts.contains(text))
@@ -101,11 +103,39 @@ pub(super) fn replaced_rows(
             old_rows.len(),
             new_rows
                 .into_iter()
-                .map(|(_, lines)| lines.join(" "))
+                .map(|(id, lines)| (id, lines.join(" ")))
                 .collect(),
         ));
     }
     (found, notices_changed)
+}
+
+fn mostly_edits(before: &Value, after: &Value, old: usize, new: usize) -> bool {
+    let left = keys(before);
+    let right = keys(after);
+    let pairs: Vec<_> = left
+        .iter()
+        .flat_map(|(key, ids)| ids.iter().zip(right.get(key).into_iter().flatten()))
+        .collect();
+    let old_ids: HashSet<_> = pairs.iter().map(|(id, _)| id).collect();
+    let new_ids: HashSet<_> = pairs.iter().map(|(_, id)| id).collect();
+    old_ids.len() * 2 > old && new_ids.len() * 2 > new
+}
+
+fn keys(body: &Value) -> HashMap<(usize, &str), Vec<u64>> {
+    let mut keys: HashMap<_, Vec<_>> = HashMap::new();
+    for row in body["rows"].as_array().into_iter().flatten() {
+        for column in [2, 3] {
+            if let Some((key, id)) = row[column]
+                .as_str()
+                .filter(|text| !text.is_empty())
+                .zip(row[0].as_u64())
+            {
+                keys.entry((column, key)).or_default().push(id);
+            }
+        }
+    }
+    keys
 }
 
 fn notices(body: &Value) -> Vec<String> {

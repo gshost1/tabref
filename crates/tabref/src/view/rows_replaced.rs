@@ -1,3 +1,4 @@
+use serde_json::{Value, json};
 use tabref_page::{PageChanges, TextChange};
 
 pub(crate) fn other_changes(page: &PageChanges) -> &[TextChange] {
@@ -19,7 +20,7 @@ pub(crate) fn preview(page: &PageChanges) -> Vec<String> {
     let mut lines = Vec::new();
     for (old, rows) in &page.replaced_rows {
         lines.push(format!("- {old} rows replaced, {} new", rows.len()));
-        for row in rows.iter().take(5) {
+        for (_, row) in rows.iter().take(5) {
             let mut chars = row.chars();
             let mut text: String = chars.by_ref().take(120).collect();
             if chars.next().is_some() {
@@ -34,18 +35,18 @@ pub(crate) fn preview(page: &PageChanges) -> Vec<String> {
     lines
 }
 
-pub(crate) fn omitted<'a>(
-    page: &PageChanges,
-    shown: impl Iterator<Item = &'a TextChange>,
-) -> usize {
-    let shown: Vec<_> = shown.collect();
-    page.replaced_rows
+pub(crate) fn data(page: &PageChanges) -> Option<Value> {
+    if page.replaced_rows.is_empty() {
+        return None;
+    }
+    let old: usize = page.replaced_rows.iter().map(|(old, _)| old).sum();
+    let new: usize = page.replaced_rows.iter().map(|(_, rows)| rows.len()).sum();
+    let preview: Vec<_> = page
+        .replaced_rows
         .iter()
         .flat_map(|(_, rows)| rows)
-        .filter(|row| {
-            !shown
-                .iter()
-                .any(|change| matches!(change, TextChange::Added(line) if line == *row))
-        })
-        .count()
+        .take(50)
+        .map(|(id, text)| json!({"id":id,"text":text}))
+        .collect();
+    Some(json!({"old":old,"new":new,"omitted":new-preview.len(),"preview":preview}))
 }

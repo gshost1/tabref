@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
-use super::page_changes::PageChanges;
+use super::page_changes::{PageChanges, ReplacedRows};
 use super::page_mark::{BlockText, PageMark, TextBlocks};
 use super::popup_close::{closed_popups, popups};
 use super::text_change::TextChange;
@@ -25,7 +25,7 @@ use crate::{CdpConnection, PageSession};
 
 const TEXT_LIMIT: usize = 200_000;
 
-type WatchedChanges = (Vec<TextChange>, usize, Vec<(usize, Vec<String>)>);
+type WatchedChanges = (Vec<TextChange>, usize, ReplacedRows);
 
 #[cfg(test)]
 #[path = "text_replaced_rows_tests.rs"]
@@ -153,7 +153,7 @@ fn compare_watched(
     closed.extend(
         replaced
             .iter()
-            .flat_map(|(_, rows)| rows.iter().cloned().map(TextChange::Added)),
+            .flat_map(|(_, rows)| rows.iter().map(|(_, text)| TextChange::Added(text.clone()))),
     );
     (closed, unchecked, replaced)
 }

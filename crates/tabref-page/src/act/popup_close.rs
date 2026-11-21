@@ -78,7 +78,10 @@ pub(super) fn closed_popups(
 }
 
 fn same_popup(before: &Value, after: &Value) -> bool {
-    if before["role"] != after["role"] {
+    let dialogs = [before, after]
+        .iter()
+        .all(|popup| matches!(popup["role"].as_str(), Some("dialog" | "alertdialog")));
+    if before["role"] != after["role"] && !dialogs {
         return false;
     }
     let identity = before["watch"].as_str().is_some()
@@ -90,7 +93,7 @@ fn same_popup(before: &Value, after: &Value) -> bool {
     let name = before["name"].as_str().unwrap_or_default();
     let items = before["text"].as_str().is_some() && before["text"] == after["text"];
     let count = before["count"].as_u64().is_some() && before["count"] == after["count"];
-    let shared = position
+    let shared = (position || (dialogs && before["block"] == after["block"]))
         && before["text"]
             .as_str()
             .zip(after["text"].as_str())

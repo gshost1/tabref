@@ -2,6 +2,45 @@ use super::compare_replies;
 use crate::TextChange;
 use serde_json::{Value, json};
 
+#[test]
+fn unnamed_dialog_remount_in_a_new_container_preserves_validation() {
+    for role in ["dialog", "alertdialog"] {
+        let mut before = reply("Name\nSave", true, "dialog", "Name\nSave", 0);
+        before["popups"][0]["name"] = json!("");
+        let mut after = before.clone();
+        after["popups"][0]["id"] = json!(12);
+        after["popups"][0]["position"] = json!("0.1.3");
+        after["popups"][0]["role"] = json!(role);
+        after["popups"][0]["text"] = json!("Name\nSave\nName is taken");
+        after["blocks"][0][1] = json!("Name\nSave\nName is taken");
+        assert_eq!(
+            compare_replies(&before, &after),
+            [TextChange::Added("Name is taken".into())]
+        );
+    }
+}
+
+#[test]
+fn moved_unnamed_dialog_in_another_block_does_not_match_shared_lines() {
+    let mut before = reply("Name\nSave", true, "dialog", "Name\nSave", 0);
+    before["popups"][0]["name"] = json!("");
+    let mut after = before.clone();
+    after["popups"][0]["id"] = json!(12);
+    after["popups"][0]["position"] = json!("0.1.3");
+    after["popups"][0]["block"] = json!(9);
+    after["popups"][0]["text"] = json!("Name\nSave\nName is taken");
+    after["blocks"] = json!([[0, ""], [9, "Name\nSave\nName is taken"]]);
+    let changes = compare_replies(&before, &after);
+    assert!(
+        changes.contains(&TextChange::Removed("dialog closed".into())),
+        "{changes:?}"
+    );
+    assert!(
+        changes.contains(&TextChange::Added("Name is taken".into())),
+        "{changes:?}"
+    );
+}
+
 fn reply(text: &str, visible: bool, role: &str, items: &str, count: usize) -> Value {
     json!({"blocks": [[0, text]], "popups": if visible {
         vec![json!({"id": 1, "watch":"first", "position":"0.0", "block": 0, "role": role, "name": "Category", "text": items, "count": count})]

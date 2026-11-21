@@ -1,8 +1,9 @@
 use serde_json::json;
 
+use super::super::page_changes::ReplacedRows;
 use super::{TextChange, compare_replies};
 
-fn replacement(before: &serde_json::Value, after: &serde_json::Value) -> Vec<(usize, Vec<String>)> {
+fn replacement(before: &serde_json::Value, after: &serde_json::Value) -> ReplacedRows {
     super::compare_watched(
         &super::text_blocks(before),
         &[],
@@ -23,7 +24,7 @@ fn replacing_the_body_element_or_emptying_it_is_detected() {
     let (before, mut after) = pair();
     assert_eq!(
         replacement(&before, &after),
-        [(2, vec!["New-A".into(), "New-B".into()])]
+        [(2, vec![(3, "New-A".into()), (4, "New-B".into())])]
     );
     after["tables"][0]["rows"] = json!([]);
     after["blocks"][0][1] = json!("");
@@ -47,6 +48,7 @@ fn reset_unreadable_malformed_and_ambiguous_metadata_are_conservative() {
         ("/tables/0/watch", json!(null)),
         ("/tables/0/block", json!(2)),
         ("/tables/0/rows/0/1", json!(null)),
+        ("/tables/0/rows", json!(null)),
         ("/blocks/0/1", json!(null)),
     ] {
         let mut after = after.clone();
@@ -107,5 +109,80 @@ fn inserting_a_body_before_surviving_rows_is_not_a_replacement() {
     surviving["body"] = json!(1);
     after["tables"].as_array_mut().unwrap().push(surviving);
     after["blocks"][0][1] = json!("New-A\nNew-B\nOld-A\nOld-B");
+    assert!(replacement(&before, &after).is_empty());
+}
+
+#[test]
+fn refreshed_rows_with_matching_keys_keep_status_edits() {
+    let (mut before, mut after) = pair();
+    for (reply, offset, stamp) in [(&mut before, 0, "0s"), (&mut after, 100, "1s")] {
+        let rows: Vec<_> = (0..10)
+            .map(|n| {
+                let status = if offset > 0 && n == 7 {
+                    "revoked"
+                } else {
+                    "active"
+                };
+                json!([
+                    offset + n + 1,
+                    format!("TOK-{}\t{status}\tchecked {stamp} ago", 100 + n),
+                    format!("TOK-{}", 100 + n),
+                    ""
+                ])
+            })
+            .collect();
+        reply["blocks"][0][1] = json!(
+            rows.iter()
+                .map(|r| r[1].as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        reply["tables"][0]["rows"] = json!(rows);
+    }
+    assert!(replacement(&before, &after).is_empty());
+    assert!(compare_replies(&before, &after).iter().any(|c| matches!(c, TextChange::Changed { before, after } if before.contains("TOK-107") && after.contains("revoked"))));
+}
+
+#[test]
+fn row_ids_pair_edits_when_first_cells_change() {
+    let (mut before, mut after) = pair();
+    for (reply, start, label) in [(&mut before, 1, "Old"), (&mut after, 3, "New")] {
+        for n in 0..2 {
+            reply["tables"][0]["rows"][n] = json!([
+                start + n,
+                format!("{label}-{}", if n == 0 { "A" } else { "B" }),
+                format!("{label}-{n}"),
+                format!("key-{n}")
+            ]);
+        }
+    }
+    assert!(replacement(&before, &after).is_empty());
+}
+
+#[test]
+fn a_minority_of_shared_keys_still_allows_a_new_page_summary() {
+    let (mut before, mut after) = pair();
+    before["tables"][0]["rows"][0]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("Shared key"));
+    after["tables"][0]["rows"][0]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("Shared key"));
+    assert_eq!(replacement(&before, &after).len(), 1);
+}
+
+#[test]
+fn ambiguous_shared_keys_keep_the_normal_diff() {
+    let (mut before, mut after) = pair();
+    for reply in [&mut before, &mut after] {
+        for n in 0..2 {
+            reply["tables"][0]["rows"][n]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("Shared key"));
+        }
+    }
     assert!(replacement(&before, &after).is_empty());
 }

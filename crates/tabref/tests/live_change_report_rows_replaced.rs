@@ -52,26 +52,29 @@ fn replacements_show_new_rows_instead_of_old_removals_in_text_and_json() {
         let value = tabref.ok(args).json();
         let data = &value["data"];
         let lines = data["changes"].as_array().unwrap();
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.as_str().unwrap().contains(&format!("TRK-{start}"))),
+        let rows = &data["rows_replaced"];
+        let shown = rows["preview"].as_array().unwrap().len();
+        assert_eq!(
+            rows["preview"][0]["text"],
+            format!("TRK-{start}"),
             "{value}"
         );
-        let shown: usize = data["change_counts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|entry| entry["line"].as_str().unwrap().starts_with("+ TRK-"))
-            .map(|entry| entry["count"].as_u64().unwrap() as usize)
-            .sum();
+        assert!(rows["preview"][0]["id"].is_u64(), "{value}");
+        assert_eq!(rows["new"], total, "{value}");
         println!(
-            "=== JSON {}: {shown} new rows shown, {} new_rows_omitted ===",
-            args[1], data["new_rows_omitted"]
+            "=== JSON {}: {shown} row identities shown, {} omitted ===",
+            args[1], rows["omitted"]
         );
         assert_eq!(
-            shown + data["new_rows_omitted"].as_u64().unwrap() as usize,
+            shown + rows["omitted"].as_u64().unwrap() as usize,
             total,
+            "{value}"
+        );
+        assert!(data.get("new_rows_omitted").is_none(), "{value}");
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line.as_str().unwrap().contains("rows replaced")),
             "{value}"
         );
         assert!(
