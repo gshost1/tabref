@@ -10,8 +10,24 @@ use crate::commands::do_step::split_value;
 use crate::commands::step_words::split_steps;
 
 const STEP_VERBS: &[&str] = &[
-    "open", "click", "double-click", "fill", "type", "select", "check", "uncheck", "press",
-    "focus", "hover", "scroll", "wait", "expect", "read", "find", "js", "snap",
+    "open",
+    "click",
+    "double-click",
+    "fill",
+    "type",
+    "select",
+    "check",
+    "uncheck",
+    "press",
+    "focus",
+    "hover",
+    "scroll",
+    "wait",
+    "expect",
+    "read",
+    "find",
+    "js",
+    "snap",
 ];
 
 fn shell_words(line: &str) -> Vec<String> {
@@ -68,7 +84,11 @@ fn assert_steps_parse(text: &str) {
     let steps: Vec<BatchStep> = expand(&split_steps(text).unwrap()).unwrap();
     assert!(!steps.is_empty(), "{text}");
     for step in &steps {
-        assert!(STEP_VERBS.contains(&step.verb().as_str()), "{}", step.source);
+        assert!(
+            STEP_VERBS.contains(&step.verb().as_str()),
+            "{}",
+            step.source
+        );
         if matches!(step.verb().as_str(), "fill" | "type" | "select") {
             split_value(step).unwrap();
         }
@@ -85,8 +105,10 @@ fn every_command_example_in_the_guides_parses() {
             if let Err(error) = Cli::try_parse_from(&words) {
                 panic!("{command}: {error}");
             }
-            if words.get(1).map(String::as_str) == Some("do") {
-                assert_steps_parse(&words[2]);
+            if let [_, verb, steps, ..] = words.as_slice()
+                && verb == "do"
+            {
+                assert_steps_parse(steps);
             }
         }
         for batch in heredoc_batches(&guide) {
@@ -165,7 +187,10 @@ fn the_batch_example_fills_checks_and_submits_in_one_call() {
         .iter()
         .map(BatchStep::verb)
         .collect();
-    assert!(verbs.iter().filter(|verb| *verb == "fill").count() >= 2, "{verbs:?}");
+    assert!(
+        verbs.iter().filter(|verb| *verb == "fill").count() >= 2,
+        "{verbs:?}"
+    );
     assert!(verbs.contains(&"check".to_owned()), "{verbs:?}");
     assert_eq!(verbs.last().map(String::as_str), Some("click"), "{verbs:?}");
     assert!(!verbs.contains(&"snap".to_owned()), "{verbs:?}");
