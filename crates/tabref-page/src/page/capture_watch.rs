@@ -30,6 +30,7 @@
 //! rules may contain container queries, so these sheets are blind too,
 //! including imports inside readable sheets. Other stylesheet errors and oversized
 //! form or stylesheet state are blind rather than sampled.
+//! Supported state pseudo-classes are fingerprinted by matched node identity.
 
 use serde_json::{Value, json};
 use tabref_cdp::is_timeout;
@@ -44,6 +45,7 @@ const SCAN: &str = r"const scan = () => {
     const roots = [];
     const sheetObjects = [];
     const animations = [];
+    const states = [];
     let blind = false;
     let state = '';
     let total = 0;
@@ -104,6 +106,18 @@ const SCAN: &str = r"const scan = () => {
       state += '\u0006' + (root.styleSheets?.length ?? 0) + ':' + (root.adoptedStyleSheets?.length ?? 0);
       const doc = root.nodeType === 9 ? root : root.ownerDocument;
       const realm = doc.defaultView;
+      const selectors = [':hover', ':active', ':fullscreen', ':focus-visible', ':focus-within',
+        ':user-invalid', ':user-valid', ':autofill', ':indeterminate', ':checked', ':modal', ':open',
+        ':popover-open', ':target', ':target-within', ':placeholder-shown', ':blank', ':playing',
+        ':paused', ':seeking', ':buffering', ':stalled', ':muted', ':volume-locked', ':picture-in-picture']
+        .filter(selector => { try { return realm.CSS.supports('selector(' + selector + ')'); } catch { return false; } });
+      if (selectors.length) {
+        for (const el of root.querySelectorAll(selectors.join(','))) {
+          for (let i = 0; i < selectors.length; i++) {
+            try { if (el.matches(selectors[i])) { state += '\u000a' + i; states.push(el); } } catch {}
+          }
+        }
+      }
       for (const query of ['(prefers-color-scheme: dark)', '(prefers-color-scheme: light)',
         '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)',
         '(prefers-contrast: more)', '(prefers-contrast: less)', '(prefers-contrast: custom)',
@@ -120,7 +134,6 @@ const SCAN: &str = r"const scan = () => {
           visible += 1;
           visibility = (Math.imul(31, visibility) + index + 1) | 0;
         }
-        if (el.matches(':hover, :active, :fullscreen')) state += '\u000a' + index;
         if (el.shadowRoot) walk(el.shadowRoot);
         const tag = el.localName;
         if ((tag.includes('-') && el.matches(':defined')) || el.getAttribute('hidden') === 'until-found') { blind = true; return; }
@@ -156,7 +169,7 @@ const SCAN: &str = r"const scan = () => {
     const box = document.documentElement;
     const place = [location.href, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio,
       box ? box.scrollWidth : 0, box ? box.scrollHeight : 0].join('\u0004');
-    return { roots, sheets: sheetObjects, animations, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
+    return { roots, sheets: sheetObjects, animations, states, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
   };";
 
 /// How long the arm script waits for an idle main thread before it arms
@@ -171,7 +184,7 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   const now = scan();
   if (now.blind) { delete window[key]; return { blind: true }; }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
-    sheets: now.sheets, animations: now.animations, active: now.active, print: now.print, blind: now.blind };
+    sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind };
   const restore = [];
   watch.stop = () => {
     if (watch.dirty) return;
@@ -237,6 +250,7 @@ const CHECK: &str = r"(() => {
   if (now.blind) return 'blind';
   if (now.roots.length !== watch.roots.length || now.roots.some((root, i) => root !== watch.roots[i])) return 'roots';
   if (now.sheets.length !== watch.sheets.length || now.sheets.some((sheet, i) => sheet !== watch.sheets[i])) return 'state';
+  if (now.states.length !== watch.states.length || now.states.some((node, i) => node !== watch.states[i])) return 'state';
   if (now.animations.length !== watch.animations.length || now.animations.some((entry, i) => {
     const old = watch.animations[i];
     return entry.animation !== old.animation || entry.playState !== old.playState || entry.currentTime !== old.currentTime;
