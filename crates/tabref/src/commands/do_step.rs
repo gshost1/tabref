@@ -178,6 +178,12 @@ fn scroll_step(
     args: &[Word],
     deadline: Deadline,
 ) -> Result<StepDone, AppError> {
+    if args
+        .iter()
+        .any(|word| !word.quoted && matches!(word.text.as_str(), "--until" | "--to-end"))
+    {
+        return scroll::run_batch_loop(session, args, deadline);
+    }
     let direction = match args.first() {
         None => Some("down"),
         Some(word) if !word.quoted => DIRECTIONS

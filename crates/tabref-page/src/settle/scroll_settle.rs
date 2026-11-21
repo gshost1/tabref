@@ -49,13 +49,24 @@ pub fn scroll_and_settle(
     delta: (f64, f64),
     deadline: Deadline,
 ) -> Result<ScrollOutcome, AppError> {
-    let step = scroll_step(connection, session, site, delta, deadline)?;
+    settle_step(connection, session, site, (delta, false), deadline)
+}
+
+pub(crate) fn settle_step(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    site: ScrollSite<'_>,
+    options: ((f64, f64), bool),
+    deadline: Deadline,
+) -> Result<ScrollOutcome, AppError> {
+    let step = scroll_step(connection, session, site, options, deadline)?;
     if !step.near {
         return Ok(ScrollOutcome {
             moved: step.moved,
             at_end: step.at_end,
             hidden: step.hidden,
             loading: step.at_end && step.pending,
+            aged_out_requests: step.aged_out_requests,
             ..ScrollOutcome::default()
         });
     }
@@ -117,6 +128,9 @@ fn watch(
     outcome.hidden = !framed;
     outcome.at_end = loaded.at_end;
     outcome.items = loaded.items;
+    outcome.grew = loaded.grew;
+    outcome.aged_out_requests = loaded.aged_out_requests;
+    outcome.quiet_ms = started.elapsed().as_millis() as u64;
     outcome.first = loaded.first;
     outcome.last = loaded.last;
     outcome.lines = loaded.lines;
