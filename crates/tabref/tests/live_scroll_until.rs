@@ -17,6 +17,86 @@ new IntersectionObserver(entries=>{
 }).observe(document.getElementById('tail'));
 </script>"#;
 
+#[test]
+fn cli_loop_flags_can_precede_the_direction_or_container() {
+    if !live() {
+        return;
+    }
+    let base = lazy_site(vec![(
+        "/",
+        PAGE.replace("810", "90")
+            .replace("ROWS", &rows("li", "Entry", 60)),
+    )]);
+    let tabref = harness("scroll-cli-order");
+    tabref.ok(&["open", &base]);
+    for args in [
+        vec!["scroll", "down", "--until", "Entry 90", "in", "Entry 1"],
+        vec!["scroll", "--until", "Entry 1", "down"],
+    ] {
+        let run = tabref.run(&args);
+        assert!(run.ok, "{}", run.stderr);
+        assert!(run.stdout.contains("found"), "{}", run.stdout);
+    }
+}
+
+#[test]
+fn do_loop_flags_can_precede_the_direction_or_container() {
+    if !live() {
+        return;
+    }
+    let base = lazy_site(vec![(
+        "/",
+        PAGE.replace("810", "90")
+            .replace("ROWS", &rows("li", "Entry", 60)),
+    )]);
+    let tabref = harness("scroll-do-order");
+    tabref.ok(&["open", &base]);
+    let run = batch(
+        &tabref,
+        "scroll down --until \"Entry 90\" in \"Entry 1\"\nscroll --until \"Entry 1\" down\n",
+    );
+    assert!(run.ok, "{}", run.stderr);
+    assert_eq!(run.stdout.matches("ok found").count(), 2, "{}", run.stdout);
+}
+
+#[test]
+fn a_slow_pending_fetch_never_claims_the_list_has_ended() {
+    if !live() {
+        return;
+    }
+    let page = PAGE
+        .replace("810", "120")
+        .replace("delay=20", "delay=6000")
+        .replace("ROWS", &rows("li", "Entry", 60));
+    let base = lazy_site(vec![("/", page)]);
+    let tabref = harness("scroll-slow-end");
+    for option in [
+        vec!["scroll", "--until", "Entry 120"],
+        vec!["scroll", "--to-end"],
+    ] {
+        tabref.ok(&["open", &base]);
+        let run = tabref.ok(&option);
+        assert!(!run.stdout.contains("bottom"), "{}", run.stdout);
+        assert!(run.stdout.contains("more may load"), "{}", run.stdout);
+    }
+}
+
+#[test]
+fn until_ignores_closed_details_transparency_clipping_and_textarea_defaults() {
+    if !live() {
+        return;
+    }
+    for prefix in [
+        "<details><summary>More</summary>Entry 90</details>",
+        "<p style='opacity:0'>Entry 90</p>",
+        "<p style='position:absolute;left:-9999px'>Entry 90</p>",
+        "<p style='position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)'>Entry 90</p>",
+        "<textarea>Entry 90</textarea>",
+    ] {
+        ignores_non_rendered_match(prefix);
+    }
+}
+
 fn ignores_non_rendered_match(prefix: &str) {
     let page = format!(
         "{prefix}{}",
