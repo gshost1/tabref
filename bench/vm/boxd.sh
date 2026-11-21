@@ -36,6 +36,7 @@ done
 mode=${1:?mode: latency, replay or models}; shift || true
 [[ $mode == models || $mode == sealed ]] && : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY for a model pass}"
 if [[ $mode == sealed ]]; then
+  [[ $keep == 0 ]] || { echo "--keep is not allowed with sealed: the VM would keep sealed files" >&2; exit 2; }
   : "${BENCH_FRESH_DIR:?set BENCH_FRESH_DIR to the sealed folder}"
   python3 -I -B "$here/harness/fresh.py" verify "$BENCH_FRESH_DIR"
   pass_id=vm-$(date -u +%Y%m%dT%H%M%SZ)
@@ -48,7 +49,7 @@ stop_bench() {
 fetched=0
 fetch() {
   if [[ $mode == sealed ]]; then
-    vx "sudo bash -c 'rm -rf /tmp/runs-out && mkdir -p /tmp/runs-out/runs && { cp /home/bench/runs/results-web.jsonl /tmp/runs-out/runs/ 2>/dev/null || true; } && tar -C /tmp/runs-out -czf /tmp/runs.tgz runs'" || return 1
+    vx "sudo bash -c 'rm -rf /tmp/runs-out && install -d -m 755 /tmp/runs-out && mkdir /tmp/runs-out/runs && { cp /home/bench/runs/results-web.jsonl /tmp/runs-out/runs/ 2>/dev/null || true; } && rm -f /tmp/runs.tgz && tar -C /tmp/runs-out -czf /tmp/runs.tgz runs'" || return 1
   else
     vx "sudo test -d /home/bench/runs && sudo tar -C /home/bench --exclude=runs/fresh-staged --exclude=runs/fresh-out --exclude=runs/web-fresh -czf /tmp/runs.tgz runs" || return 1
   fi
@@ -58,7 +59,10 @@ fetch() {
   fetched=1
 }
 cleanup() {
-  [[ $mode == sealed ]] && { stop_bench 2>/dev/null || true; }
+  if [[ $mode == sealed ]]; then
+    stop_bench 2>/dev/null || true
+    vx "sudo rm -rf /home/bench/fresh /home/bench/fresh.tar /tmp/sealed-in /tmp/sealed-out /home/bench/runs/fresh-staged" 2>/dev/null || true
+  fi
   [[ $fetched == 1 ]] || fetch 2>/dev/null || true
   rm -rf "$tmp"
   [[ $keep == 1 ]] || boxd machine remove "$name" --confirm || echo "could not remove $name: remove it by hand" >&2
@@ -101,15 +105,15 @@ case $mode in
     rc=0
     boxd machine exec --env "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$name" -- bash -c \
       "sudo --preserve-env=ANTHROPIC_API_KEY -u bench -H env BENCH_TOOLS=/home/bench/bench-tools BENCH_RUNS=/home/bench/runs $tabref_env PATH=/usr/local/bin:/usr/bin:/bin $in_b python3 -I harness/run_web.py --display xvfb --chrome $chrome --host vm $args --taskset fresh --fresh-dir /home/bench/fresh --fresh-remove-copy --fresh-pass-id $pass_id --out /home/bench/runs" || rc=$?
-    stop_bench
+    stop_bench || { echo "bench processes not stopped: this pass's rows are discarded" >&2; [[ $rc == 0 ]] && rc=1; true; }
     verdict=discard
     if [[ $rc != 0 ]]; then echo "the pass exited $rc: its rows are discarded" >&2
     elif python3 -I -B "$here/harness/fresh.py" verify "$BENCH_FRESH_DIR"; then verdict=commit
     else echo "fresh seal BROKEN after the pass (original folder): this pass's rows are discarded" >&2; fi
     vx "$run python3 -I -B harness/fresh.py $verdict /home/bench/runs $pass_id" || verdict=failed
-    vx "sudo bash -c 'set -e; umask 077; d=/home/bench/runs/fresh-staged/$pass_id/sealed; mkdir -p \$d; tar -C \$d -czf /tmp/sealed.tgz .; chown \$SUDO_USER /tmp/sealed.tgz; rm -rf /home/bench/runs/fresh-staged /home/bench/fresh'" || echo "could not pack the sealed output" >&2
+    vx "sudo bash -c 'set -e; umask 077; d=/home/bench/runs/fresh-staged/$pass_id/sealed; mkdir -p \$d; rm -rf /tmp/sealed-out; install -d -m 700 -o \$SUDO_USER /tmp/sealed-out; tar -C \$d -czf /tmp/sealed-out/sealed.tgz .; chown \$SUDO_USER /tmp/sealed-out/sealed.tgz; rm -rf /home/bench/runs/fresh-staged /home/bench/fresh'" || echo "could not pack the sealed output" >&2
     ( umask 077; mkdir -p "$here/runs/fresh-out"; chmod 700 "$here/runs/fresh-out"
-      boxd machine cp "$name:/tmp/sealed.tgz" "$here/runs/fresh-out/$pass_id.tgz" && chmod 600 "$here/runs/fresh-out/$pass_id.tgz" ) \
+      boxd machine cp "$name:/tmp/sealed-out/sealed.tgz" "$here/runs/fresh-out/$pass_id.tgz" && chmod 600 "$here/runs/fresh-out/$pass_id.tgz" ) \
       || echo "could not copy the sealed output back" >&2
     echo "fresh pass $pass_id: staged rows: $verdict; sealed output in $here/runs/fresh-out/$pass_id.tgz (not for tuners)"
     [[ $verdict == commit ]] ;;
