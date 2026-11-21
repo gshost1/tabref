@@ -134,13 +134,33 @@ const VISIBLE_TEXT: &str = r"function(needle) {
   needle = fold(needle);
   if (!needle) return false;
   let matched = false;
-  const skipped = new Set(['HEAD','SCRIPT','STYLE','NOSCRIPT','TEMPLATE']);
+  const skipped = new Set(['HEAD','SCRIPT','STYLE','NOSCRIPT','TEMPLATE','TEXTAREA']);
+  function visibleText(node) {
+    const element = node.parentElement;
+    if (!element || win.getComputedStyle(element).visibility !== 'visible') return '';
+    for (let ancestor = element; ancestor; ancestor = parent(ancestor)) {
+      const style = win.getComputedStyle(ancestor);
+      if (style.display === 'none' || Number(style.opacity) === 0) return '';
+      const clip = style.clip.match(/^rect\((.*)\)$/);
+      if (clip) {
+        const edges = clip[1].split(/[,\s]+/).map(parseFloat);
+        if (edges[2] <= edges[0] || edges[1] <= edges[3]) return '';
+      }
+      if (style.clipPath === 'inset(50%)') return '';
+      const rect = ancestor.getBoundingClientRect();
+      if (/(hidden|clip)/.test(style.overflowX + ' ' + style.overflowY) && rect.width <= 1 && rect.height <= 1) return '';
+    }
+    const range = doc.createRange();
+    range.selectNodeContents(node);
+    return Array.from(range.getClientRects()).some(rect => rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.left < win.innerWidth)
+      ? node.textContent : '';
+  }
   function scan(node) {
-    if (node.nodeType === 3) return node.textContent;
-    if (node.nodeType === 1 && (skipped.has(node.tagName)
-      || (!node.checkVisibility({visibilityProperty:true}) && win.getComputedStyle(node).display !== 'contents'))) return '';
+    if (node.nodeType === 3) return visibleText(node);
+    if (node.nodeType === 1 && skipped.has(node.tagName)) return '';
     let text = '';
     for (const child of (node.shadowRoot || node).childNodes) {
+      if (node.nodeName === 'DETAILS' && !node.open && child.nodeName !== 'SUMMARY') continue;
       const block = /^(ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DIV|DL|DT|DD|FIELDSET|FIGCAPTION|FIGURE|FOOTER|FORM|H[1-6]|HEADER|HR|LI|MAIN|NAV|OL|P|PRE|SECTION|TABLE|TD|TH|TR|UL)$/.test(child.nodeName);
       text += (block ? ' ' : '') + scan(child) + (block ? ' ' : '');
     }
