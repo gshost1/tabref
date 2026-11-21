@@ -40,6 +40,7 @@ pub(crate) fn tend(session: &mut Session) {
                 reported: false,
                 watched: false,
                 batch: None,
+                cleanup: None,
             };
             merge(kept, entry);
         }

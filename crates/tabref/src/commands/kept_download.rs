@@ -11,6 +11,8 @@ pub(crate) struct KeptDownload {
     pub(crate) reported: bool,
     pub(crate) watched: bool,
     pub(crate) batch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cleanup: Option<super::downloads::cleanup::CapCleanup>,
 }
 
 impl KeptDownload {

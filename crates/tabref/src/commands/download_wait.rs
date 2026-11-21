@@ -48,6 +48,7 @@ pub(crate) fn wait_download(
                     reported: false,
                     watched: new && ours,
                     batch: None,
+                    cleanup: None,
                 };
                 merge(kept, entry);
             }

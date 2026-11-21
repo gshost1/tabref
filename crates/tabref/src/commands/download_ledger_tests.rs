@@ -17,6 +17,7 @@ fn entry(guid: &str, state: DownloadState, reported: bool) -> KeptDownload {
         reported,
         watched: false,
         batch: None,
+        cleanup: None,
     }
 }
 

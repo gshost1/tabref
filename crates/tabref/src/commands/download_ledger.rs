@@ -27,6 +27,10 @@ impl DownloadLedger {
         self.read().iter().any(|entry| {
             entry.watched
                 && (entry.record.running()
+                    || entry
+                        .cleanup
+                        .as_ref()
+                        .is_some_and(|cleanup| !cleanup.pending_paths.is_empty())
                     || (!entry.reported
                         && matches!(
                             entry.record.state,
@@ -115,6 +119,9 @@ pub(crate) fn merge(kept: &mut Vec<KeptDownload>, entry: KeptDownload) {
     old.reported |= entry.reported;
     old.watched |= entry.watched;
     old.batch = entry.batch.or(old.batch);
+    if old.cleanup.is_none() {
+        old.cleanup = entry.cleanup;
+    }
 }
 
 #[cfg(test)]
