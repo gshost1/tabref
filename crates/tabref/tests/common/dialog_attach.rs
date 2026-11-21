@@ -23,7 +23,7 @@ fn attach(
     target: &str,
     legacy: bool,
 ) -> Result<PageSession, AppError> {
-    let deadline = Deadline::after(4000).unwrap();
+    let deadline = Deadline::after(10000).unwrap();
     let calls = [
         ("Page.enable", json!({})),
         ("Page.setLifecycleEventsEnabled", json!({"enabled":true})),
@@ -54,7 +54,7 @@ fn timed(tabref: &Harness, legacy: bool) -> (Result<PageSession, AppError>, Dura
     (result, started.elapsed())
 }
 
-fn arm(tabref: &Harness, expression: &str) {
+pub(super) fn arm(tabref: &Harness, expression: &str) {
     let (mut connection, target) = fresh(tabref);
     let page = attach(&mut connection, &target, true).unwrap();
     connection
@@ -80,14 +80,18 @@ fn cold_and_briefly_busy_attaches_succeed() {
         "cold launch + first attach: {:?}; attach: {cold:?}",
         launch.elapsed()
     );
-    arm(
-        &tabref,
-        "setTimeout(() => { const until = Date.now() + 140; while (Date.now() < until) {} }, 100)",
-    );
-    std::thread::sleep(Duration::from_millis(120));
-    let (result, elapsed) = timed(&tabref, false);
-    result.unwrap();
-    eprintln!("briefly busy attach succeeded: {elapsed:?}");
+    for busy in [300, 1000] {
+        arm(
+            &tabref,
+            &format!(
+                "setTimeout(() => {{ const until = Date.now() + {busy}; while (Date.now() < until) {{}} }}, 100)"
+            ),
+        );
+        std::thread::sleep(Duration::from_millis(120));
+        let (result, elapsed) = timed(&tabref, false);
+        eprintln!("busy {busy} ms attach: {elapsed:?}: {result:?}");
+        result.unwrap();
+    }
 }
 
 #[test]
@@ -105,9 +109,11 @@ fn a_busy_renderer_gets_a_possibility_not_a_dialog_diagnosis() {
         error.suggestion.as_deref().unwrap_or_default()
     );
     assert!(
-        elapsed < Duration::from_millis(1500),
+        elapsed >= Duration::from_millis(1900) && elapsed < Duration::from_millis(6500),
         "{elapsed:?}: {error:?}"
     );
+    assert_eq!(error.kind(), Some("cdp_page_unresponsive"));
+    assert_ne!(error.code, tabref_core::ErrorCode::Timeout);
     assert!(
         error
             .suggestion
@@ -116,13 +122,13 @@ fn a_busy_renderer_gets_a_possibility_not_a_dialog_diagnosis() {
     );
 }
 
-struct CpuLoad {
+pub(super) struct CpuLoad {
     stop: Arc<AtomicBool>,
     workers: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl CpuLoad {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let count = std::thread::available_parallelism().map_or(2, |count| count.get().min(8));
         let workers = (0..count)

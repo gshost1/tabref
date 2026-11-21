@@ -118,11 +118,12 @@ fn new_tabs_open_in_the_background() {
 }
 
 #[test]
-fn a_tab_that_never_answers_its_attach_is_said_to_be_maybe_blocked_by_a_dialog() {
+fn a_slow_browser_keeps_the_normal_timeout_and_a_possible_dialog_hint() {
     let transport = ScriptedTransport::new()
         .expect("Target.attachToTarget", json!({ "sessionId": "S9" }))
         .expect_silence("Runtime.runIfWaitingForDebugger")
-        .expect_silence("Page.enable");
+        .expect_silence("Page.enable")
+        .expect_silence("Target.getTargetInfo");
     let mut connection = CdpConnection::new(transport.boxed());
 
     let error = attach_to_target_with(

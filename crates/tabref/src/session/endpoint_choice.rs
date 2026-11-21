@@ -268,7 +268,10 @@ fn start_browser(
             let text = save_launched(store, &started);
             match (text, started.endpoint()) {
                 (Ok(text), Ok(endpoint)) => match connect(&endpoint, deadline) {
-                    Ok(connection) => (endpoint, connection, text, headless_profile),
+                    Ok(mut connection) => {
+                        connection.defer_initial_attach_probe();
+                        (endpoint, connection, text, headless_profile)
+                    }
                     Err(error) => return Err(abandon(store, &started, error)),
                 },
                 (Err(error), _) | (_, Err(error)) => return Err(abandon(store, &started, error)),

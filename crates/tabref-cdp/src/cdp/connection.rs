@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -36,6 +37,8 @@ pub struct CdpConnection {
     pub(super) dialogs: DialogAnswers,
     pub(super) health: ConnectionHealth,
     attach_probe: bool,
+    initial_attach: bool,
+    fresh_targets: HashSet<String>,
 }
 
 impl CdpConnection {
@@ -49,6 +52,8 @@ impl CdpConnection {
             dialogs: DialogAnswers::default(),
             health: ConnectionHealth::default(),
             attach_probe: true,
+            initial_attach: false,
+            fresh_targets: HashSet::new(),
         }
     }
 
@@ -108,8 +113,19 @@ impl CdpConnection {
         self.attach_probe = enabled;
     }
 
-    pub(crate) fn probes_attach(&self) -> bool {
-        self.attach_probe
+    /// Gives the first attach after launching a browser its full budget.
+    pub fn defer_initial_attach_probe(&mut self) {
+        self.initial_attach = true;
+    }
+
+    pub(crate) fn note_fresh_target(&mut self, target_id: &str) {
+        self.fresh_targets.insert(target_id.to_owned());
+    }
+
+    pub(crate) fn probes_attach(&mut self, target_id: &str) -> bool {
+        let initial = std::mem::take(&mut self.initial_attach);
+        let fresh = self.fresh_targets.remove(target_id);
+        self.attach_probe && !initial && !fresh
     }
 
     /// Checks `guard` before every request and, while a reply or event is

@@ -1,7 +1,7 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tabref_core::{AppError, Deadline, ErrorCode};
+use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use crate::transport::transport_error::transport_failed;
 use crate::{CdpConnection, PageSession, PageTarget};
@@ -81,15 +81,18 @@ fn attach_calls(
     calls: &[(&str, Value)],
     deadline: Deadline,
 ) -> Result<(), AppError> {
+    let started = Instant::now();
     let mut pending = Vec::with_capacity(calls.len());
     let outcome = (|| {
         for (method, params) in calls {
             pending.push(connection.send(method, params.clone(), Some(session_id), deadline)?);
         }
-        let first = if connection.probes_attach()
+        let first = if connection.probes_attach(target_id)
             && calls.iter().any(|(method, _)| *method == "Page.enable")
         {
-            deadline.capped(Duration::from_millis(100))
+            deadline.capped(Duration::from_millis(
+                (deadline.timeout_ms() / 4).clamp(1, 2000),
+            ))
         } else {
             deadline
         };
@@ -117,9 +120,17 @@ fn attach_calls(
                         &mut progressed,
                     ) {
                         Err(error)
-                            if error.code == ErrorCode::Timeout
-                                && progressed
-                                && !deadline.is_expired() => {}
+                            if error.code == ErrorCode::Timeout && !deadline.is_expired() =>
+                        {
+                            if !progressed {
+                                let waited_ms = started.elapsed().as_millis();
+                                return Err(AppError::new(ErrorCode::ActionFailed,
+                                            format!("Waited {waited_ms} ms for page initialization; a dialog may be open or the page is busy"))
+                                            .with_details(json!({"kind":"cdp_page_unresponsive","waited_ms":waited_ms}))
+                                            .with_disposition(DeliverySemantics::not_delivered())
+                                            .with_suggestion(BLOCKED_BY_DIALOG));
+                            }
+                        }
                         outcome => return outcome,
                     }
                 }
@@ -162,7 +173,9 @@ pub fn create_background_tab(
         None,
         deadline,
     )?;
-    string_field(&result, "targetId", "Target.createTarget")
+    let target_id = string_field(&result, "targetId", "Target.createTarget")?;
+    connection.note_fresh_target(&target_id);
+    Ok(target_id)
 }
 
 /// Brings a page target to the front of its window. In a headless browser
@@ -227,3 +240,7 @@ mod tests;
 #[cfg(test)]
 #[path = "targets_deadline_tests.rs"]
 mod deadline_tests;
+
+#[cfg(test)]
+#[path = "targets_fresh_tests.rs"]
+mod fresh_tests;

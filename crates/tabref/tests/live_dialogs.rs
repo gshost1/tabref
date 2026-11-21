@@ -16,6 +16,8 @@
 #[path = "common/dialog_attach.rs"]
 mod attach_checks;
 mod common;
+#[path = "common/dialog_scenarios.rs"]
+mod scenarios;
 
 use common::{harness, live, serve};
 
@@ -287,7 +289,7 @@ fn without_the_daemon_a_late_dialog_fails_fast_without_promising_a_policy_retry(
     tabref.ok(&["click", "Later"]);
     std::thread::sleep(std::time::Duration::from_millis(800));
     for policy in [None, Some("accept"), Some("dismiss")] {
-        let mut args = vec!["--timeout", "4000"];
+        let mut args = vec!["--json", "--timeout", "10000"];
         if let Some(policy) = policy {
             args.extend(["--dialog", policy]);
         }
@@ -297,21 +299,34 @@ fn without_the_daemon_a_late_dialog_fails_fast_without_promising_a_policy_retry(
         let elapsed = started.elapsed();
         eprintln!(
             "late dialog policy={policy:?}: {elapsed:?}: {}",
-            next.stderr
+            next.stdout
         );
         assert!(!next.ok, "{}", next.stdout);
         assert!(
-            elapsed < std::time::Duration::from_millis(1500),
+            elapsed >= std::time::Duration::from_millis(1900)
+                && elapsed < std::time::Duration::from_millis(6500),
             "{elapsed:?}: {}",
             next.stderr
         );
-        assert!(
-            next.stderr
-                .contains("a dialog may be open or the page is busy")
-                && next.stderr.contains("browser window")
-                && !next.stderr.contains("--dialog"),
-            "{}",
-            next.stderr
+        let payload = next.json();
+        let error = &payload["error"];
+        assert_eq!(error["code"], "ACTION_FAILED", "{payload}");
+        assert_eq!(
+            error["details"]["kind"], "cdp_page_unresponsive",
+            "{payload}"
         );
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("a dialog may be open or the page is busy")
+        );
+        assert!(
+            error["suggestion"]
+                .as_str()
+                .unwrap()
+                .contains("browser window")
+        );
+        assert!(!error["suggestion"].as_str().unwrap().contains("--dialog"));
     }
 }
