@@ -53,7 +53,7 @@ pub(crate) fn fit(
     let tenth = options.budget / 10;
     let room = options.budget.saturating_sub(FRAME_ROOM.min(tenth));
     let share = room / OUTLINE_SHARE;
-    let wanted = cut_outline(&lines, cut_index(&lines, room), share, route, full).cost();
+    let wanted = cut_outline(&lines, cut_index(&lines, room), share, route, full).stub_cost;
     let content_room = room.saturating_sub(wanted.min(share) + MARKER_ROOM.min(tenth));
     let mut cut = cut_index(&lines, content_room);
     let mut kept: Vec<ViewLine> = lines[..cut].to_vec();
