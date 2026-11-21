@@ -66,12 +66,14 @@ pub(crate) const SCAN: &str = r"const scan = () => {
       return state.ids.get(node);
     };
     for (const [root, owner] of [[document, null], ...roots.map(root => [root, root]), ...docs.filter(([, doc]) => doc).map(([frame, doc]) => [doc, frame])]) {
-      for (const popup of root.querySelectorAll('[role=listbox],[role=menu],[popover]')) {
+      for (const popup of root.querySelectorAll('[role=listbox],[role=menu],[popover],[role=dialog],[role=alertdialog],dialog[open]')) {
         if (!shown(popup) || popup.closest('select')) continue;
-        if (popup.parentElement?.closest('[role=listbox],[role=menu],[popover]')) continue;
-        const role = popup.getAttribute('role') === 'listbox' || popup.querySelector('[role=option]') ? 'listbox' : 'menu';
+        const dialog = popup.localName === 'dialog' || ['dialog', 'alertdialog'].includes(popup.getAttribute('role'));
+        if (!dialog && popup.parentElement?.closest('[role=listbox],[role=menu],[popover]')) continue;
+        const role = dialog ? (popup.getAttribute('role') === 'alertdialog' ? 'alertdialog' : 'dialog') :
+          popup.getAttribute('role') === 'listbox' || popup.querySelector('[role=option]') ? 'listbox' : 'menu';
         const items = Array.from(popup.querySelectorAll('[role=option],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio]')).filter(shown);
-        if (!items.length) continue;
+        if (!dialog && !items.length) continue;
         const separate = items.every(item => {
           for (let node = item; node; node = node.parentElement) {
             if (!['block', 'list-item', 'flow-root'].includes(getComputedStyle(node).display)) return false;
@@ -80,13 +82,14 @@ pub(crate) const SCAN: &str = r"const scan = () => {
           return false;
         });
         const labels = (popup.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(key => root.getElementById(key)?.textContent || '').join(' ').trim();
+        const heading = dialog ? Array.from(popup.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]')).find(shown)?.innerText : '';
         const position = [];
         for (let node = popup; node.parentNode; node = node.parentNode) {
           position.push(Array.prototype.indexOf.call(node.parentNode.children || [], node));
         }
         result.push({ id: id(popup), watch: state.epoch, position: position.reverse().join('.'), block: owner ? id(owner) : 0, role,
-          name: labels || popup.getAttribute('aria-label') || '', count: items.length,
-          text: separate ? items.map(item => item.innerText).join('\n') : null });
+          name: labels || popup.getAttribute('aria-label') || heading || '', count: items.length,
+          text: dialog ? popup.innerText : separate ? items.map(item => item.innerText).join('\n') : null });
       }
     }
     return result;

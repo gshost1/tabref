@@ -33,28 +33,35 @@ pub(super) fn closed_popups(
             continue;
         };
         let role = popup["role"].as_str().unwrap_or_default();
-        if !matches!(role, "listbox" | "menu") {
+        let dialog = matches!(role, "dialog" | "alertdialog");
+        if !dialog && !matches!(role, "listbox" | "menu") {
             continue;
         }
         let Some(item_text) = popup["text"].as_str() else {
             continue;
         };
         let items = text_lines(item_text);
-        if items.is_empty() {
+        if items.is_empty() && !dialog {
             continue;
         }
-        let mut lines = text_lines(text);
-        let Some(start) = lines.windows(items.len()).position(|run| run == items) else {
-            continue;
-        };
-        lines.drain(start..start + items.len());
-        *text = lines.join("\n");
+        if !items.is_empty() {
+            let mut lines = text_lines(text);
+            let Some(start) = lines.windows(items.len()).position(|run| run == items) else {
+                continue;
+            };
+            lines.drain(start..start + items.len());
+            *text = lines.join("\n");
+        }
         let name = popup["name"].as_str().unwrap_or_default();
         let name = if name.is_empty() {
             String::new()
         } else {
             format!(" \"{}\"", crate::escape_line(name, true))
         };
+        if dialog {
+            closed.push(TextChange::Removed(format!("{role}{name} closed")));
+            continue;
+        }
         let count = popup["count"].as_u64().unwrap_or(0);
         let noun = if role == "listbox" {
             "options"
@@ -83,6 +90,7 @@ fn same_popup(before: &Value, after: &Value) -> bool {
         || (position && before["name"] == after["name"])
         || (!name.is_empty()
             && before["name"] == after["name"]
-            && before["text"].as_str().is_some()
-            && before["text"] == after["text"])
+            && ((matches!(before["role"].as_str(), Some("dialog" | "alertdialog"))
+                && before["block"] == after["block"])
+                || (before["text"].as_str().is_some() && before["text"] == after["text"])))
 }
