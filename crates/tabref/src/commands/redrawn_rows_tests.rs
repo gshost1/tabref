@@ -16,10 +16,9 @@ fn control(role: &str, name: Option<&str>, backend_id: i64) -> AccessibilityNode
 #[test]
 fn without_a_reorder_every_new_control_is_listed() {
     let undo = control("button", Some("Undo"), 1);
-    let (_, shown, summary) =
-        preview_controls(&[TextChange::Added("Saved".into())], &[&undo], |_| None);
-    assert!(summary.is_empty());
-    assert_eq!(shown, [0]);
+    let preview = preview_controls(&[TextChange::Added("Saved".into())], &[&undo], |_| None);
+    assert!(preview.summary.is_empty());
+    assert_eq!(preview.shown, [0]);
 }
 
 #[test]
@@ -55,11 +54,10 @@ fn only_named_controls_inside_reordered_rows_are_summarized() {
         run: vec!["P-2 44 kg".into(), "Close 12 kg".into()],
         table: true,
     };
-    let (_, outside, summary) =
-        preview_controls(&[sorted], &[&link, &unnamed, &close], |_| Some(&documents));
+    let preview = preview_controls(&[sorted], &[&link, &unnamed, &close], |_| Some(&documents));
     assert_eq!(
-        summary,
+        preview.summary,
         ["rows drawn again: 1 new refs, earlier refs in them are stale: tabref snap"]
     );
-    assert_eq!(outside, [1, 2]);
+    assert_eq!(preview.shown, [1, 2]);
 }

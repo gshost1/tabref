@@ -7,11 +7,18 @@ use tabref_page::{
     subtree_text,
 };
 
-pub(crate) fn new_controls<'a, 'c>(
+pub(crate) struct ReportChanges<'a> {
+    pub(crate) controls: Vec<&'a AccessibilityNode>,
+    pub(crate) changes: Vec<TextChange>,
+}
+
+pub(crate) fn prepare<'a, 'c>(
     tree: &'a AccessibilityNode,
     known: &HashSet<String>,
+    changes: &[TextChange],
     captures: impl Fn(&str) -> Option<(&'a [DomTree], &'c Value)>,
-) -> Vec<&'a AccessibilityNode> {
+    displayed: impl FnOnce(&[&AccessibilityNode]) -> HashSet<String>,
+) -> ReportChanges<'a> {
     let mut controls = Vec::new();
     collect(tree, known, &mut controls);
     let mut clickable = HashMap::new();
@@ -29,21 +36,22 @@ pub(crate) fn new_controls<'a, 'c>(
     controls.retain(|node| {
         !native_option(node, &documents) && !passive_table_part(node, &documents, &clickable)
     });
-    controls
-}
-
-pub(crate) fn without_control_text<'a>(
-    tree: &AccessibilityNode,
-    changes: &[TextChange],
-    documents: impl Fn(&str) -> Option<&'a [DomTree]>,
-    displayed: &[&AccessibilityNode],
-) -> Vec<TextChange> {
-    let owners: Vec<_> = displayed
+    let displayed = displayed(&controls);
+    let owners: Vec<_> = controls
         .iter()
+        .filter(|node| {
+            node.identity
+                .retained_object
+                .as_ref()
+                .is_some_and(|token| displayed.contains(token))
+        })
         .filter_map(|node| owner(node, &documents))
         .collect();
     if owners.is_empty() {
-        return changes.to_vec();
+        return ReportChanges {
+            controls,
+            changes: changes.to_vec(),
+        };
     }
     let mut docs = Vec::new();
     let mut targets = HashSet::new();
@@ -85,7 +93,7 @@ pub(crate) fn without_control_text<'a>(
             }
         }
     }
-    changes
+    let changes = changes
         .iter()
         .filter(|change| {
             if let TextChange::Added(line) = change
@@ -98,14 +106,15 @@ pub(crate) fn without_control_text<'a>(
             true
         })
         .cloned()
-        .collect()
+        .collect();
+    ReportChanges { controls, changes }
 }
 
 fn token(node: &AccessibilityNode) -> Option<ElementToken> {
     ElementToken::parse(node.identity.retained_object.as_deref()?).ok()
 }
 
-fn location<'a>(
+pub(crate) fn location<'a>(
     node: &AccessibilityNode,
     documents: &impl Fn(&str) -> Option<&'a [DomTree]>,
 ) -> Option<(&'a DomTree, usize)> {
