@@ -356,6 +356,8 @@ class Runner:
                     "prompt": arms.PROMPT_VERSION}
         if ts.sealed:
             base_row["pass_id"] = a.fresh_pass_id
+            if a.spent_rerun:
+                base_row["regression"] = a.spent_rerun
         exp = self.site.reset(seed)
         try:
             exp.update(ts.mod.web_expectations(tid))
@@ -503,6 +505,8 @@ def main():
     ap.add_argument("--fresh-remove-copy", action="store_true",
                     help="the fresh folder is a disposable copy: delete it once loaded and served (tabbench.sh)")
     ap.add_argument("--fresh-pass-id", default=None, help="id of this fresh pass (default: time and pid)")
+    ap.add_argument("--spent-rerun", default=None,
+                    help="regression rerun of this named spent set (rows go to results-regression.jsonl, never a gate)")
     ap.add_argument("--smoke", action="store_true", help="no model: reset every task and check empty answers fail")
     ap.add_argument("--base", default=None, help="site URL (default: 127.0.0.1:8792 heldout, :8793 fresh, :8794 dev)")
     ap.add_argument("--timeout", type=int, default=TIMEOUT_S)
@@ -516,11 +520,20 @@ def main():
     a.host = a.host or core.host_label()
     core.check_frozen()
     core.exit_on_sigterm()
+    if a.spent_rerun:
+        if a.taskset != "fresh":
+            raise SystemExit("--spent-rerun needs --taskset fresh")
+        try:
+            fresh.allow_spent_rerun(a.spent_rerun)
+        except fresh.SealBroken as e:
+            raise SystemExit(str(e))
     if a.taskset != "fresh" and (a.fresh_dir or a.fresh_remove_copy or a.fresh_pass_id):
         print("warning: --fresh-* options are ignored without --taskset fresh", flush=True)
     vault = None
     if a.taskset == "fresh":
         a.fresh_pass_id = fresh.check_pass_id(a.fresh_pass_id or new_pass_id())
+        if a.spent_rerun and not a.fresh_pass_id.startswith("regress-"):
+            a.fresh_pass_id = fresh.check_pass_id(f"regress-{a.spent_rerun}-{a.fresh_pass_id}")
         vault = fresh.Vault(a.out, a.fresh_pass_id)
     ts = load_taskset(a.taskset, a.fresh_dir, a.fresh_remove_copy, vault)
     if ts.sealed:

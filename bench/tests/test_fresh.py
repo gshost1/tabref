@@ -77,6 +77,67 @@ class Sealed(unittest.TestCase):
         self.assertEqual(sorted(fresh.SPENT_SEALS), ["v0.1", "v0.2"])
         self.assertEqual(len(set(fresh.SPENT_SEALS.values())), 2)
 
+    def spend_this_set(self, name="test"):
+        saved = fresh.SPENT_SEALS
+        self.addCleanup(setattr, fresh, "SPENT_SEALS", saved)
+        self.addCleanup(setattr, fresh, "SPENT_RERUN", None)
+        fresh.SPENT_SEALS = dict(saved, **{name: fresh.SEAL})
+        fresh.SEAL = "0" * 64
+
+    def test_a_named_spent_rerun_accepts_only_that_spent_set(self):
+        self.spend_this_set()
+        with self.assertRaises(fresh.SealBroken):
+            fresh.verify(self.root)
+        fresh.allow_spent_rerun("test")
+        self.assertEqual(fresh.verify(self.root), 2)
+        fresh.allow_spent_rerun("v0.1")
+        with self.assertRaises(fresh.SealBroken):
+            fresh.verify(self.root)
+
+    def test_a_spent_rerun_refuses_the_current_seal(self):
+        self.addCleanup(setattr, fresh, "SPENT_RERUN", None)
+        fresh.allow_spent_rerun("v0.2")
+        with self.assertRaises(fresh.SealBroken):
+            fresh.verify(self.root)
+
+    def test_an_unknown_spent_set_cannot_be_named(self):
+        self.addCleanup(setattr, fresh, "SPENT_RERUN", None)
+        with self.assertRaises(fresh.SealBroken):
+            fresh.allow_spent_rerun("v9.9")
+        self.assertIsNone(fresh.SPENT_RERUN)
+
+    def test_rerun_rows_never_reach_the_gate_results(self):
+        self.spend_this_set()
+        fresh.allow_spent_rerun("test")
+        runs = self.root / "runs"
+        stage = fresh.stage_dir(runs, "regress-test-1")
+        stage.mkdir(parents=True)
+        (stage / "rows.jsonl").write_text('{"regression": "test"}\n')
+        self.assertEqual(fresh.commit(runs, "regress-test-1"), 1)
+        self.assertFalse((runs / "results-web.jsonl").exists())
+        self.assertEqual((runs / "results-regression.jsonl").read_text(), '{"regression": "test"}\n')
+
+    def stage(self, pass_id, row):
+        runs = self.root / "runs"
+        stage = fresh.stage_dir(runs, pass_id)
+        stage.mkdir(parents=True)
+        (stage / "rows.jsonl").write_text(row + "\n")
+        return runs
+
+    def test_regression_rows_never_commit_without_the_flag(self):
+        runs = self.stage("regress-v0.2-vm-x", '{"pass_id": "regress-v0.2-vm-x", "regression": "v0.2"}')
+        with self.assertRaises(fresh.SealBroken):
+            fresh.commit(runs, "regress-v0.2-vm-x")
+        self.assertFalse((runs / "results-web.jsonl").exists())
+
+    def test_gate_rows_never_commit_with_the_flag(self):
+        self.addCleanup(setattr, fresh, "SPENT_RERUN", None)
+        runs = self.stage("vm-20261122T000000Z", '{"pass_id": "vm-20261122T000000Z"}')
+        fresh.allow_spent_rerun("v0.2")
+        with self.assertRaises(fresh.SealBroken):
+            fresh.commit(runs, "vm-20261122T000000Z")
+        self.assertFalse((runs / "results-regression.jsonl").exists())
+
     def test_edited_file_fails(self):
         (self.root / "web" / "server.py").write_text("pass  \n")
         with self.assertRaises(fresh.SealBroken):
