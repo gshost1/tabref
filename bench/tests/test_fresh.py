@@ -74,8 +74,8 @@ class Sealed(unittest.TestCase):
         self.assertNotIn(fresh.SEAL, fresh.SPENT_SEALS.values())
 
     def test_spent_sets_stay_spent(self):
-        self.assertEqual(sorted(fresh.SPENT_SEALS), ["v0.1", "v0.2"])
-        self.assertEqual(len(set(fresh.SPENT_SEALS.values())), 2)
+        self.assertEqual(sorted(fresh.SPENT_SEALS), ["v0.1", "v0.2", "v0.3"])
+        self.assertEqual(len(set(fresh.SPENT_SEALS.values())), 3)
 
     def spend_this_set(self, name="test"):
         saved = fresh.SPENT_SEALS
@@ -175,7 +175,7 @@ class Sealed(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get("BENCH_FRESH_DIR"), "BENCH_FRESH_DIR not set")
     def test_real_folder_seal(self):
-        fresh.SEAL = "4aa5bccad9a75b0746131c784788402c997831d1d1464962cbcbc748eb07ad39"
+        fresh.SEAL = "01cb12dfc8f4eb3407ec56de9f84145de4de3a206557af7774614048c4eea97b"
         self.assertGreater(fresh.verify(fresh.fresh_dir()), 0)
 
 

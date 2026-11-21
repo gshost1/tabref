@@ -5,7 +5,7 @@ The folder (--fresh-dir or BENCH_FRESH_DIR) holds tasks_fresh.py (the tasks_held
 web_seed, reset_payload, web_expectations, verify_web), web/server.py and a SHA256SUMS file. The seal is the
 sha256 of SHA256SUMS; `verify` checks it, every listed file's hash, and that nothing else is in the folder (a
 __pycache__ or an edited file breaks it). The seal is checked before every use and again after a pass.
-SEAL is set 0.3's, written after set 0.2 was used up; SPENT_SEALS keeps the seals of sets already used up (v0.1, v0.2),
+SEAL is set 0.4's, written after set 0.3 was used up; SPENT_SEALS keeps the seals of sets already used up (v0.1-v0.3),
 which verify refuses even if SEAL were set back to one. A regression rerun names one spent set explicitly
 (--spent-rerun v0.2): verify then accepts exactly that set's seal (never the current SEAL, never another spent one),
 and its rows go to results-regression.jsonl, never results-web.jsonl, so they can never count as a gate result.
@@ -25,9 +25,10 @@ import sys
 import threading
 from pathlib import Path
 
-SEAL = "4aa5bccad9a75b0746131c784788402c997831d1d1464962cbcbc748eb07ad39"
+SEAL = "01cb12dfc8f4eb3407ec56de9f84145de4de3a206557af7774614048c4eea97b"
 SPENT_SEALS = {"v0.1": "1067387e3e7631ff2a1d28675cb2a2391c99324a57f2fc7f5e45dbdd2fd5468a",
-               "v0.2": "4603086733af2ee8a2a04c26ff3495b63a348b4c896b5689434bb523104733b3"}
+               "v0.2": "4603086733af2ee8a2a04c26ff3495b63a348b4c896b5689434bb523104733b3",
+               "v0.3": "4aa5bccad9a75b0746131c784788402c997831d1d1464962cbcbc748eb07ad39"}
 SPENT_RERUN = None
 PORT = 8793
 BASE = f"http://127.0.0.1:{PORT}"
