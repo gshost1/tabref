@@ -216,9 +216,8 @@ fn probe_until(
         let text = '';
         for (const node of root.childNodes) {{
           if (node.nodeType === 3) text += node.textContent;
-          else if (node.nodeType === 1 && !['SCRIPT','STYLE','NOSCRIPT','TEMPLATE'].includes(node.tagName)) {{
-            for (const attr of ['aria-label','title','alt','placeholder','value'])
-              if (fold(node.getAttribute(attr) || '').includes(needle)) matched = true;
+          else if (node.nodeType === 1 && !['HEAD','SCRIPT','STYLE','NOSCRIPT','TEMPLATE'].includes(node.tagName)) {{
+            if (!node.checkVisibility({{visibilityProperty:true}}) && getComputedStyle(node).display !== 'contents') continue;
             const block = /^(ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DIV|DL|DT|DD|FIELDSET|FIGCAPTION|FIGURE|FOOTER|FORM|H[1-6]|HEADER|HR|LI|MAIN|NAV|OL|P|PRE|SECTION|TABLE|TD|TH|TR|UL)$/.test(node.tagName);
             const child = scan(node.shadowRoot || node);
             text += (block ? ' ' : '') + child + (block ? ' ' : '');
