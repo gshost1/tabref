@@ -18,6 +18,7 @@ enum Mode {
     Daemon,
     SendFailure,
     PageError,
+    ReleaseOnly,
 }
 
 struct Delayed {
@@ -71,6 +72,9 @@ impl CdpTransport for Delayed {
             return Ok(frame);
         }
         self.empty_reads += 1;
+        if self.mode == Mode::ReleaseOnly && deadline.remaining_ms() > 500 {
+            return Ok(reply(2));
+        }
         match (self.mode, self.empty_reads) {
             (Mode::Partial, 2) => Ok(reply(2)),
             (Mode::ConfirmProgress, 3) => Ok(reply(3)),
@@ -95,6 +99,7 @@ fn staged_waits_preserve_pending_replies_and_only_fail_after_confirmation() {
         Mode::Daemon,
         Mode::SendFailure,
         Mode::PageError,
+        Mode::ReleaseOnly,
     ] {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let budgets = Arc::new(Mutex::new(Vec::new()));
@@ -108,10 +113,15 @@ fn staged_waits_preserve_pending_replies_and_only_fail_after_confirmation() {
         if mode == Mode::Daemon {
             connection.set_attach_probe(false);
         }
+        let follow_ups = [("Page.enable", json!({}))];
         let result = attach_to_target_with(
             &mut connection,
             "P",
-            &[("Page.enable", json!({}))],
+            if mode == Mode::ReleaseOnly {
+                &[]
+            } else {
+                &follow_ups
+            },
             Deadline::after(1000).unwrap(),
         );
         let sent = sent.lock().unwrap();
@@ -163,7 +173,11 @@ fn staged_waits_preserve_pending_replies_and_only_fail_after_confirmation() {
                 assert!(result.is_ok());
                 if matches!(
                     mode,
-                    Mode::BrowserSlow | Mode::BrowserError | Mode::Partial | Mode::ConfirmProgress
+                    Mode::BrowserSlow
+                        | Mode::BrowserError
+                        | Mode::Partial
+                        | Mode::ConfirmProgress
+                        | Mode::ReleaseOnly
                 ) {
                     assert!(budgets.last().unwrap() > &500);
                 }

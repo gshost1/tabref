@@ -86,10 +86,12 @@ fn attach_calls(
         for (method, params) in calls {
             pending.push(connection.send(method, params.clone(), Some(session_id), deadline)?);
         }
-        let first = if !connection.probes_attach() {
-            deadline
-        } else {
+        let first = if connection.probes_attach()
+            && calls.iter().any(|(method, _)| *method == "Page.enable")
+        {
             deadline.capped(Duration::from_millis(100))
+        } else {
+            deadline
         };
         let mut progressed = false;
         match attach_replies(connection, &mut pending, first, &mut progressed) {
