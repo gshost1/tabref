@@ -45,7 +45,7 @@ pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome
 
 /// A `do` step's line: `ok fill "Price ($)" "67.00" -> "62.00"`, with
 /// where a navigation led and the first change on the same line. The last
-/// step of a batch adds the full block a single command prints.
+/// step and row replacements add the full block a single command prints.
 pub(crate) fn step_report(
     session: &mut Session,
     acted: Acted,
@@ -59,7 +59,12 @@ pub(crate) fn step_report(
     let Some(effects) = &acted.effects else {
         return Ok((line, data));
     };
-    if last {
+    if last
+        || effects
+            .page
+            .as_ref()
+            .is_some_and(|page| !page.replaced_rows.is_empty())
+    {
         let (lines, more) = effect_block(session, effects, &acted.known)?;
         for extra in lines {
             line.push('\n');
@@ -85,7 +90,7 @@ pub(crate) fn step_report(
             if effects.url_before == page.url {
                 line.push_str("; page reloaded");
             }
-        } else if let Some(change) = step_change(&rows_replaced::changes(page)) {
+        } else if let Some(change) = step_change(&page.changes) {
             line.push_str(&format!("; {change}"));
         }
         if let Some(note) = text_check_note(page) {

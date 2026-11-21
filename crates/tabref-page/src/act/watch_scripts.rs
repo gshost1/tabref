@@ -16,9 +16,11 @@ pub(crate) const SCAN: &str = r"const scan = () => {
   const boundedText = (el, limit = 4096, rendered = true) => {
     if (!el) return null;
     const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_ALL);
-    let left = limit, nodes = 0;
+    let left = limit, nodes = 0, optionNodes = 0;
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (++nodes > 1024) return null;
+      if (node.parentElement?.closest('select')) {
+        if (++optionNodes > limit * 2) return null;
+      } else if (++nodes > 1024) return null;
       if (node.nodeType === Node.TEXT_NODE) {
         if (node.length > left) return null;
         left -= node.length;
@@ -130,7 +132,11 @@ pub(crate) const SCAN: &str = r"const scan = () => {
         let room = LIMIT, complete = true;
         for (const row of rows) {
           const value = boundedText(row, Math.min(4096, room));
-          const key = boundedText(row.querySelector('th[scope=row],[role=rowheader]') || row.firstElementChild, 512);
+          let key = '';
+          for (const cell of [row.querySelector('th[scope=row],[role=rowheader]'), ...row.children].filter(Boolean)) {
+            key = boundedText(cell, 512);
+            if (key === null || key.trim()) break;
+          }
           if (value === null || key === null) { complete = false; break; }
           room -= value.length;
           text.push([id(row), value, key.trim().replace(/\s+/g, ' '), row.id || row.getAttribute('data-row-key') || row.getAttribute('data-id') || '']);

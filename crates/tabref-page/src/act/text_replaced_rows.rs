@@ -126,11 +126,21 @@ fn keys(body: &Value) -> HashMap<(usize, &str), Vec<u64>> {
     let mut keys: HashMap<_, Vec<_>> = HashMap::new();
     for row in body["rows"].as_array().into_iter().flatten() {
         for column in [2, 3] {
-            if let Some((key, id)) = row[column]
+            let key = row[column]
                 .as_str()
-                .filter(|text| !text.is_empty())
-                .zip(row[0].as_u64())
-            {
+                .filter(|text| !text.trim().is_empty())
+                .or_else(|| {
+                    if column == 2 {
+                        row[1]
+                            .as_str()?
+                            .split('\t')
+                            .map(str::trim)
+                            .find(|text| !text.is_empty())
+                    } else {
+                        None
+                    }
+                });
+            if let Some((key, id)) = key.zip(row[0].as_u64()) {
                 keys.entry((column, key)).or_default().push(id);
             }
         }

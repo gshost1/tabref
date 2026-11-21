@@ -31,7 +31,13 @@ fn previews_are_five_rows_and_other_changes_are_not_removed() {
     assert_eq!(preview[5], "  New 4");
     assert_eq!(preview[6], "  (+3 more: tabref snap)");
     assert_eq!(rows_replaced::data(&page).unwrap()["omitted"], 0);
-    assert_eq!(rows_replaced::changes(&page).len(), 10);
+    assert_eq!(
+        rows_replaced::data(&page).unwrap()["preview"]
+            .as_array()
+            .unwrap()
+            .len(),
+        8
+    );
 }
 
 #[test]

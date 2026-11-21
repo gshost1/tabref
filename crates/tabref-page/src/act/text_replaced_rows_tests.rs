@@ -186,3 +186,34 @@ fn ambiguous_shared_keys_keep_the_normal_diff() {
     }
     assert!(replacement(&before, &after).is_empty());
 }
+
+#[test]
+fn checkbox_first_cells_do_not_hide_the_first_text_key() {
+    let (mut before, mut after) = pair();
+    for (reply, offset, stamp) in [(&mut before, 0, "0s"), (&mut after, 100, "1s")] {
+        let rows: Vec<_> = (0..10)
+            .map(|n| {
+                let status = if offset > 0 && n == 7 {
+                    "revoked"
+                } else {
+                    "active"
+                };
+                json!([
+                    offset + n + 1,
+                    format!("\tTOK-{}\t{status}\tchecked {stamp} ago", 100 + n),
+                    "",
+                    ""
+                ])
+            })
+            .collect();
+        reply["blocks"][0][1] = json!(
+            rows.iter()
+                .map(|row| row[1].as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        reply["tables"][0]["rows"] = json!(rows);
+    }
+    assert!(replacement(&before, &after).is_empty());
+    assert!(compare_replies(&before,&after).iter().any(|change| matches!(change,TextChange::Changed {before,after} if before.contains("TOK-107") && after.contains("revoked"))));
+}

@@ -6,16 +6,6 @@ pub(crate) fn other_changes(page: &PageChanges) -> &[TextChange] {
     &page.changes[..page.changes.len().saturating_sub(rows)]
 }
 
-pub(crate) fn changes(page: &PageChanges) -> Vec<TextChange> {
-    let mut changes: Vec<_> = page
-        .replaced_rows
-        .iter()
-        .map(|(old, rows)| TextChange::Removed(format!("{old} rows replaced, {} new", rows.len())))
-        .collect();
-    changes.extend(page.changes.iter().cloned());
-    changes
-}
-
 pub(crate) fn preview(page: &PageChanges) -> Vec<String> {
     let mut lines = Vec::new();
     for (old, rows) in &page.replaced_rows {
