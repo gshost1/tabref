@@ -44,12 +44,8 @@ pub(crate) fn run_loop(
     let mut found = probe_until(session, until, deadline)?;
     let mut cap = None;
     while !found {
-        if deadline.is_expired() || steps == MAX_STEPS {
-            cap = Some(if steps == MAX_STEPS {
-                "60-step cap"
-            } else {
-                "time cap (8 s or session deadline)"
-            });
+        if let Some(reason) = cap_reason(steps, deadline.is_expired()) {
+            cap = Some(reason);
             break;
         }
         let next = match step_outcome(session, container.as_ref(), delta, deadline) {
@@ -85,30 +81,16 @@ pub(crate) fn run_loop(
     output.data["first_item"] = json!(total.first);
     output.data["last_item"] = json!(total.last);
     output.text = match until {
-        Some(text) if found => format!("found {} after {steps} scrolls:", quote_text(text)),
+        Some(text) if found => found_head(text, steps, true),
         Some(text) => format!(
             "{} is not on the page after {steps} scrolls; stopped at {reason}",
             quote_text(text)
         ),
-        None => {
-            let detail = super::first_line(&direction, step, &total);
-            let suffix = detail.split_once(": ").map_or("", |(_, tail)| tail);
-            let mut head = format!("scrolled {direction} {steps} times to {reason}");
-            if !suffix.is_empty() {
-                head.push_str(": ");
-                head.push_str(suffix);
-            } else if total.unwatched {
-                head.push_str("; could not check what loaded");
-            } else if total.hidden {
-                head.push_str("; more may still be loading (tab not showing)");
-            } else if total.loading {
-                head.push_str("; more may still be loading");
-            }
-            head
-        }
+        None => end_summary(&direction, step, steps, &total, (reason, cap.is_some())),
     };
     if found && let Some(text) = until {
         let matches = find::search(session, text, None, 20, false)?;
+        output.text = found_head(text, steps, !matches.lines.is_empty());
         output.data["count"] = json!(matches.count);
         output.data["matches"] = json!(matches.lines);
         for line in matches.lines.into_iter().chain(matches.more) {
@@ -116,6 +98,61 @@ pub(crate) fn run_loop(
         }
     }
     Ok(output)
+}
+
+fn cap_reason(steps: u64, expired: bool) -> Option<&'static str> {
+    if steps >= MAX_STEPS {
+        Some("60-step cap")
+    } else if expired {
+        Some("time cap (8 s or session deadline)")
+    } else {
+        None
+    }
+}
+
+fn found_head(text: &str, steps: u64, located: bool) -> String {
+    if located {
+        format!("found {} after {steps} scrolls:", quote_text(text))
+    } else {
+        format!(
+            "{} is on the page after {steps} scrolls; use `tabref find` to locate it",
+            quote_text(text)
+        )
+    }
+}
+
+fn end_summary(
+    direction: &str,
+    step: f64,
+    steps: u64,
+    total: &ScrollOutcome,
+    (reason, capped): (&str, bool),
+) -> String {
+    let detail = super::first_line(direction, step, total);
+    let suffix = if total.items > 0 {
+        detail.split_once(": ").map_or("", |(_, tail)| tail)
+    } else {
+        ""
+    };
+    let mut head = if capped {
+        format!("scrolled {direction} {steps} times, stopped at the {reason}")
+    } else {
+        format!("scrolled {direction} {steps} times to {reason}")
+    };
+    if !suffix.is_empty() {
+        head.push_str(": ");
+        head.push_str(suffix);
+    } else if total.unwatched {
+        head.push_str("; could not check what loaded");
+    } else if total.hidden {
+        head.push_str("; more may still be loading (tab not showing)");
+    } else if total.loading {
+        head.push_str("; more may still be loading");
+    }
+    if capped {
+        head.push_str("; more may load");
+    }
+    head
 }
 
 fn stopped(outcome: &ScrollOutcome) -> bool {

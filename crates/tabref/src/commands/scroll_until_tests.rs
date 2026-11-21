@@ -1,5 +1,52 @@
-use super::{accumulate, stopped};
+use super::{MAX_TIME, accumulate, cap_reason, end_summary, found_head, stopped};
+use std::time::Duration;
+use tabref_core::Deadline;
 use tabref_page::ScrollOutcome;
+
+#[test]
+fn caps_are_stops_not_destinations() {
+    for reason in ["60-step cap", "time cap (8 s or session deadline)"] {
+        let line = end_summary("down", 600.0, 60, &ScrollOutcome::default(), (reason, true));
+        assert_eq!(
+            line,
+            format!("scrolled down 60 times, stopped at the {reason}; more may load")
+        );
+        let loaded = ScrollOutcome {
+            items: 30,
+            first: Some("A".into()),
+            last: Some("B".into()),
+            ..ScrollOutcome::default()
+        };
+        let line = end_summary("down", 600.0, 60, &loaded, (reason, true));
+        assert!(line.contains("30 new items loaded"), "{line}");
+        assert!(line.ends_with("; more may load"), "{line}");
+    }
+}
+
+#[test]
+fn a_probe_hit_without_find_lines_does_not_promise_refs() {
+    assert_eq!(
+        found_head("X", 27, false),
+        "\"X\" is on the page after 27 scrolls; use `tabref find` to locate it"
+    );
+    assert_eq!(found_head("X", 27, true), "found \"X\" after 27 scrolls:");
+}
+
+#[test]
+fn the_eight_second_limit_and_earlier_session_deadline_stop_the_loop() {
+    assert_eq!(MAX_TIME, Duration::from_secs(8));
+    let deadline = Deadline::after(60_000).unwrap().capped(MAX_TIME);
+    assert!(deadline.remaining() <= Duration::from_secs(8));
+    assert_eq!(cap_reason(27, deadline.is_expired()), None);
+    let expired = deadline.capped(Duration::ZERO);
+    assert_eq!(
+        cap_reason(27, expired.is_expired()),
+        Some("time cap (8 s or session deadline)")
+    );
+    let earlier = Deadline::after(50).unwrap().capped(MAX_TIME);
+    assert!(earlier.remaining() <= Duration::from_millis(50));
+    assert_eq!(cap_reason(60, false), Some("60-step cap"));
+}
 
 #[test]
 fn only_a_quiet_stationary_end_stops_the_loop() {
