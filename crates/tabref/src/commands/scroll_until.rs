@@ -24,6 +24,27 @@ pub(crate) fn run_loop(
     if until.is_none() && !to_end {
         return scroll::run(session, direction, target, px);
     }
+    let container = target.map(TargetSpec::from_arg).transpose()?;
+    let deadline = session.deadline();
+    scroll_loop(
+        session,
+        direction,
+        container.as_ref(),
+        px,
+        (until, to_end, deadline),
+    )
+}
+
+pub(super) fn scroll_loop(
+    session: &mut Session,
+    direction: &str,
+    container: Option<&TargetSpec>,
+    px: Option<u32>,
+    (until, to_end, deadline): (Option<&str>, bool, Deadline),
+) -> Result<Outcome, AppError> {
+    if until.is_none() && !to_end {
+        return scroll::scroll(session, direction, container, px, deadline);
+    }
     let direction = direction.trim().to_ascii_lowercase();
     let step = f64::from(px.unwrap_or(PAGE_STEP));
     let delta = match direction.as_str() {
@@ -37,8 +58,7 @@ pub(crate) fn run_loop(
             ));
         }
     };
-    let container = target.map(TargetSpec::from_arg).transpose()?;
-    let deadline = session.deadline().capped(MAX_TIME);
+    let deadline = deadline.capped(MAX_TIME);
     let mut total = ScrollOutcome::default();
     let mut steps = 0;
     let mut found = probe_until(session, until, deadline)?;
@@ -48,7 +68,7 @@ pub(crate) fn run_loop(
             cap = Some(reason);
             break;
         }
-        let next = match step_outcome(session, container.as_ref(), delta, deadline) {
+        let next = match step_outcome(session, container, delta, deadline) {
             Ok(next) => next,
             Err(error) if is_timeout(&error) && deadline.is_expired() => {
                 cap = Some("time cap (8 s or session deadline)");

@@ -18,6 +18,12 @@ const ITEM_CHARS: usize = 40;
 mod scroll_until;
 pub(crate) use scroll_until::run_loop;
 
+#[path = "scroll_batch.rs"]
+mod scroll_batch;
+#[cfg(test)]
+pub(crate) use scroll_batch::parse_batch_scroll;
+pub(crate) use scroll_batch::run_batch_loop;
+
 /// Scrolls the page, or the container that holds `target`, in `direction`;
 /// with a target in place of the direction, scrolls that element into view.
 pub(crate) fn run(

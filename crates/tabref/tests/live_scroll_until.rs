@@ -22,7 +22,11 @@ fn a_do_scroll_until_prints_the_summary_and_indented_find_refs() {
     if !live() {
         return;
     }
-    let base = lazy_site(vec![("/", PAGE.replace("ROWS", &rows("li", "Entry", 30)))]);
+    let page = PAGE.replace("ROWS", &rows("li", "Entry", 30)).replace(
+        "li.textContent=text;",
+        "const link=document.createElement('a');link.href='#'+count;link.textContent=text;li.appendChild(link);",
+    );
+    let base = lazy_site(vec![("/", page)]);
     let tabref = harness("do-scroll-until");
     tabref.ok(&["open", &base]);
     let run = batch(
@@ -44,6 +48,34 @@ fn a_do_scroll_until_prints_the_summary_and_indented_find_refs() {
     );
     assert!(run.stdout.contains("ok scrolled down"), "{}", run.stdout);
     assert!(!run.stdout.contains("\n+ "), "{}", run.stdout);
+}
+
+#[test]
+fn a_do_scroll_loop_uses_the_container_holding_its_target() {
+    if !live() {
+        return;
+    }
+    let page = PAGE
+        .replace("ROWS", &rows("li", "Entry", 30))
+        .replace(
+            "<ol id=rows>",
+            "<div style='height:320px;overflow:auto'><ol id=rows>",
+        )
+        .replace("<script>", "</div><script>");
+    let base = lazy_site(vec![("/", page)]);
+    let tabref = harness("do-scroll-until-container");
+    tabref.ok(&["open", &base]);
+    let run = batch(
+        &tabref,
+        "scroll down in \"Entry 1\" --until \"Entry 810\"\nscroll down in \"Entry 1\" --to-end\n",
+    );
+    assert!(run.ok, "{}\n{}", run.stdout, run.stderr);
+    assert!(
+        run.stdout.contains("ok found \"Entry 810\" after"),
+        "{}",
+        run.stdout
+    );
+    assert!(run.stdout.contains("to the bottom"), "{}", run.stdout);
 }
 
 #[test]

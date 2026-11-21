@@ -6,7 +6,7 @@ use super::first_line;
 fn batch_scroll_loop_options_keep_quoted_text_and_scoped_containers() {
     use crate::commands::step_words::split_words;
     let parsed = super::parse_batch_scroll(
-        &split_words("down in list \"Messages\" --until \"Entry 810\"").unwrap(),
+        &split_words("down in button \"Messages\" --until \"Entry 810\"").unwrap(),
     )
     .unwrap();
     assert_eq!(parsed.direction, "down");
