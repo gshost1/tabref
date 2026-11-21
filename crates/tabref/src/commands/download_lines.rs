@@ -53,7 +53,7 @@ pub(crate) fn download_line(record: &DownloadRecord) -> String {
                 format!("delete pending: {}", cleanup.pending_paths.join(", "))
             } else if cleanup.completed_before_cap {
                 if cleanup.removal_verified {
-                    "canceled".into()
+                    "removed".into()
                 } else {
                     "removal unverified (download folder unknown)".into()
                 }

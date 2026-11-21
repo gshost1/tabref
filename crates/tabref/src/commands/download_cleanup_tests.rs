@@ -43,7 +43,7 @@ fn failed_removal_is_persisted_restored_and_retried() {
     });
     assert!(lookup(&record).unwrap().pending_paths.is_empty());
     assert!(record.path.is_none());
-    assert!(download_line(&record).contains("canceled"));
+    assert!(download_line(&record).contains("removed"));
     assert_eq!(download_json(&record)["removal_pending"], false);
     std::fs::remove_dir_all(dir).unwrap();
 }

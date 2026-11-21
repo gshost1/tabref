@@ -128,7 +128,10 @@ fn follow_up(command: &[&str], partial: bool, bytes: usize) {
             assert!(download["path"].is_null());
         } else {
             assert!(text.contains("over the 1 MB download cap"), "{text}");
-            assert!(text.contains("canceled"), "{text}");
+            assert!(
+                text.contains(if partial { "canceled" } else { "removed" }),
+                "{text}"
+            );
         }
         assert!(!folder.join("slow.bin").exists());
         assert!(
