@@ -194,6 +194,9 @@ def commit(runs, pass_id):
     if not rows.exists():
         return 0
     lines = [x for x in rows.read_text().splitlines() if x.strip()]
+    rerun_rows = pass_id.startswith("regress-") or any('"regression"' in x for x in lines)
+    if bool(SPENT_RERUN) != rerun_rows:
+        raise SealBroken("regression rows commit only with --spent-rerun, and gate rows only without it")
     with open(Path(runs) / results_name(), "a") as fh:
         fh.write("".join(x + "\n" for x in lines))
     rows.unlink()
@@ -228,7 +231,11 @@ def main():
             raise SystemExit(1)
         print(f"fresh seal ok: {n} files")
     elif cmd in ("commit", "discard") and len(sys.argv) == 4:
-        n = (commit if cmd == "commit" else discard)(Path(sys.argv[2]), sys.argv[3])
+        try:
+            n = (commit if cmd == "commit" else discard)(Path(sys.argv[2]), sys.argv[3])
+        except SealBroken as e:
+            print(f"fresh rows NOT committed: {e}", file=sys.stderr)
+            raise SystemExit(1)
         print(f"fresh rows {'committed' if cmd == 'commit' else 'discarded'}: {n}")
     else:
         raise SystemExit("usage: fresh.py [--spent-rerun <name>] verify <dir> | commit <runs> <pass id> | discard <runs> <pass id>")

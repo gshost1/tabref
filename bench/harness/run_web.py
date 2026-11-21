@@ -532,6 +532,8 @@ def main():
     vault = None
     if a.taskset == "fresh":
         a.fresh_pass_id = fresh.check_pass_id(a.fresh_pass_id or new_pass_id())
+        if a.spent_rerun and not a.fresh_pass_id.startswith("regress-"):
+            a.fresh_pass_id = fresh.check_pass_id(f"regress-{a.spent_rerun}-{a.fresh_pass_id}")
         vault = fresh.Vault(a.out, a.fresh_pass_id)
     ts = load_taskset(a.taskset, a.fresh_dir, a.fresh_remove_copy, vault)
     if ts.sealed:
