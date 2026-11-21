@@ -22,12 +22,18 @@ pub(crate) fn run_loop(
     px: Option<u32>,
     (until, to_end): (Option<&[String]>, bool),
 ) -> Result<Outcome, AppError> {
-    let until = match until {
-        Some([text]) => Some(text.as_str()),
-        Some(words) => return Err(super::scroll_batch::quote_until_value(&words.join(" "))),
-        None => None,
-    };
-    if until.is_none() && !to_end {
+    if let Some(words) = until {
+        let parsed = super::scroll_batch::parse_cli_scroll(direction, target, words)?;
+        let deadline = session.deadline();
+        return scroll_loop(
+            session,
+            &parsed.direction,
+            parsed.container.as_ref(),
+            px,
+            (parsed.until.as_deref(), to_end, deadline),
+        );
+    }
+    if !to_end {
         return scroll::run(session, direction, target, px);
     }
     let container = target.map(TargetSpec::from_arg).transpose()?;
@@ -37,7 +43,7 @@ pub(crate) fn run_loop(
         direction,
         container.as_ref(),
         px,
-        (until, to_end, deadline),
+        (None, to_end, deadline),
     )
 }
 

@@ -21,6 +21,40 @@ pub(crate) struct BatchScroll {
     pub to_end: bool,
 }
 
+fn direction(word: &Word) -> bool {
+    !word.quoted
+        && ["down", "up", "left", "right"]
+            .iter()
+            .any(|value| word.text.eq_ignore_ascii_case(value))
+}
+
+fn boundary(word: &Word) -> bool {
+    word.is_keyword("in") || direction(word) || (!word.quoted && word.text.starts_with("--"))
+}
+
+pub(super) fn parse_cli_scroll(
+    heading: &str,
+    target: Option<&str>,
+    values: &[String],
+) -> Result<BatchScroll, AppError> {
+    let (text, tail) = values.split_first().ok_or_else(|| quote_until_value(""))?;
+    let mut words = vec![Word::bare("--until"), Word::quoted(text)];
+    let tail: Vec<Word> = tail.iter().map(|word| Word::bare(word)).collect();
+    let needs_heading = !tail.iter().any(direction);
+    words.extend(tail);
+    if needs_heading {
+        words.push(Word::bare(heading));
+    }
+    let mut parsed = parse_batch_scroll(&words)?;
+    if let Some(target) = target {
+        if parsed.container.is_some() {
+            return Err(AppError::invalid_args("give one scroll container"));
+        }
+        parsed.container = Some(TargetSpec::from_arg(target)?);
+    }
+    Ok(parsed)
+}
+
 pub(crate) fn parse_batch_scroll(args: &[Word]) -> Result<BatchScroll, AppError> {
     let mut until = None;
     let mut to_end = false;
@@ -40,14 +74,9 @@ pub(crate) fn parse_batch_scroll(args: &[Word]) -> Result<BatchScroll, AppError>
                     .ok_or_else(|| {
                         AppError::invalid_args("--until needs TEXT; quote text containing spaces")
                     })?;
-                if words
-                    .peek()
-                    .is_some_and(|word| word.quoted || !word.text.starts_with("--"))
-                {
+                if words.peek().is_some_and(|word| !boundary(word)) {
                     let mut text = text.text.clone();
-                    while let Some(word) =
-                        words.next_if(|word| word.quoted || !word.text.starts_with("--"))
-                    {
+                    while let Some(word) = words.next_if(|word| !boundary(word)) {
                         text.push(' ');
                         text.push_str(&word.text);
                     }
@@ -71,22 +100,19 @@ pub(crate) fn parse_batch_scroll(args: &[Word]) -> Result<BatchScroll, AppError>
             _ => positional.push(word.clone()),
         }
     }
-    let (direction, rest) = match positional.split_first() {
-        None => ("down".to_owned(), &[][..]),
-        Some((word, rest))
-            if !word.quoted
-                && ["down", "up", "left", "right"]
-                    .iter()
-                    .any(|direction| word.text.eq_ignore_ascii_case(direction)) =>
-        {
-            (word.text.to_ascii_lowercase(), rest)
-        }
-        _ => {
-            return Err(AppError::invalid_args(
-                "--until and --to-end require a scroll direction, not a REF",
-            ));
-        }
-    };
+    let heading = positional
+        .iter()
+        .position(direction)
+        .map(|index| positional.remove(index).text.to_ascii_lowercase())
+        .unwrap_or_else(|| "down".to_owned());
+    let rest = positional.as_slice();
+    if rest.first().is_some_and(|word| !word.is_keyword("in"))
+        && args.iter().all(|word| !direction(word))
+    {
+        return Err(AppError::invalid_args(
+            "--until and --to-end require a scroll direction, not a REF",
+        ));
+    }
     let container = if rest.is_empty() {
         None
     } else {
@@ -94,7 +120,7 @@ pub(crate) fn parse_batch_scroll(args: &[Word]) -> Result<BatchScroll, AppError>
         Some(TargetSpec::from_words(rest)?)
     };
     Ok(BatchScroll {
-        direction,
+        direction: heading,
         container,
         until,
         to_end,
