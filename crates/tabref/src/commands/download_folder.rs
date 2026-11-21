@@ -50,6 +50,23 @@ pub(crate) fn clear_folder(session: &mut Session) {
 
 /// Saves the size cap, in megabytes, past which a download is canceled.
 pub(crate) fn choose_cap(session: &mut Session, megabytes: u64) -> Result<(), AppError> {
+    let ledger = super::download_ledger::DownloadLedger::of(session);
+    if ledger.pending() {
+        let folder = download_folder(session)?;
+        let cap = download_cap(session);
+        let deadline = session.deadline();
+        if let Err(error) = ledger.recovering_with(|kept| {
+            super::downloads::refresh_kept(
+                session.connection(),
+                kept,
+                cap,
+                folder.as_deref(),
+                deadline,
+            )
+        }) {
+            super::downloads::note_error(error);
+        }
+    }
     let name = state_name(session, "download-cap-mb");
     session.store().write_state(&name, &megabytes.to_string())
 }

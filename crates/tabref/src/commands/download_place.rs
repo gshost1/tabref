@@ -20,6 +20,11 @@ pub(crate) fn landed_size(dir: &Path, guid: &str) -> Option<u64> {
     regular_len(&dir.join(name))
 }
 
+pub(crate) fn partial_size(dir: &Path, guid: &str) -> Option<u64> {
+    let name = plain_name(guid)?;
+    regular_len(&dir.join(format!("{name}{PARTIAL_SUFFIX}")))
+}
+
 /// Moves the finished guid-named file to the suggested name in the same
 /// folder, as `name (1).ext` when that name is taken. Each candidate is
 /// claimed with a hard link, which fails when the name exists, and the guid
@@ -110,7 +115,7 @@ pub(crate) fn numbered(name: &str, copy: u32) -> String {
     }
 }
 
-fn plain_name(guid: &str) -> Option<&str> {
+pub(crate) fn plain_name(guid: &str) -> Option<&str> {
     let plain = !guid.is_empty()
         && guid
             .chars()

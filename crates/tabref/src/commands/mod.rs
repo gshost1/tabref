@@ -94,6 +94,7 @@ pub(crate) fn run(cli: &Cli) -> Result<Outcome, AppError> {
 pub(crate) fn dispatch_cli(session: &mut Session, cli: &Cli) -> Result<Outcome, AppError> {
     let started_headless_profile = session.take_headless_profile_launch();
     let outcome = dispatch(session, &cli.command);
+    let outcome = downloads::after_command(session, outcome);
     let unused = session.connection().take_dialog_choice();
     let left = dialog_report::navigation_dialogs(session, None);
     let left = dialog_report::mark_other_tabs(session, left);
