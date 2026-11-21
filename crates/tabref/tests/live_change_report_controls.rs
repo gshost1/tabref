@@ -200,18 +200,41 @@ fn non_final_do_steps_keep_new_control_refs_for_next_step() {
     tabref.ok(&["open", &format!("{base}/load-more")]);
 
     let older = tabref
-        .ok(&["do", "click \"Show older releases\"\nclick \"Version 4.0.0\""])
+        .ok(&[
+            "do",
+            "click \"Show older releases\"\nclick \"Version 4.0.0\"",
+        ])
         .stdout;
     report("DO SHOW OLDER", &older);
     let version_ref = new_ref(&older, "button \"Version 3.1.0\"");
     let clicked = tabref.ok(&["click", &version_ref]).stdout;
     assert!(clicked.contains("Added maxSockets option"), "{clicked}");
+}
 
-    let plan = tabref.ok(&["do", "check \"Team\"\ncheck \"Annual\""]).stdout;
+#[test]
+fn non_final_do_steps_keep_conditional_field_refs() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/load-more")]);
+
+    let plan = tabref
+        .ok(&["do", "check \"Team\"\ncheck \"Annual\""])
+        .stdout;
     report("DO CONDITIONAL FIELD", &plan);
     let seats_ref = new_ref(&plan, "\"Number of seats\"");
     let filled = tabref.ok(&["fill", &seats_ref, "12"]).stdout;
     assert!(filled.contains("\"5\" -> \"12\""), "{filled}");
+}
+
+#[test]
+fn non_final_do_steps_prioritize_appended_rows_after_a_redraw() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/load-more")]);
 
     let rows = tabref
         .ok(&["do", "click \"Load more rows\"\nclick \"Version 3.7.0\""])
@@ -233,7 +256,7 @@ fn board_redraw_labels_containers_and_prefers_distinct_controls() {
     }
     let (tabref, base) = site();
     tabref.ok(&["open", &format!("{base}/board")]);
-    tabref.ok(&["click", "\"Card actions\" in \"Fix login bug\""]);
+    tabref.ok(&["click", "\"Card actions\" nth 2"]);
     let text = tabref.ok(&["click", "\"Move to Done\""]).stdout;
     report("BOARD REDRAW", &text);
 

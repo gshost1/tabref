@@ -1,17 +1,25 @@
+use tabref_core::AccessibilityNode;
 use tabref_page::{DomNode, DomTree, NodeKind, TextChange};
 
-use super::{NewControl, redrawn};
+use super::preview_controls;
+
+fn control(role: &str, name: Option<&str>, backend_id: i64) -> AccessibilityNode {
+    let mut node = AccessibilityNode {
+        role: role.to_owned(),
+        ..AccessibilityNode::default()
+    };
+    node.identity.name = name.map(str::to_owned);
+    node.identity.retained_object = Some(format!("cdp:target:frame:loader:{backend_id}"));
+    node
+}
 
 #[test]
 fn without_a_reorder_every_new_control_is_listed() {
-    let found = [NewControl {
-        line: "[e1 button Undo]".into(),
-        name: Some("Undo"),
-        token: "cdp:target:frame:loader:1",
-    }];
-    let (note, outside) = redrawn(&[TextChange::Added("Saved".into())], &found, |_| None);
-    assert_eq!(note, None);
-    assert_eq!(outside, ["[e1 button Undo]"]);
+    let undo = control("button", Some("Undo"), 1);
+    let (_, shown, summary) =
+        preview_controls(&[TextChange::Added("Saved".into())], &[&undo], |_| None);
+    assert!(summary.is_empty());
+    assert_eq!(shown, [0]);
 }
 
 #[test]
@@ -39,32 +47,19 @@ fn only_named_controls_inside_reordered_rows_are_summarized() {
         ],
         ..DomTree::default()
     }];
-    let found = [
-        NewControl {
-            line: "[e1 link Close]".into(),
-            name: Some("Close"),
-            token: "cdp:target:frame:loader:2",
-        },
-        NewControl {
-            line: "[e2 button]".into(),
-            name: None,
-            token: "cdp:target:frame:loader:3",
-        },
-        NewControl {
-            line: "[e3 button Close]".into(),
-            name: Some("Close"),
-            token: "cdp:target:frame:loader:6",
-        },
-    ];
+    let link = control("link", Some("Close"), 2);
+    let unnamed = control("button", None, 3);
+    let close = control("button", Some("Close"), 6);
     let sorted = TextChange::Reordered {
         above: None,
         run: vec!["P-2 44 kg".into(), "Close 12 kg".into()],
         table: true,
     };
-    let (note, outside) = redrawn(&[sorted], &found, |_| Some(&documents));
+    let (_, outside, summary) =
+        preview_controls(&[sorted], &[&link, &unnamed, &close], |_| Some(&documents));
     assert_eq!(
-        note.as_deref(),
-        Some("rows drawn again: 1 new refs, earlier refs in them are stale: tabref snap")
+        summary,
+        ["rows drawn again: 1 new refs, earlier refs in them are stale: tabref snap"]
     );
-    assert_eq!(outside, ["[e2 button]", "[e3 button Close]"]);
+    assert_eq!(outside, [1, 2]);
 }

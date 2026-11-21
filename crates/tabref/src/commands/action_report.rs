@@ -1,27 +1,25 @@
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
-use tabref_core::{AccessibilityNode, AppError};
+use tabref_core::AppError;
 
 use super::acted::Acted;
 use super::action_report_changes::{change_data, counted, reload_head, step_change, within_budget};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
-use super::redrawn_rows::{NewControl, redrawn};
+use super::redrawn_rows::control_report;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
-use crate::view::action_changes::prepare;
+use crate::session::captured_snapshot::CapturedSnapshot;
 use crate::view::bot_check::action_bot_check;
-use crate::view::node_line::{node_line, quote_text};
+use crate::view::node_line::quote_text;
 use crate::view::ref_style::RefStyle;
 use crate::view::rows_replaced;
 
 const NOTHING_SEEN: &str = " (no visible change)";
 const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
-const NEW_SHOWN: usize = 8;
-const NEW_LINE_CHARS: usize = 80;
 
 /// An action as a single command prints it: `clicked "Save"`, then what it
 /// set off, capped near 150 tokens: dialogs, the new address, the page's
@@ -46,6 +44,7 @@ pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome
 /// A `do` step's line: `ok fill "Price ($)" "67.00" -> "62.00"`, with
 /// where a navigation led and the first change on the same line. The last
 /// step and row replacements add the full block a single command prints.
+/// Other steps include a bounded preview of newly available controls.
 pub(crate) fn step_report(
     session: &mut Session,
     acted: Acted,
@@ -85,19 +84,36 @@ pub(crate) fn step_report(
         if let Some(url) = effects.moved_to() {
             line.push_str(&format!(" -> {}", short_url(&effects.url_before, url)));
         }
+        let captured = capture_control_changes(session, effects, page)?;
+        let report = captured
+            .as_ref()
+            .map(|snapshot| control_report(snapshot, &acted.known, page));
         if effects.settled.navigated {
             line.push_str(&format!(" {}", quote_text(&page.title)));
             if effects.url_before == page.url {
                 line.push_str("; page reloaded");
             }
-        } else if let Some(change) = step_change(&page.changes) {
+        } else if let Some(change) = step_change(
+            report
+                .as_ref()
+                .map_or(&page.changes, |report| &report.changes),
+        ) {
             line.push_str(&format!("; {change}"));
         }
         if let Some(note) = text_check_note(page) {
             line.push_str(&format!("; {note}"));
         }
         merge(&mut data, text_check_data(page));
-        if let Some(check) = action_bot_check(session, &page.title, None) {
+        if let Some(report) = report
+            && !report.lines.is_empty()
+        {
+            for extra in report.lines {
+                line.push('\n');
+                line.push_str(&extra);
+            }
+            set(&mut data, "new", json!(report.new));
+        }
+        if let Some(check) = action_bot_check(session, &page.title, captured.as_ref()) {
             line.push('\n');
             line.push_str(&check.note());
             check.add_data(&mut data);
@@ -144,31 +160,10 @@ fn effect_block(
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
-    let captured = if !effects.settled.navigated
-        && (page.changed_anything() || effects.settled.same_document)
-    {
-        Some(session.capture()?)
-    } else {
-        None
-    };
-    let prepared = captured.as_ref().map(|captured| {
-        prepare(
-            &captured.tree,
-            known,
-            rows_replaced::other_changes(page),
-            |target| captured.dom(target).zip(captured.dom_reply(target)),
-            |controls| {
-                let found = control_lines(controls);
-                let (_, outside) = redrawn(&page.changes, &found, |target| captured.dom(target));
-                let shown: HashSet<_> = outside.iter().take(NEW_SHOWN).collect();
-                found
-                    .iter()
-                    .filter(|control| shown.contains(&control.line))
-                    .map(|control| control.token.to_owned())
-                    .collect()
-            },
-        )
-    });
+    let captured = capture_control_changes(session, effects, page)?;
+    let prepared = captured
+        .as_ref()
+        .map(|snapshot| control_report(snapshot, known, page));
     let changes = counted(
         prepared
             .as_ref()
@@ -193,17 +188,9 @@ fn effect_block(
         merge(&mut data, json!({ "page": report.data }));
         return Ok((lines, data));
     }
-    if let (Some(captured), Some(prepared)) = (&captured, &prepared) {
-        let found = control_lines(&prepared.controls);
-        let (in_rows, outside) = redrawn(&page.changes, &found, |target| captured.dom(target));
-        let shown = outside.len().min(NEW_SHOWN);
-        lines.extend(outside.iter().take(shown).map(|line| format!("new {line}")));
-        if outside.len() > shown {
-            lines.push(format!("+{} more new: tabref snap", outside.len() - shown));
-        }
-        lines.extend(in_rows);
-        let appeared: Vec<&String> = found.iter().map(|control| &control.line).collect();
-        merge(&mut data, json!({ "new": appeared }));
+    if let Some(prepared) = prepared {
+        lines.extend(prepared.lines);
+        set(&mut data, "new", json!(prepared.new));
     }
     if let Some(check) = action_bot_check(session, &page.title, captured.as_ref()) {
         lines.insert(0, check.note());
@@ -219,17 +206,14 @@ fn text_check_data(page: &tabref_page::PageChanges) -> Value {
     })
 }
 
-fn control_lines<'a>(controls: &[&'a AccessibilityNode]) -> Vec<NewControl<'a>> {
-    controls
-        .iter()
-        .filter_map(|node| {
-            Some(NewControl {
-                line: styled(&node_line(node, NEW_LINE_CHARS)),
-                name: node.identity.name.as_deref(),
-                token: node.identity.retained_object.as_deref()?,
-            })
-        })
-        .collect()
+fn capture_control_changes(
+    session: &mut Session,
+    effects: &ActionEffects,
+    page: &tabref_page::PageChanges,
+) -> Result<Option<CapturedSnapshot>, AppError> {
+    (!effects.settled.navigated && (page.changed_anything() || effects.settled.same_document))
+        .then(|| session.capture())
+        .transpose()
 }
 
 fn text_check_note(page: &tabref_page::PageChanges) -> Option<String> {
