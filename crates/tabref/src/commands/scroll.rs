@@ -4,7 +4,7 @@ use tabref_page::{
     LocateIntent, ScrollOutcome, ScrollSite, cut_chars, scroll_and_settle, scroll_into_view,
 };
 
-use super::act_target::resolve_target;
+use super::act_target::{ActTarget, resolve_target};
 use super::target_spec::TargetSpec;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -13,6 +13,16 @@ use crate::view::node_line::{escape_line, quote_text};
 const PAGE_STEP: u32 = 600;
 const LINE_CHARS: usize = 100;
 const ITEM_CHARS: usize = 40;
+
+#[path = "scroll_until.rs"]
+mod scroll_until;
+pub(crate) use scroll_until::run_loop;
+
+#[path = "scroll_batch.rs"]
+mod scroll_batch;
+#[cfg(test)]
+pub(crate) use scroll_batch::parse_batch_scroll;
+pub(crate) use scroll_batch::run_batch_loop;
 
 /// Scrolls the page, or the container that holds `target`, in `direction`;
 /// with a target in place of the direction, scrolls that element into view.
@@ -59,17 +69,27 @@ pub(crate) fn scroll(
             ));
         }
     };
-    let outcome = match container {
-        Some(spec) => {
-            let target = resolve_target(session, spec, LocateIntent::Click, deadline)?;
-            scroll_and_settle(
-                session.connection(),
-                &target.session,
-                ScrollSite::Element(&target.token),
-                delta,
-                deadline,
-            )?
-        }
+    let target = container
+        .map(|spec| resolve_target(session, spec, LocateIntent::Click, deadline))
+        .transpose()?;
+    let outcome = step_outcome(session, target.as_ref(), delta, deadline)?;
+    Ok(report(direction, step, &outcome))
+}
+
+fn step_outcome(
+    session: &mut Session,
+    container: Option<&ActTarget>,
+    delta: (f64, f64),
+    deadline: Deadline,
+) -> Result<ScrollOutcome, AppError> {
+    match container {
+        Some(target) => scroll_and_settle(
+            session.connection(),
+            &target.session,
+            ScrollSite::Element(&target.token),
+            delta,
+            deadline,
+        ),
         None => {
             let page = session.page()?;
             scroll_and_settle(
@@ -78,11 +98,14 @@ pub(crate) fn scroll(
                 ScrollSite::Page,
                 delta,
                 deadline,
-            )?
+            )
         }
-    };
+    }
+}
+
+fn report(direction: &str, step: f64, outcome: &ScrollOutcome) -> Outcome {
     let mut report = Outcome::new(
-        first_line(direction, step, &outcome),
+        first_line(direction, step, outcome),
         json!({
             "action": "scroll",
             "direction": direction,
@@ -108,7 +131,7 @@ pub(crate) fn scroll(
             outcome.more_lines
         ));
     }
-    Ok(report)
+    report
 }
 
 /// `scrolled down 600px`, with what the scroll loaded or why it stopped:
