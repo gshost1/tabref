@@ -1,11 +1,11 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::json;
 use tabref_cdp::is_timeout;
 use tabref_core::{AppError, Deadline};
 use tabref_page::{LocateIntent, ScrollOutcome, ScrollSite};
 
-use super::{PAGE_STEP, report, step_outcome};
+use super::{PAGE_STEP, report};
 use crate::commands::act_target::{ActTarget, resolve_target};
 use crate::commands::{find, scroll, target_spec::TargetSpec};
 use crate::output::outcome::Outcome;
@@ -70,21 +70,25 @@ pub(super) fn scroll_loop(
             ));
         }
     };
-    let started = Instant::now();
     let deadline = deadline.capped(MAX_TIME);
     let container = container
         .map(|spec| resolve_target(session, spec, LocateIntent::Click, deadline))
         .transpose()?;
+    let (page, site) = match container.as_ref() {
+        Some(target) => (target.session.clone(), ScrollSite::Element(&target.token)),
+        None => (session.page()?, ScrollSite::Page),
+    };
     let mut total = ScrollOutcome::default();
     let mut steps = 0;
     let mut found = probe_until(session, container.as_ref(), until, deadline)?;
     let mut cap = None;
+    let mut confirmed = false;
     while !found {
         if let Some(reason) = cap_reason(steps, deadline.is_expired()) {
             cap = Some(reason);
             break;
         }
-        let next = match step_outcome(session, container.as_ref(), delta, deadline) {
+        let next = match site.scroll_loop_step(session.connection(), &page, delta, deadline) {
             Ok(next) => next,
             Err(error) if is_timeout(&error) && deadline.is_expired() => {
                 cap = Some("time cap (8 s or session deadline)");
@@ -94,6 +98,7 @@ pub(super) fn scroll_loop(
         };
         steps += 1;
         let ended = stopped(&next);
+        confirmed = ended && next.watched && next.aged_out_requests == 0;
         accumulate(&mut total, next);
         if !deadline.is_expired() {
             found = probe_until(session, container.as_ref(), until, deadline)?;
@@ -102,20 +107,29 @@ pub(super) fn scroll_loop(
             break;
         }
     }
-    let reason = cap.map(str::to_owned).unwrap_or_else(|| {
-        format!(
-            "no more loaded within {:.1}s; more may load",
-            started.elapsed().as_secs_f64()
-        )
-    });
+    let reason = match cap {
+        Some(reason) => reason.to_owned(),
+        None if confirmed => format!(
+            "stopped at {}",
+            match direction.as_str() {
+                "up" => "the top",
+                "left" => "the left end",
+                "right" => "the right end",
+                _ => "the bottom",
+            }
+        ),
+        None => quiet_reason(Duration::from_millis(total.quiet_ms)),
+    };
     let mut output = report(&direction, step, &total);
     output.data["steps"] = json!(steps);
     output.data["until"] = json!(until);
     output.data["found"] = json!(found);
     output.data["cap"] = json!(cap);
+    output.data["aged_out_requests"] = json!(total.aged_out_requests);
+    output.data["quiet_ms"] = json!(total.quiet_ms);
+    output.data["end_confirmed"] = json!(confirmed && cap.is_none());
     if !found && cap.is_none() {
-        output.data["end_confirmed"] = json!(false);
-        output.data["stop_reason"] = json!("no_growth");
+        output.data["stop_reason"] = json!(if confirmed { "end" } else { "no_growth" });
     }
     output.data["total_px"] = json!(step * steps as f64);
     output.data["first_item"] = json!(total.first);
@@ -151,6 +165,15 @@ fn cap_reason(steps: u64, expired: bool) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+fn quiet_reason(elapsed: Duration) -> String {
+    let duration = if elapsed.is_zero() {
+        "less than 0.001s".to_owned()
+    } else {
+        format!("{:.3}s", elapsed.as_secs_f64())
+    };
+    format!("no more loaded within {duration}; more may load")
 }
 
 fn not_found_head(text: &str, steps: u64, reason: &str, capped: bool) -> String {

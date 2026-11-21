@@ -14,6 +14,8 @@ pub struct ScrollOutcome {
     pub at_end: bool,
     pub items: u64,
     pub grew: bool,
+    pub aged_out_requests: u64,
+    pub quiet_ms: u64,
     pub first: Option<String>,
     pub last: Option<String>,
     pub lines: Vec<String>,

@@ -23,6 +23,23 @@ pub(crate) struct SiteScript<'s> {
 }
 
 impl ScrollSite<'_> {
+    /// Settles a loop step, watching a quiet window even at a stationary end.
+    pub fn scroll_loop_step(
+        self,
+        connection: &mut CdpConnection,
+        session: &PageSession,
+        delta: (f64, f64),
+        deadline: Deadline,
+    ) -> Result<crate::ScrollOutcome, AppError> {
+        crate::settle::scroll_settle::settle_step(
+            connection,
+            session,
+            self,
+            (delta, true),
+            deadline,
+        )
+    }
+
     /// Checks rendered text inside the same container a scroll would move.
     pub fn contains_visible_text(
         self,

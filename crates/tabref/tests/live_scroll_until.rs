@@ -270,7 +270,11 @@ fn a_do_scroll_loop_uses_the_container_holding_its_target() {
         "{}",
         run.stdout
     );
-    assert!(run.stdout.contains("more may load"), "{}", run.stdout);
+    assert!(
+        run.stdout.contains("stopped at the bottom"),
+        "{}",
+        run.stdout
+    );
 }
 
 #[test]
