@@ -16,9 +16,38 @@ pub(crate) fn after_command(
         return outcome;
     }
     let deadline = session.deadline();
-    match reconcile(session, deadline) {
+    finish(outcome, reconcile(session, deadline))
+}
+
+fn finish(
+    outcome: Result<Outcome, AppError>,
+    reconciled: Result<Vec<DownloadRecord>, AppError>,
+) -> Result<Outcome, AppError> {
+    match reconciled {
         Ok(records) => report(outcome, records),
-        Err(error) => outcome.and(Err(error)),
+        Err(error) => {
+            let text = format!("note: download reconciliation failed: {}", error.message);
+            let note = serde_json::json!({"message": error.message, "details": error.details});
+            match outcome {
+                Ok(mut outcome) => {
+                    outcome.push_line(&text);
+                    if let Some(data) = outcome.data.as_object_mut() {
+                        data.insert("download_reconciliation_error".into(), note);
+                    }
+                    Ok(outcome)
+                }
+                Err(mut original) => {
+                    original.message.push_str(&format!("\n{text}"));
+                    let details = original
+                        .details
+                        .get_or_insert_with(|| serde_json::json!({}));
+                    if let Some(details) = details.as_object_mut() {
+                        details.insert("download_reconciliation_error".into(), note);
+                    }
+                    Err(original)
+                }
+            }
+        }
     }
 }
 
@@ -103,5 +132,37 @@ mod tests {
             "slow.bin"
         );
         assert!(error.message.contains("over the 1 MB download cap"));
+    }
+
+    #[test]
+    fn a_ledger_io_failure_never_changes_command_success_or_delivery() {
+        let failure: AppError = std::fs::File::open(
+            std::env::temp_dir().join(format!("missing-ledger-{}", std::process::id())),
+        )
+        .unwrap_err()
+        .into();
+        let result = finish(
+            Ok(Outcome::new("paid", json!({"paid": true}))),
+            Err(failure.clone()),
+        )
+        .unwrap();
+        assert_eq!(result.data["paid"], true);
+        assert!(
+            result
+                .text
+                .starts_with("paid\nnote: download reconciliation failed:")
+        );
+        assert_eq!(
+            result.data["download_reconciliation_error"]["details"]["kind"],
+            "io"
+        );
+        let before = AppError::timeout("original").with_details(json!({"kind":"original"}));
+        let result = finish(Err(before.clone()), Err(failure)).unwrap_err();
+        assert_eq!(result.code, before.code);
+        assert_eq!(result.disposition, before.disposition);
+        assert_eq!(result.suggestion, before.suggestion);
+        assert_eq!(result.kind(), Some("original"));
+        assert!(result.message.starts_with("original\nnote:"));
+        assert!(result.details.unwrap()["download_reconciliation_error"].is_object());
     }
 }
