@@ -27,6 +27,7 @@ pub(crate) mod user_chrome_record;
 pub(crate) mod visible_tab;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::json;
@@ -38,7 +39,7 @@ use tabref_core::{AppError, Deadline, RefStore};
 
 use crate::commands::app_guard::{app_has_no_page, app_runtime};
 use attached_tab::AttachedTab;
-use capture_cache::CaptureAccess;
+use capture_cache::CaptureCache;
 use command_scope::CommandScope;
 use endpoint_choice::connect_browser;
 use focus_state::FocusState;
@@ -54,9 +55,8 @@ use user_chrome_record::{choice_in_use, opt_in_guard};
 /// lives for one command; the daemon keeps one alive across commands and
 /// starts a new [`CommandScope`] for each, so the connection, the attached
 /// sessions and the domains they enabled are paid for once. A daemon command
-/// that only reads may also keep captures; actions may reuse one to resolve
-/// their first target, but never keep one across commands; batches cannot
-/// reuse captures (see [`capture_cache::CaptureCache`]).
+/// that only reads may also keep and reuse captures; actions always read
+/// fresh (see [`capture_cache::CaptureCache`]).
 pub(crate) struct Session {
     connection: CdpConnection,
     browser: ReachedBrowser,
@@ -65,7 +65,7 @@ pub(crate) struct Session {
     scope: CommandScope,
     warning: Option<String>,
     choice: Option<String>,
-    captures: Option<CaptureAccess>,
+    captures: Option<Arc<CaptureCache>>,
     started_headless_profile: bool,
 }
 

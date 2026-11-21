@@ -96,25 +96,25 @@ fn check_opaque_sheet(imported: bool) {
     for change in ["sheet.disabled=true", "sheet.media.mediaText='not all'"] {
         let deadline = Deadline::after(30_000).unwrap();
         let watch = arm_capture_watch(&mut connection, &page, "opaque", deadline).unwrap();
-        assert!(!watch.blind);
-        assert_eq!(
+        assert!(watch.blind);
+        assert_ne!(
             check_capture_watch(&mut connection, &page, &watch, deadline),
             "same"
         );
         evaluate(&mut connection, &page, change);
-        assert_eq!(
+        assert_ne!(
             check_capture_watch(&mut connection, &page, &watch, deadline),
-            "state"
+            "same"
         );
     }
 }
 
 #[test]
-fn an_opaque_link_sheet_is_watchable_but_disabled_and_media_changes_are_not_replayed() {
+fn an_opaque_link_sheet_is_blind_and_never_replayed() {
     check_opaque_sheet(false);
 }
 
 #[test]
-fn an_opaque_import_in_a_readable_sheet_is_watched_too() {
+fn an_opaque_import_in_a_readable_sheet_is_blind_too() {
     check_opaque_sheet(true);
 }

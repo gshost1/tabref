@@ -65,33 +65,28 @@ fn site(name: &str) -> (Harness, proxy::Proxy, String) {
 }
 
 #[test]
-fn an_unchanged_large_page_resolves_without_another_capture() {
+fn an_unchanged_large_page_always_captures_for_resolve_and_report() {
     if !live() {
         return;
     }
     let (tabref, proxy, url) = site("action-reuse-still");
     run(&tabref, &proxy, &["open", &url], false);
-    let mut counts = Vec::new();
-    for _ in 0..3 {
-        run(&tabref, &proxy, &["snap"], false);
-        let before = proxy.captures();
-        run(&tabref, &proxy, &["click", "Noop"], false);
-        let count = proxy.captures() - before;
-        counts.push(count);
-        if count == 0 {
-            let before = proxy.captures();
-            run(&tabref, &proxy, &["snap"], false);
-            assert_eq!(
-                proxy.captures() - before,
-                1,
-                "kept a capture after an action"
-            );
-            run(&tabref, &proxy, &["daemon", "stop"], false);
-            return;
-        }
-    }
+    run(&tabref, &proxy, &["snap"], false);
+    let before = proxy.captures();
+    run(&tabref, &proxy, &["click", "Go"], false);
+    assert_eq!(
+        proxy.captures() - before,
+        2,
+        "action did not capture fresh for both resolve and report"
+    );
+    let before = proxy.captures();
+    run(&tabref, &proxy, &["snap"], false);
+    assert_eq!(
+        proxy.captures() - before,
+        1,
+        "kept a capture after an action"
+    );
     run(&tabref, &proxy, &["daemon", "stop"], false);
-    panic!("no action reused its resolve capture: {counts:?}");
 }
 
 #[test]
@@ -129,7 +124,7 @@ fn report(mut value: Value) -> Value {
 }
 
 #[test]
-fn reused_and_fresh_resolves_pick_the_same_button_and_report_the_same_changes() {
+fn daemon_and_in_process_actions_pick_the_same_button_and_report_the_same_changes() {
     if !live() {
         return;
     }

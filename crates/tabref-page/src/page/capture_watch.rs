@@ -24,9 +24,11 @@
 //! blind. Form validity and finished fill animations are watched too, since
 //! they can change rendering without mutations. Upgraded custom elements
 //! are blind: ElementInternals can change accessibility and custom states
-//! without observable mutations. Cross-origin rules cannot be edited by page script: opaque
-//! sheets are watched by identity, href, disabled and media state, including
-//! imports inside readable sheets. Other stylesheet errors and oversized
+//! without observable mutations, including scoped registries. Manual slots,
+//! until-found content and container queries are blind. Opaque stylesheet
+//! identity, href, disabled and media state are recorded, but unreadable
+//! rules may contain container queries, so these sheets are blind too,
+//! including imports inside readable sheets. Other stylesheet errors and oversized
 //! form or stylesheet state are blind rather than sampled.
 
 use serde_json::{Value, json};
@@ -75,6 +77,7 @@ const SCAN: &str = r"const scan = () => {
         const rules = list => {
           for (const rule of list) {
             const text = rule.cssText;
+            if (text.startsWith('@container')) { blind = true; return; }
             styleSize += text.length;
             if (styleSize > 100_000) { blind = true; return; }
             state += '\u0009' + text;
@@ -86,19 +89,26 @@ const SCAN: &str = r"const scan = () => {
         };
         try { rules(sheet.cssRules); } catch (error) {
           if (error.name === 'SecurityError') state += ':opaque';
-          else blind = true;
+          blind = true;
         }
         if (blind) return;
       }
     };
     const walk = root => {
       roots.push(root);
+      if (root.slotAssignment === 'manual') { blind = true; return; }
       if (moving(root) || unreadable(root)) { blind = true; return; }
       const elements = root.querySelectorAll('*');
       total += elements.length;
       if (total > MAX_ELEMENTS) { blind = true; return; }
       state += '\u0006' + (root.styleSheets?.length ?? 0) + ':' + (root.adoptedStyleSheets?.length ?? 0);
       const doc = root.nodeType === 9 ? root : root.ownerDocument;
+      const realm = doc.defaultView;
+      for (const query of ['(prefers-color-scheme: dark)', '(prefers-color-scheme: light)',
+        '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)',
+        '(prefers-contrast: more)', '(prefers-contrast: less)', '(prefers-contrast: custom)',
+        '(prefers-contrast: no-preference)', '(forced-colors: active)', '(forced-colors: none)',
+        '(orientation: portrait)', '(orientation: landscape)']) state += ':' + realm.matchMedia(query).matches;
       styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
       if (blind) return;
       state += ':' + doc.defaultView.scrollX + ':' + doc.defaultView.scrollY
@@ -113,7 +123,7 @@ const SCAN: &str = r"const scan = () => {
         if (el.matches(':hover, :active, :fullscreen')) state += '\u000a' + index;
         if (el.shadowRoot) walk(el.shadowRoot);
         const tag = el.localName;
-        if (tag.includes('-') && doc.defaultView.customElements.get(tag)) { blind = true; return; }
+        if ((tag.includes('-') && el.matches(':defined')) || el.getAttribute('hidden') === 'until-found') { blind = true; return; }
         if (tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed') {
           let inner = null;
           try { inner = el.contentDocument; } catch (error) { inner = null; }
@@ -189,6 +199,12 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
       const realm = root.defaultView;
       wrap(realm.Element.prototype, 'attachShadow');
       wrap(realm.HTMLElement.prototype, 'attachInternals');
+      wrap(realm.HTMLSlotElement.prototype, 'assign');
+      wrap(realm.CSS, 'registerProperty');
+      for (const method of ['add', 'delete', 'clear']) wrap(realm.FontFaceSet.prototype, method);
+      const fonts = realm.document.fonts;
+      fonts.addEventListener('loadingdone', watch.stop);
+      restore.push(() => fonts.removeEventListener('loadingdone', watch.stop));
       wrap(realm.CustomElementRegistry.prototype, 'define');
       wrap(realm.CustomElementRegistry.prototype, 'upgrade');
     }

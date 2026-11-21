@@ -59,17 +59,6 @@ pub(crate) fn resolve_target(
     intent: LocateIntent,
     deadline: Deadline,
 ) -> Result<ActTarget, AppError> {
-    let result = resolve_first_target(session, spec, intent, deadline);
-    session.resolved_target();
-    result
-}
-
-fn resolve_first_target(
-    session: &mut Session,
-    spec: &TargetSpec,
-    intent: LocateIntent,
-    deadline: Deadline,
-) -> Result<ActTarget, AppError> {
     match spec {
         TargetSpec::Ref(text) => {
             let (mut target, hidden) = match intent {
@@ -101,15 +90,8 @@ fn resolve_first_target(
         }
         TargetSpec::Find(locator) => {
             let page = session.page()?;
-            let kept = session.reusable_capture();
-            let snapshot;
-            let tree = match &kept {
-                Some(captured) => &captured.tree,
-                None => {
-                    snapshot = snapshot_page_within_budget(session.connection(), &page, deadline)?;
-                    &snapshot.tree
-                }
-            };
+            let snapshot = snapshot_page_within_budget(session.connection(), &page, deadline)?;
+            let tree = &snapshot.tree;
             let found = locate(tree, locator, intent)?;
             let mut known = HashSet::new();
             collect_tokens(tree, &mut known);

@@ -102,13 +102,13 @@ fn setup(html: &str, large: bool, edit: &str) -> Harness {
 fn compare_click(html: &str, large: bool, edit: &str, locator: &str) {
     let harness = setup(html, large, edit);
     run(&harness, &["click", locator], false);
-    let reused = evaluate(&harness, "picked");
+    let daemon = evaluate(&harness, "picked");
     evaluate(&harness, "picked=''");
     run(&harness, &["click", locator], true);
     let fresh = evaluate(&harness, "picked");
     run(&harness, &["daemon", "stop"], false);
     assert_eq!(fresh, "b", "fresh baseline did not pick the exact match");
-    assert_eq!(reused, fresh, "reuse selected a different element");
+    assert_eq!(daemon, fresh, "daemon action selected a different element");
 }
 
 fn compare_view(html: &str, large: bool, edit: &str, command: &str, needle: &str) {

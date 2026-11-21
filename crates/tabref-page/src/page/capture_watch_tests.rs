@@ -71,9 +71,37 @@ fn unobserved_form_animation_and_internals_changes_are_guarded() {
     assert!(check.contains("entry.playState !== old.playState"));
     assert!(check.contains("entry.currentTime !== old.currentTime"));
     assert!(check.contains("now.animations.length !== watch.animations.length"));
-    assert!(check.contains("doc.defaultView.customElements.get(tag)"));
+    assert!(check.contains("tag.includes('-') && el.matches(':defined')"));
     let arm = script(ARM, "s1");
     for method in ["'attachInternals'", "'define'", "'upgrade'"] {
         assert!(arm.contains(method));
+    }
+}
+
+#[test]
+fn read_holes_are_guarded_by_fingerprints_hooks_or_blindness() {
+    let check = script(CHECK, "s1");
+    for condition in [
+        "text.startsWith('@container')",
+        "root.slotAssignment === 'manual'",
+        "el.getAttribute('hidden') === 'until-found'",
+        "error.name === 'SecurityError'",
+        "prefers-color-scheme",
+        "prefers-reduced-motion",
+        "prefers-contrast",
+        "forced-colors",
+        "orientation: portrait",
+        "win.innerWidth, win.innerHeight",
+    ] {
+        assert!(check.contains(condition), "{condition}");
+    }
+    let arm = script(ARM, "s1");
+    for hook in [
+        "'registerProperty'",
+        "'assign'",
+        "realm.FontFaceSet.prototype",
+        "'loadingdone'",
+    ] {
+        assert!(arm.contains(hook), "{hook}");
     }
 }

@@ -205,3 +205,66 @@ fn a_page_above_the_full_visibility_scan_cap_is_blind() {
     .unwrap();
     assert!(watch.blind);
 }
+
+#[test]
+fn property_slot_and_font_calls_invalidate_every_document_realm() {
+    if !common::live() {
+        return;
+    }
+    let (_harness, mut connection, page) = page();
+    for realm in ["window", "document.querySelector('iframe').contentWindow"] {
+        for action in [
+            "realm.CSS.registerProperty({name:'--hook-test',syntax:'<string>',inherits:false,initialValue:'\"test\"'})",
+            "realm.document.createElement('slot').assign()",
+            "realm.document.fonts.add(new realm.FontFace('Unused','local(Arial)'))",
+            "realm.document.fonts.delete(new realm.FontFace('Unused','local(Arial)'))",
+            "realm.document.fonts.clear()",
+            "realm.document.fonts.dispatchEvent(new realm.Event('loadingdone'))",
+        ] {
+            let deadline = Deadline::after(30_000).unwrap();
+            let watch = arm_capture_watch(&mut connection, &page, "read-hooks", deadline).unwrap();
+            assert!(!watch.blind);
+            evaluate(
+                &mut connection,
+                &page,
+                &format!("{{const realm={realm};try{{{action}}}catch{{}}}}"),
+            );
+            assert_ne!(
+                check_capture_watch(&mut connection, &page, &watch, deadline),
+                "same",
+                "{realm}: {action}"
+            );
+        }
+    }
+}
+
+#[test]
+fn media_features_are_checked_in_top_and_frame_realms() {
+    if !common::live() {
+        return;
+    }
+    let (_harness, mut connection, page) = page();
+    for realm in ["window", "document.querySelector('iframe').contentWindow"] {
+        let deadline = Deadline::after(30_000).unwrap();
+        let watch = arm_capture_watch(&mut connection, &page, "media", deadline).unwrap();
+        assert!(!watch.blind);
+        evaluate(
+            &mut connection,
+            &page,
+            &format!(
+                "{{const realm={realm};realm.savedMatchMedia=realm.matchMedia;realm.matchMedia=()=>({{matches:true}})}}"
+            ),
+        );
+        assert_ne!(
+            check_capture_watch(&mut connection, &page, &watch, deadline),
+            "same"
+        );
+        evaluate(
+            &mut connection,
+            &page,
+            &format!(
+                "{{const realm={realm};realm.matchMedia=realm.savedMatchMedia;delete realm.savedMatchMedia}}"
+            ),
+        );
+    }
+}
