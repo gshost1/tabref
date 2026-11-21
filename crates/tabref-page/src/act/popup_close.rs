@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde_json::Value;
 
 use super::page_mark::{BlockText, TextBlocks};
@@ -16,10 +18,7 @@ pub(super) fn closed_popups(
 ) -> Vec<TextChange> {
     let mut closed = Vec::new();
     for popup in before {
-        if after.iter().any(|other| {
-            other["id"] == popup["id"]
-                || (other["role"] == popup["role"] && other["name"] == popup["name"])
-        }) {
+        if after.iter().any(|other| same_popup(popup, other)) {
             continue;
         }
         let Some(block) = popup["block"].as_u64() else {
@@ -43,24 +42,15 @@ pub(super) fn closed_popups(
             continue;
         };
         let items = text_lines(item_text);
-        if items.is_empty()
-            || after_blocks.iter().any(|(_, block)| match block {
-                BlockText::Readable(text) => {
-                    text_lines(text).iter().any(|line| items.contains(line))
-                }
-                _ => false,
-            })
-        {
+        if items.is_empty() {
             continue;
         }
-        if !items.is_empty() {
-            let mut lines = text_lines(text);
-            let Some(start) = lines.windows(items.len()).position(|run| run == items) else {
-                continue;
-            };
-            lines.drain(start..start + items.len());
-            *text = lines.join("\n");
-        }
+        let mut lines = text_lines(text);
+        let Some(start) = lines.windows(items.len()).position(|run| run == items) else {
+            continue;
+        };
+        lines.drain(start..start + items.len());
+        *text = lines.join("\n");
         let name = popup["name"].as_str().unwrap_or_default();
         let name = if name.is_empty() {
             String::new()
@@ -78,4 +68,31 @@ pub(super) fn closed_popups(
         )));
     }
     closed
+}
+
+fn same_popup(before: &Value, after: &Value) -> bool {
+    if before["role"] != after["role"] {
+        return false;
+    }
+    let identity = before["watch"].as_str().is_some()
+        && before["watch"] == after["watch"]
+        && before["id"] == after["id"];
+    let position = before["position"].as_str().is_some()
+        && before["position"] == after["position"]
+        && before["block"] == after["block"];
+    let name = before["name"].as_str().unwrap_or_default();
+    let items = before["text"].as_str().is_some() && before["text"] == after["text"];
+    let count = before["count"].as_u64().is_some() && before["count"] == after["count"];
+    let shared = position
+        && before["text"]
+            .as_str()
+            .zip(after["text"].as_str())
+            .is_some_and(|(old, new)| {
+                let remaining: HashSet<_> = text_lines(new).into_iter().collect();
+                text_lines(old).iter().any(|line| remaining.contains(line))
+            });
+    identity
+        || shared
+        || (position && before["name"] == after["name"] && (items || (!name.is_empty() && count)))
+        || (before["block"] == after["block"] && items)
 }
