@@ -78,8 +78,7 @@ fn await_file(folder: &Path, bytes: usize, partial: bool) {
     loop {
         let ready = std::fs::read_dir(folder).unwrap().flatten().any(|entry| {
             entry.file_name().to_string_lossy().ends_with(".crdownload") == partial
-                && entry
-                    .metadata()
+                && std::fs::metadata(entry.path())
                     .is_ok_and(|metadata| metadata.len() >= bytes as u64)
         });
         if ready {
@@ -138,8 +137,7 @@ fn follow_up(command: &[&str], partial: bool, bytes: usize) {
             !std::fs::read_dir(&folder)
                 .unwrap()
                 .flatten()
-                .any(|entry| entry
-                    .metadata()
+                .any(|entry| std::fs::metadata(entry.path())
                     .is_ok_and(|metadata| metadata.len() > MB as u64)),
             "over-cap download left in {folder:?}"
         );
