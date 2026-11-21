@@ -12,6 +12,7 @@ enum Mode {
     Blocked,
     Recover,
     BrowserSlow,
+    BrowserError,
     Partial,
     ConfirmProgress,
     Daemon,
@@ -46,6 +47,10 @@ impl CdpTransport for Delayed {
                 .frames
                 .push_back(json!({"id":3,"error":{"code":-32000,"message":"denied"}}).to_string()),
             "Page.enable" if self.mode == Mode::Partial => self.frames.push_back(reply(3)),
+            "Target.getTargetInfo" if self.mode == Mode::BrowserError => self.frames.push_back(
+                json!({"id":value["id"],"error":{"code":-32000,"message":"unavailable"}})
+                    .to_string(),
+            ),
             "Target.getTargetInfo" if self.mode != Mode::BrowserSlow => {
                 self.frames.push_back(reply(value["id"].as_u64().unwrap()));
                 if matches!(self.mode, Mode::Recover | Mode::ConfirmProgress) {
@@ -69,7 +74,7 @@ impl CdpTransport for Delayed {
         match (self.mode, self.empty_reads) {
             (Mode::Partial, 2) => Ok(reply(2)),
             (Mode::ConfirmProgress, 3) => Ok(reply(3)),
-            (Mode::BrowserSlow, 2) => {
+            (Mode::BrowserSlow, 3) | (Mode::BrowserError, 2) => {
                 self.frames.push_back(reply(3));
                 Ok(reply(2))
             }
@@ -84,6 +89,7 @@ fn staged_waits_preserve_pending_replies_and_only_fail_after_confirmation() {
         Mode::Blocked,
         Mode::Recover,
         Mode::BrowserSlow,
+        Mode::BrowserError,
         Mode::Partial,
         Mode::ConfirmProgress,
         Mode::Daemon,
@@ -117,7 +123,11 @@ fn staged_waits_preserve_pending_replies_and_only_fail_after_confirmation() {
             checked,
             matches!(
                 mode,
-                Mode::Blocked | Mode::Recover | Mode::BrowserSlow | Mode::ConfirmProgress
+                Mode::Blocked
+                    | Mode::Recover
+                    | Mode::BrowserSlow
+                    | Mode::BrowserError
+                    | Mode::ConfirmProgress
             )
         );
         match mode {
@@ -151,6 +161,12 @@ fn staged_waits_preserve_pending_replies_and_only_fail_after_confirmation() {
             }
             _ => {
                 assert!(result.is_ok());
+                if matches!(
+                    mode,
+                    Mode::BrowserSlow | Mode::BrowserError | Mode::Partial | Mode::ConfirmProgress
+                ) {
+                    assert!(budgets.last().unwrap() > &500);
+                }
             }
         }
     }
