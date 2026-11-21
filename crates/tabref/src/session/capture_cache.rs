@@ -51,6 +51,18 @@ struct Kept {
     actions: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct CaptureAccess {
+    cache: Arc<CaptureCache>,
+    keep: bool,
+}
+
+impl CaptureAccess {
+    fn writable(&self) -> Option<&Arc<CaptureCache>> {
+        self.keep.then_some(&self.cache)
+    }
+}
+
 impl CaptureCache {
     /// Forgets every kept capture.
     pub(crate) fn clear(&self) {
@@ -90,12 +102,24 @@ impl CaptureCache {
 impl Session {
     /// Lets this command keep and reuse captures in `cache`.
     pub(crate) fn keep_captures(&mut self, cache: Arc<CaptureCache>) {
-        self.captures = Some(cache);
+        self.reuse_captures(cache);
+        if let Some(access) = &mut self.captures {
+            access.keep = true;
+        }
+    }
+
+    /// Lets this command reuse captures without arming watches or keeping
+    /// any captures it reads itself.
+    pub(crate) fn reuse_captures(&mut self, cache: Arc<CaptureCache>) {
+        self.captures = Some(CaptureAccess { cache, keep: false });
     }
 
     /// Whether this command keeps its captures for the next one to reuse.
     pub(crate) fn keeps_captures(&self) -> bool {
-        self.captures.is_some()
+        self.captures
+            .as_ref()
+            .and_then(CaptureAccess::writable)
+            .is_some()
     }
 
     /// A capture of the current tab: the kept one when the page provably
@@ -113,7 +137,7 @@ impl Session {
     /// as it is now. A capture found stale is forgotten. If the check
     /// times out, this command reads fresh and the next one can check again.
     pub(crate) fn reusable_capture(&mut self) -> Option<Arc<CapturedSnapshot>> {
-        let cache = self.captures.clone()?;
+        let cache = Arc::clone(&self.captures.as_ref()?.cache);
         let page = self.page().ok()?;
         let key = self.capture_key(&page);
         let kept = cache.take(&key)?;
@@ -142,7 +166,7 @@ impl Session {
     /// Arms the page's watch before a capture, when this command keeps
     /// captures.
     pub(super) fn arm_watch(&mut self, page: &PageSession) -> Option<CaptureWatch> {
-        self.captures.as_ref()?;
+        self.captures.as_ref()?.writable()?;
         let deadline = self.deadline().capped(ARM_WAIT);
         let token = new_snapshot_id();
         arm_capture_watch(self.connection(), page, &token, deadline)
@@ -158,7 +182,12 @@ impl Session {
         captured: &Arc<CapturedSnapshot>,
         watch: Option<CaptureWatch>,
     ) {
-        let Some(cache) = self.captures.clone() else {
+        let Some(cache) = self
+            .captures
+            .as_ref()
+            .and_then(CaptureAccess::writable)
+            .cloned()
+        else {
             return;
         };
         let key = self.capture_key(page);
@@ -189,4 +218,34 @@ impl Session {
 
 fn page_actions(store: &RefStore) -> Option<String> {
     store.read_state(PAGE_ACTIONS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Arc, CaptureAccess, CaptureCache};
+
+    #[test]
+    fn reuse_only_access_cannot_arm_or_keep() {
+        let cache = Arc::new(CaptureCache::default());
+        let access = CaptureAccess {
+            cache: Arc::clone(&cache),
+            keep: false,
+        };
+        assert!(Arc::ptr_eq(&access.cache, &cache));
+        assert!(access.writable().is_none());
+    }
+
+    #[test]
+    fn keeping_access_can_arm_and_keep_in_the_same_cache() {
+        let cache = Arc::new(CaptureCache::default());
+        let access = CaptureAccess {
+            cache: Arc::clone(&cache),
+            keep: true,
+        };
+        assert!(
+            access
+                .writable()
+                .is_some_and(|writable| Arc::ptr_eq(writable, &cache))
+        );
+    }
 }
