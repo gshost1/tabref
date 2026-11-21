@@ -13,12 +13,20 @@ pub(crate) fn prepare<'a>(
     known: &HashSet<String>,
     changes: &[TextChange],
     documents: impl Fn(&str) -> Option<&'a [DomTree]>,
+    displayed: impl FnOnce(&[&AccessibilityNode]) -> HashSet<String>,
 ) -> ReportChanges<'a> {
     let mut controls = Vec::new();
     collect(tree, known, &mut controls);
     controls.retain(|node| !native_option(node, &documents));
+    let displayed = displayed(&controls);
     let owners: Vec<_> = controls
         .iter()
+        .filter(|node| {
+            node.identity
+                .retained_object
+                .as_ref()
+                .is_some_and(|token| displayed.contains(token))
+        })
         .filter_map(|node| owner(node, &documents))
         .collect();
     if owners.is_empty() {

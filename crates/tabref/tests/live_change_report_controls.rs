@@ -75,6 +75,7 @@ fn custom_open_prints_options_once_and_caps_them() {
         8
     );
     assert!(text.contains("+11 more new: tabref snap"), "{text}");
+    assert!(text.contains("+ Sports"), "{text}");
 }
 
 #[test]
@@ -111,6 +112,7 @@ fn aria_owns_options_are_still_reported_once() {
     report("ARIA OWNS OPEN", &text);
     assert!(text.contains("option \"Announcements\""), "{text}");
     assert!(!text.contains("+ Announcements"), "{text}");
+    assert!(text.contains("+ Events"), "{text}");
 }
 
 #[test]

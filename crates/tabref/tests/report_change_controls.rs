@@ -50,6 +50,14 @@ fn document(nodes: Vec<DomNode>) -> [DomTree; 1] {
     }]
 }
 
+fn shown(controls: &[&AccessibilityNode]) -> HashSet<String> {
+    controls
+        .iter()
+        .take(8)
+        .filter_map(|node| node.identity.retained_object.clone())
+        .collect()
+}
+
 #[test]
 fn native_options_are_filtered_but_aria_owned_options_are_not() {
     let docs = document(vec![
@@ -67,7 +75,7 @@ fn native_options_are_filtered_but_aria_owned_options_are_not() {
         ],
         ..Default::default()
     };
-    let report = action_changes::prepare(&tree, &HashSet::new(), &[], |_| Some(&docs));
+    let report = action_changes::prepare(&tree, &HashSet::new(), &[], |_| Some(&docs), shown);
     assert_eq!(report.controls.len(), 1);
     assert_eq!(
         report.controls[0].identity.name.as_deref(),
@@ -92,7 +100,7 @@ fn only_complete_owned_added_lines_are_deduplicated() {
             after: "Value new".into(),
         },
     ];
-    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs));
+    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
     assert_eq!(report.changes, changes[1..]);
     assert_eq!(report.controls.len(), 1);
 }
@@ -111,14 +119,14 @@ fn an_error_matching_a_control_name_survives_and_unknown_dom_is_conservative() {
         TextChange::Added("Retry".into()),
         TextChange::Added("Retry".into()),
     ];
-    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs));
+    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
     assert_eq!(report.changes, changes);
     assert_eq!(
-        action_changes::prepare(&tree, &HashSet::new(), &changes, |_| None).changes,
+        action_changes::prepare(&tree, &HashSet::new(), &changes, |_| None, shown).changes,
         changes
     );
     assert!(
-        action_changes::prepare(&tree, &HashSet::new(), &[], |_| None)
+        action_changes::prepare(&tree, &HashSet::new(), &[], |_| None, shown)
             .changes
             .is_empty()
     );
@@ -141,10 +149,10 @@ fn known_controls_changed_values_and_removed_lines_remain() {
         },
         TextChange::Removed("Continue".into()),
     ];
-    let report = action_changes::prepare(&tree, &known, &changes, |_| Some(&docs));
+    let report = action_changes::prepare(&tree, &known, &changes, |_| Some(&docs), shown);
     assert!(report.controls.is_empty());
     assert_eq!(report.changes, changes);
-    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs));
+    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
     assert_eq!(report.controls.len(), 1);
     assert_eq!(report.changes, changes[1..]);
 }
@@ -160,12 +168,45 @@ fn inaccessible_labels_invalid_tokens_and_truncated_names_keep_added_text() {
         let mut tree = control("button", &name, 2);
         let changes = vec![TextChange::Added(name)];
         assert_eq!(
-            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs)).changes,
+            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown)
+                .changes,
             changes
         );
         tree.identity.retained_object = Some("invalid".into());
-        let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs));
+        let report =
+            action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
         assert_eq!(report.controls.len(), 1);
         assert_eq!(report.changes, changes);
     }
+}
+
+#[test]
+fn capped_controls_and_controls_only_in_row_summaries_keep_their_added_names() {
+    let mut nodes = vec![dom("BODY", 1, None, (0..9).map(|n| n * 2 + 1).collect())];
+    let mut children = Vec::new();
+    let mut changes = Vec::new();
+    for n in 0..9 {
+        let index = nodes.len();
+        let id = index as i64 + 1;
+        let name = format!("Option {n}");
+        nodes.push(dom("LI", id, Some(0), vec![index + 1]));
+        nodes.push(text(&name, id + 1, index));
+        children.push(control("option", &name, id));
+        changes.push(TextChange::Added(name));
+    }
+    let docs = document(nodes);
+    let tree = AccessibilityNode {
+        children,
+        ..Default::default()
+    };
+    let report = action_changes::prepare(&tree, &HashSet::new(), &changes, |_| Some(&docs), shown);
+    assert_eq!(report.changes, [TextChange::Added("Option 8".into())]);
+    let report = action_changes::prepare(
+        &tree,
+        &HashSet::new(),
+        &changes,
+        |_| Some(&docs),
+        |_| HashSet::new(),
+    );
+    assert_eq!(report.changes, changes);
 }

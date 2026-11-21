@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
-use tabref_core::AppError;
+use tabref_core::{AccessibilityNode, AppError};
 
 use super::acted::Acted;
 use super::action_report_changes::{change_data, counted, reload_head, step_change, within_budget};
@@ -146,9 +146,22 @@ fn effect_block(
         None
     };
     let prepared = captured.as_ref().map(|captured| {
-        prepare(&captured.tree, known, &page.changes, |target| {
-            captured.dom(target)
-        })
+        prepare(
+            &captured.tree,
+            known,
+            &page.changes,
+            |target| captured.dom(target),
+            |controls| {
+                let found = control_lines(controls);
+                let (_, outside) = redrawn(&page.changes, &found, |target| captured.dom(target));
+                let shown: HashSet<_> = outside.iter().take(NEW_SHOWN).collect();
+                found
+                    .iter()
+                    .filter(|control| shown.contains(&control.line))
+                    .map(|control| control.token.to_owned())
+                    .collect()
+            },
+        )
     });
     let changes = counted(
         prepared
@@ -169,17 +182,7 @@ fn effect_block(
         return Ok((lines, data));
     }
     if let (Some(captured), Some(prepared)) = (&captured, &prepared) {
-        let found: Vec<_> = prepared
-            .controls
-            .iter()
-            .filter_map(|node| {
-                Some(NewControl {
-                    line: styled(&node_line(node, NEW_LINE_CHARS)),
-                    name: node.identity.name.as_deref(),
-                    token: node.identity.retained_object.as_deref()?,
-                })
-            })
-            .collect();
+        let found = control_lines(&prepared.controls);
         let (in_rows, outside) = redrawn(&page.changes, &found, |target| captured.dom(target));
         let shown = outside.len().min(NEW_SHOWN);
         lines.extend(outside.iter().take(shown).map(|line| format!("new {line}")));
@@ -202,6 +205,19 @@ fn text_check_data(page: &tabref_page::PageChanges) -> Value {
         "unread_frames": page.unread_frames,
         "unchecked_text_blocks": page.unchecked_text_blocks,
     })
+}
+
+fn control_lines<'a>(controls: &[&'a AccessibilityNode]) -> Vec<NewControl<'a>> {
+    controls
+        .iter()
+        .filter_map(|node| {
+            Some(NewControl {
+                line: styled(&node_line(node, NEW_LINE_CHARS)),
+                name: node.identity.name.as_deref(),
+                token: node.identity.retained_object.as_deref()?,
+            })
+        })
+        .collect()
 }
 
 fn text_check_note(page: &tabref_page::PageChanges) -> Option<String> {
