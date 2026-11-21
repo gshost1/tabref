@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
-use tabref_core::{AccessibilityNode, AppError};
+use tabref_core::AppError;
 
 use super::acted::Acted;
 use super::action_report_changes::{change_data, counted, reload_head, step_change, within_budget};
@@ -12,6 +12,7 @@ use super::redrawn_rows::{NewControl, redrawn};
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
+use crate::view::action_changes::prepare;
 use crate::view::bot_check::action_bot_check;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
@@ -137,13 +138,29 @@ fn effect_block(
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
-    let changes = counted(&page.changes);
+    let captured = if !effects.settled.navigated
+        && (page.changed_anything() || effects.settled.same_document)
+    {
+        Some(session.capture()?)
+    } else {
+        None
+    };
+    let prepared = captured.as_ref().map(|captured| {
+        prepare(&captured.tree, known, &page.changes, |target| {
+            captured.dom(target)
+        })
+    });
+    let changes = counted(
+        prepared
+            .as_ref()
+            .map_or(&page.changes, |report| &report.changes),
+    );
     if effects.settled.navigated {
         lines.extend(reload_head(&changes));
     } else {
         lines.extend(within_budget(&changes));
     }
-    merge(&mut data, change_data(&changes));
+    merge(&mut data, change_data(&counted(&page.changes)));
     lines.extend(text_check_note(page));
     if effects.settled.navigated {
         let report = current_page_view(session)?;
@@ -151,10 +168,18 @@ fn effect_block(
         merge(&mut data, json!({ "page": report.data }));
         return Ok((lines, data));
     }
-    let captured = if page.changed_anything() || effects.settled.same_document {
-        let captured = session.capture()?;
-        let mut found = Vec::new();
-        new_controls(&captured.tree, known, &mut found);
+    if let (Some(captured), Some(prepared)) = (&captured, &prepared) {
+        let found: Vec<_> = prepared
+            .controls
+            .iter()
+            .filter_map(|node| {
+                Some(NewControl {
+                    line: styled(&node_line(node, NEW_LINE_CHARS)),
+                    name: node.identity.name.as_deref(),
+                    token: node.identity.retained_object.as_deref()?,
+                })
+            })
+            .collect();
         let (in_rows, outside) = redrawn(&page.changes, &found, |target| captured.dom(target));
         let shown = outside.len().min(NEW_SHOWN);
         lines.extend(outside.iter().take(shown).map(|line| format!("new {line}")));
@@ -164,10 +189,7 @@ fn effect_block(
         lines.extend(in_rows);
         let appeared: Vec<&String> = found.iter().map(|control| &control.line).collect();
         merge(&mut data, json!({ "new": appeared }));
-        Some(captured)
-    } else {
-        None
-    };
+    }
     if let Some(check) = action_bot_check(session, &page.title, captured.as_ref()) {
         lines.insert(0, check.note());
         check.add_data(&mut data);
@@ -213,26 +235,6 @@ fn nothing_seen(acted: &Acted) -> Option<&'static str> {
     } else {
         NOTHING_SEEN
     })
-}
-
-fn new_controls<'a>(
-    node: &'a AccessibilityNode,
-    known: &HashSet<String>,
-    found: &mut Vec<NewControl<'a>>,
-) {
-    if node.ref_id.is_some()
-        && let Some(token) = &node.identity.retained_object
-        && !known.contains(token)
-    {
-        found.push(NewControl {
-            line: styled(&node_line(node, NEW_LINE_CHARS)),
-            name: node.identity.name.as_deref(),
-            token,
-        });
-    }
-    for child in &node.children {
-        new_controls(child, known, found);
-    }
 }
 
 const MAX_DIALOG_LINES: usize = 10;
