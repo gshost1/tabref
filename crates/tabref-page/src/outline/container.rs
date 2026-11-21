@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use super::block_kind::BlockKind;
 use super::dom_tree::DomTree;
+use super::element_kind::semantic_kind;
 use super::ref_label::RefLabel;
 use super::text_runs::subtree_text;
 
@@ -23,29 +25,31 @@ pub(crate) fn is_container(
     let Some(node) = tree.node(index) else {
         return false;
     };
-    if matches!(
-        node.tag(),
-        "INPUT" | "SELECT" | "TEXTAREA" | "SUMMARY" | "OPTION"
-    ) {
+    if matches!(node.tag(), "INPUT" | "SELECT" | "TEXTAREA" | "OPTION") {
         return false;
     }
+    let summary = node.tag() == "SUMMARY";
     let mut pending: Vec<usize> = node.children.clone();
     let mut seen = 0usize;
     while let Some(current) = pending.pop() {
         seen += 1;
         if seen > 4_000 {
-            return true;
+            return !summary;
         }
         let Some(inner) = tree.node(current) else {
             continue;
         };
         let nested_ref = refs.contains_key(&(tree.target_id.clone(), inner.backend_id));
         let nested_link = inner.tag() == "A" && inner.attr("href").is_some();
-        if inner.is_shown() && (CONTAINER_TAGS.contains(&inner.tag()) || nested_ref || nested_link)
-        {
+        let structural = if summary {
+            matches!(semantic_kind(inner, false), Some(BlockKind::Heading(_)))
+        } else {
+            CONTAINER_TAGS.contains(&inner.tag()) || nested_ref || nested_link
+        };
+        if inner.is_shown() && structural {
             return true;
         }
         pending.extend(inner.children.iter().copied());
     }
-    subtree_text(tree, index).chars().count() > LONG_NAME
+    !summary && subtree_text(tree, index).chars().count() > LONG_NAME
 }

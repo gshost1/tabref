@@ -1,12 +1,14 @@
+use std::collections::HashSet;
+
 use serde_json::{Value, json};
-use tabref_core::AppError;
-use tabref_page::search_text;
+use tabref_core::{AccessibilityNode, AppError};
+use tabref_page::{OutlineInput, TextMatch, squash};
 
 use super::find_room::{room_note, scroll_room};
 use crate::output::outcome::Outcome;
 use crate::session::Session;
-use crate::view::find_matches::find_matches;
-use crate::view::find_view::find_lines;
+use crate::view::find_matches::{find_matches, visit_matches};
+use crate::view::find_view::find_lines_with_ax;
 use crate::view::outline_source::outline_input;
 use crate::view::row_window::RowWindow;
 use crate::view::view_options::ViewOptions;
@@ -66,14 +68,17 @@ pub(crate) fn search(
         snapshot_find(&captured.tree, &url, text, role, cap)
     } else {
         let input = outline_input(session, Some(&captured))?;
-        let (matches, total) = search_text(&input, text, cap);
-        if total == 0 {
-            snapshot_find(&captured.tree, &url, text, None, cap)
+        let (matches, dom_total, ax, ax_total) = merged_matches(&input, &captured.tree, text, cap);
+        if dom_total == 0 {
+            snapshot_result(&url, text, ax_total, ax)
         } else {
             let options = ViewOptions::snap(&url, false, RowWindow::default());
-            let mut lines = find_lines(text, &matches, total, &options);
+            let total = dom_total + ax_total;
+            let mut lines = find_lines_with_ax(text, &matches, &ax, total, &options);
             let head = lines.remove(0);
-            let more = (total > matches.len()).then(|| lines.pop()).flatten();
+            let more = (total > matches.len() + ax.len())
+                .then(|| lines.pop())
+                .flatten();
             let mut listed = lines.clone();
             listed.extend(more.clone());
             Found {
@@ -101,30 +106,63 @@ pub(crate) fn search(
     Ok(found)
 }
 
+fn merged_matches(
+    input: &OutlineInput,
+    tree: &AccessibilityNode,
+    needle: &str,
+    cap: usize,
+) -> (Vec<TextMatch>, usize, Vec<String>, usize) {
+    let mut covered = HashSet::new();
+    let (dom, dom_total) = TextMatch::search_with(input, needle, cap, |reference, source| {
+        covered.insert((reference.map(str::to_owned), squash(source).to_lowercase()));
+    });
+    let mut ax = Vec::new();
+    let mut ax_total = 0;
+    let room = cap.saturating_sub(dom.len());
+    visit_matches(tree, needle, None, |reference, sources, render| {
+        let reference = reference.map(str::to_owned);
+        if sources
+            .iter()
+            .all(|source| covered.contains(&(reference.clone(), squash(source).to_lowercase())))
+        {
+            return;
+        }
+        ax_total += 1;
+        if ax.len() < room {
+            ax.push(render());
+        }
+    });
+    (dom, dom_total, ax, ax_total)
+}
+
 fn snapshot_find(
-    tree: &tabref_core::AccessibilityNode,
+    tree: &AccessibilityNode,
     url: &str,
     text: &str,
     role: Option<&str>,
     keep: usize,
 ) -> Found {
     let matches = find_matches(tree, text, role);
-    let shown: Vec<String> = matches.iter().take(keep).cloned().collect();
-    let more = (matches.len() > keep).then(|| {
+    let count = matches.len();
+    snapshot_result(url, text, count, matches.into_iter().take(keep).collect())
+}
+
+fn snapshot_result(url: &str, text: &str, count: usize, shown: Vec<String>) -> Found {
+    let more = (count > shown.len()).then(|| {
         format!(
             "… {} more; search a longer text or pass --role",
-            matches.len() - keep
+            count - shown.len()
         )
     });
-    let head = if matches.is_empty() {
+    let head = if count == 0 {
         format!("0 matches for \"{text}\" on {url}")
     } else {
-        format!("{} matches for \"{text}\"", matches.len())
+        format!("{count} matches for \"{text}\"")
     };
     Found {
-        count: matches.len(),
+        count,
         head,
-        data: json!({ "url": url, "count": matches.len(), "matches": shown }),
+        data: json!({ "url": url, "count": count, "matches": shown }),
         lines: shown,
         more,
         note: None,

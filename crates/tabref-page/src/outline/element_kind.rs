@@ -1,10 +1,12 @@
 use super::block_kind::BlockKind;
 use super::dom_node::DomNode;
+use super::dom_tree::DomTree;
+use super::text_runs::subtree_text;
 
 const SKIPPED_TAGS: &[&str] = &[
-    "HEAD", "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "META", "LINK", "TITLE", "SVG", "CANVAS",
-    "VIDEO", "AUDIO", "OBJECT", "EMBED", "SOURCE", "TRACK", "MAP", "IMG", "PICTURE", "HR", "WBR",
-    "PARAM", "DATALIST",
+    "HEAD", "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "META", "LINK", "TITLE", "CANVAS", "VIDEO",
+    "AUDIO", "OBJECT", "EMBED", "SOURCE", "TRACK", "MAP", "IMG", "PICTURE", "HR", "WBR", "PARAM",
+    "DATALIST",
 ];
 
 const SECTIONING: &[&str] = &["ARTICLE", "ASIDE", "MAIN", "NAV", "SECTION"];
@@ -13,6 +15,10 @@ const SECTIONING: &[&str] = &["ARTICLE", "ASIDE", "MAIN", "NAV", "SECTION"];
 /// metadata, media, scripts, and what the page hides from assistive
 /// technology.
 pub(crate) fn is_skipped(node: &DomNode) -> bool {
+    is_non_content(node) || (node.tag() == "SVG" && !has_svg_name(node))
+}
+
+fn is_non_content(node: &DomNode) -> bool {
     node.form.pseudo
         || SKIPPED_TAGS.contains(&node.tag())
         || node.attr("aria-hidden") == Some("true")
@@ -20,6 +26,39 @@ pub(crate) fn is_skipped(node: &DomNode) -> bool {
             && node
                 .attr("type")
                 .is_some_and(|kind| kind.eq_ignore_ascii_case("hidden")))
+}
+
+pub(crate) fn has_svg_name(node: &DomNode) -> bool {
+    matches!(
+        role_of(node).as_deref(),
+        Some("img" | "graphics-document" | "graphics-symbol")
+    ) && (has_label(node)
+        || node
+            .attr("title")
+            .is_some_and(|title| !title.trim().is_empty()))
+}
+
+pub(crate) fn skip_svg(tree: &DomTree, node: &DomNode) -> bool {
+    is_non_content(node)
+        || (!has_svg_name(node)
+            && !svg_metadata(tree, node).any(|child| !subtree_text(tree, child).is_empty())
+            && !node.children.iter().any(|child| {
+                tree.node(*child)
+                    .is_some_and(|child| !is_non_content(child) && has_svg_name(child))
+            }))
+}
+
+pub(crate) fn svg_metadata<'a>(
+    tree: &'a DomTree,
+    node: &'a DomNode,
+) -> impl Iterator<Item = usize> + 'a {
+    node.children.iter().copied().filter(|child| {
+        tree.node(*child).is_some_and(|node| {
+            matches!(node.tag(), "TITLE" | "DESC")
+                && node.attr("aria-hidden") != Some("true")
+                && !node.form.pseudo
+        })
+    })
 }
 
 /// The element's first ARIA role token, lower-cased.
@@ -57,6 +96,7 @@ pub(crate) fn semantic_kind(node: &DomNode, in_section: bool) -> Option<BlockKin
         "TH" => Some(BlockKind::HeaderCell),
         "BLOCKQUOTE" => Some(BlockKind::Quote),
         "PRE" => Some(BlockKind::Pre),
+        "SVG" => landmark("img"),
         "DETAILS" => Some(BlockKind::Details),
         "MAIN" => landmark("main"),
         "NAV" => landmark("nav"),
