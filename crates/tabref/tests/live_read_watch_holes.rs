@@ -230,3 +230,83 @@ fn until_found_content_is_never_retained() {
         }
     }
 }
+
+fn key(connection: &mut CdpConnection, page: &PageSession, key: &str, code: u32) {
+    for kind in ["keyDown", "keyUp"] {
+        connection.call("Input.dispatchKeyEvent", json!({"type":kind,"key":key,"windowsVirtualKeyCode":code,"nativeVirtualKeyCode":code}), Some(&page.session_id), Deadline::after(30_000).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn keyboard_modality_does_not_replay_focus_visible_content() {
+    if !common::live() {
+        return;
+    }
+    for command in ["snap", "read"] {
+        let (harness, mut connection, page) = setup(
+            "<!doctype html><style>button:focus-visible::after{content:' FV'}</style><button>Btn</button>",
+        );
+        run(&harness, &["click", "Btn"], false);
+        run(&harness, &["snap"], false);
+        key(&mut connection, &page, "ArrowLeft", 37);
+        let cached = run(&harness, &[command], false);
+        let fresh = run(&harness, &[command], true);
+        run(&harness, &["daemon", "stop"], false);
+        if command == "snap" {
+            assert!(lines(&fresh).contains("Btn FV"), "fresh: {fresh}");
+        }
+        assert_eq!(lines(&cached), lines(&fresh), "stale focus-visible content");
+    }
+}
+
+#[test]
+fn user_validation_state_does_not_replay_generated_content() {
+    if !common::live() {
+        return;
+    }
+    for command in ["snap", "read"] {
+        let (harness, mut connection, page) = setup(
+            "<!doctype html><style>input:user-invalid+button::after{content:' Bad'}</style><input id=i required><button>Go</button>",
+        );
+        key(&mut connection, &page, "Tab", 9);
+        evaluate(
+            &mut connection,
+            &page,
+            "document.querySelector('button').focus()",
+        );
+        run(&harness, &["snap"], false);
+        evaluate(&mut connection, &page, "i.focus()");
+        connection
+            .call(
+                "Input.insertText",
+                json!({"text":"a"}),
+                Some(&page.session_id),
+                Deadline::after(30_000).unwrap(),
+            )
+            .unwrap();
+        key(&mut connection, &page, "Backspace", 8);
+        evaluate(
+            &mut connection,
+            &page,
+            "i.blur();document.querySelector('button').focus()",
+        );
+        let cached = run(&harness, &[command], false);
+        let fresh = run(&harness, &[command], true);
+        run(&harness, &["daemon", "stop"], false);
+        if command == "snap" {
+            assert!(lines(&fresh).contains("Go Bad"), "fresh: {fresh}");
+        }
+        assert_eq!(lines(&cached), lines(&fresh), "stale user-invalid content");
+    }
+}
+
+#[test]
+fn indeterminate_state_does_not_replay_generated_content() {
+    if !common::live() {
+        return;
+    }
+    edit_case(
+        "<!doctype html><style>input:indeterminate+button::after{content:' Mixed'}</style><input type=checkbox id=c><button>Go</button>",
+        "c.indeterminate=true",
+    );
+}

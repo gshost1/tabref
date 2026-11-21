@@ -105,3 +105,37 @@ fn read_holes_are_guarded_by_fingerprints_hooks_or_blindness() {
         assert!(arm.contains(hook), "{hook}");
     }
 }
+
+#[test]
+fn supported_pseudo_states_are_matched_by_node_and_selector() {
+    let check = script(CHECK, "s1");
+    for selector in [
+        ":focus-visible",
+        ":focus-within",
+        ":user-invalid",
+        ":user-valid",
+        ":autofill",
+        ":indeterminate",
+        ":checked",
+        ":modal",
+        ":open",
+        ":popover-open",
+        ":target",
+        ":target-within",
+        ":placeholder-shown",
+        ":blank",
+        ":playing",
+        ":paused",
+        ":seeking",
+        ":buffering",
+        ":stalled",
+        ":muted",
+        ":volume-locked",
+        ":picture-in-picture",
+    ] {
+        assert!(check.contains(selector), "{selector}");
+    }
+    assert!(check.contains("realm.CSS.supports('selector(' + selector + ')')"));
+    assert!(check.contains("states.push(el)"));
+    assert!(check.contains("node !== watch.states[i]"));
+}
