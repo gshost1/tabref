@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions, TryLockError};
 use std::path::PathBuf;
 
 use tabref_core::{AppError, read_bounded, write_atomic};
-use tabref_page::DownloadState;
+use tabref_page::{DownloadState, now_ms};
 
 use super::download_folder::state_name;
 use super::kept_download::KeptDownload;
@@ -11,6 +11,11 @@ use crate::session::Session;
 
 const KEPT: usize = 50;
 const MAX_BYTES: u64 = 64 * 1024;
+const MAX_WATCH_MS: u64 = 24 * 60 * 60 * 1000;
+
+fn expired(entry: &KeptDownload, now: u64) -> bool {
+    entry.record.running() && now.saturating_sub(entry.record.timing.started_ms) > MAX_WATCH_MS
+}
 
 /// The downloads one browser endpoint's commands have seen, oldest first,
 /// each marked with whether a result reported it. Every change runs under
@@ -24,8 +29,14 @@ pub(crate) struct DownloadLedger {
 
 impl DownloadLedger {
     pub(crate) fn pending(&self) -> bool {
-        self.read().iter().any(|entry| {
+        let records = self.read();
+        let now = now_ms();
+        if records.iter().any(|entry| expired(entry, now)) {
+            let _ = self.try_with(|kept| kept.retain(|entry| !expired(entry, now)));
+        }
+        records.iter().any(|entry| {
             entry.watched
+                && !expired(entry, now)
                 && (entry.record.running()
                     || entry
                         .cleanup
@@ -94,7 +105,16 @@ impl DownloadLedger {
         let result = change(&mut records);
         let kept = &records[records.len().saturating_sub(KEPT)..];
         if kept != before.as_slice() {
-            write_atomic(&self.path, serde_json::to_string(kept)?.as_bytes())?;
+            if kept.is_empty() {
+                match std::fs::remove_file(&self.path) {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                        return Err(error.into());
+                    }
+                    _ => {}
+                }
+            } else {
+                write_atomic(&self.path, serde_json::to_string(kept)?.as_bytes())?;
+            }
         }
         Ok(result)
     }

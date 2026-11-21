@@ -12,7 +12,10 @@ fn entry(guid: &str, state: DownloadState, reported: bool) -> KeptDownload {
             bytes: 1,
             expected: 0,
             path: None,
-            timing: DownloadTiming::default(),
+            timing: DownloadTiming {
+                started_ms: tabref_page::now_ms(),
+                ..DownloadTiming::default()
+            },
         },
         reported,
         watched: false,
@@ -112,5 +115,33 @@ fn pending_fast_path_is_read_only_for_missing_empty_or_invalid_ledgers() {
         "empty ledger: {:.2} us/check (1000 checks)",
         started.elapsed().as_secs_f64() * 1_000.0
     );
+    std::fs::remove_dir_all(ledger.path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn abandoned_running_watches_expire_without_expiring_pending_removals() {
+    let ledger = ledger("expired");
+    let mut stale = entry("stale", DownloadState::InProgress, false);
+    stale.watched = true;
+    stale.record.timing.started_ms = tabref_page::now_ms() - super::MAX_WATCH_MS - 1000;
+    std::fs::write(
+        &ledger.path,
+        serde_json::to_vec(&vec![stale.clone()]).unwrap(),
+    )
+    .unwrap();
+    assert!(!ledger.pending());
+    assert!(!ledger.path.exists());
+    assert!(!ledger.pending());
+    let mut cleanup = stale;
+    cleanup.record.state = DownloadState::TooLarge { cap_mb: 1 };
+    cleanup.reported = true;
+    cleanup.cleanup = Some(crate::commands::downloads::cleanup::CapCleanup {
+        completed_before_cap: true,
+        pending_paths: vec!["held".into()],
+        removal_verified: false,
+    });
+    std::fs::write(&ledger.path, serde_json::to_vec(&vec![cleanup]).unwrap()).unwrap();
+    assert!(ledger.pending());
+    assert!(ledger.path.exists());
     std::fs::remove_dir_all(ledger.path.parent().unwrap()).unwrap();
 }
