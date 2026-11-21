@@ -1,8 +1,11 @@
+pub(crate) mod action_changes;
 pub(crate) mod block_renderer;
 pub(crate) mod block_titles;
 pub(crate) mod bot_check;
 pub(crate) mod budget;
 pub(crate) mod control_text;
+#[cfg(test)]
+mod cut_inline_tests;
 pub(crate) mod cut_marker;
 pub(crate) mod cut_outline;
 pub(crate) mod cut_report;

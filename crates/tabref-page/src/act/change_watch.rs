@@ -15,6 +15,7 @@ use tabref_core::{AppError, Deadline};
 
 use super::page_changes::PageChanges;
 use super::page_mark::{BlockText, PageMark, TextBlocks};
+use super::popup_close::{closed_popups, popups};
 use super::text_change::TextChange;
 use super::text_diff::{diff_page, text_lines};
 use super::text_reorder::{Cells, cells_of};
@@ -34,6 +35,7 @@ pub fn mark_page(
         url: text_field(&reply, "url"),
         title: text_field(&reply, "title"),
         blocks: text_blocks(&reply),
+        popups: popups(&reply),
     })
 }
 
@@ -46,7 +48,7 @@ pub fn page_changes(
     deadline: Deadline,
 ) -> Result<PageChanges, AppError> {
     let reply = run(connection, session, READ_WATCH, deadline)?;
-    let (changes, unchecked_text_blocks) = compare_blocks(&mark.blocks, text_blocks(&reply));
+    let (changes, unchecked_text_blocks) = compare_watched(&mark.blocks, &mark.popups, &reply);
     Ok(PageChanges {
         url: text_field(&reply, "url"),
         title: text_field(&reply, "title"),
@@ -103,6 +105,27 @@ fn compare_blocks(before: &TextBlocks, after: TextBlocks) -> (Vec<TextChange>, u
     let (before, _) = readable(before);
     let (after, cells) = readable(&after);
     (diff_page(&before, &after, &cells), over_budget.len())
+}
+
+#[cfg(test)]
+fn compare_replies(before: &Value, after: &Value) -> Vec<TextChange> {
+    compare_watched(&text_blocks(before), &popups(before), after).0
+}
+
+fn compare_watched(
+    before: &TextBlocks,
+    popups_before: &[Value],
+    after: &Value,
+) -> (Vec<TextChange>, usize) {
+    let after_blocks = text_blocks(after);
+    if after_blocks.is_empty() {
+        return compare_blocks(before, after_blocks);
+    }
+    let mut before = before.clone();
+    let mut closed = closed_popups(&mut before, &after_blocks, popups_before, &popups(after));
+    let (changes, unchecked) = compare_blocks(&before, after_blocks);
+    closed.extend(changes);
+    (closed, unchecked)
 }
 
 /// How many DOM mutations the watch has counted so far; `None` when the
@@ -177,3 +200,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "popup_close_tests.rs"]
+mod popup_close_tests;

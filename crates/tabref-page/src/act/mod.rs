@@ -34,6 +34,7 @@ pub(crate) mod key_stroke;
 pub(crate) mod option_match;
 pub(crate) mod page_changes;
 pub(crate) mod page_mark;
+pub(crate) mod popup_close;
 pub(crate) mod press_point;
 pub(crate) mod read;
 pub(crate) mod remote_element;
