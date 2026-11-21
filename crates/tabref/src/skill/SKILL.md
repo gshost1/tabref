@@ -1,47 +1,38 @@
 # tabref: read and drive Chrome from the shell
 
-Start with `tabref skill && tabref open <url>`. Read the whole output.
+Start with `tabref open <url>`. Read the whole output.
 If no browser is connected, use `tabref open <url> --launch`.
 Commands wait for the page. Don't add sleeps.
-See `tabref skill more` for waits, `connect` to your own Chrome, downloads, dialogs, logins, and Chrome-based apps.
-Options: `tabref CMD --help`.
+See `tabref skill more` for waits, `connect` to your own Chrome, downloads, dialogs, logins, tabs, and Chrome-based apps.
 
-## Reading
-One line per block; `#` lines are headings. Controls show their ref: `[e5 button Save]`,
-`[e7 Edit -> /admin/7/edit]` (open the address or click the ref),
-`[e9 select Size = "M" options: S | M | L]`. Lists say `N items:`, tables `table N rows:`,
-repeats `(1/3)`: count with these across the whole page, not the first block. A cut ends with the command for the rest
-(`tabref snap --rows 21-`); run it before answering about it. `tabref find TEXT` searches all text,
-hidden too; `tabref read` prints the main text and `tabref read --section "<heading>"` reads one section.
-A `dialog` line at the top: click one of its buttons (decline cookies).
+## Read
+`tabref snap`: one line per block; controls show refs: `[e5 button Save]`,
+`[e9 select Size = "M" options: S | M | L]`, links their address: `[e7 Next -> <address>]`.
+Count `N items:`, `table N rows:` and repeats `(1/3)` across the whole page, not the first block.
+A cut view ends with an outline of the rest; if what you need is not shown, use its `--from N`,
+`tabref read --section "<heading>"` or `tabref find TEXT` (hidden text too). A `dialog` line at the top: click one of its buttons.
 
-## Acting
-`click T`, `fill T VALUE`, `type T TEXT` (adds), `select T LABEL|VALUE`, `check T`, `uncheck T`,
-`press KEY [T]`, `focus T`, `hover T`, `scroll down|T`, `double-click T`, `upload T FILE`.
-T is a ref (`e4`) or what the page shows: `"Save"`, `button "Save"`, `"Edit" nth 2`,
-`"Edit" in "<row text>"`, `"Reply" after "<text>"`.
-Single commands accept these qualifiers too: `tabref fill "Email" in "Billing" a@b.c` (value last).
-Copy a data table row from `snap` to use it as an `in` scope.
-Dates and times take plain values (`2027-07-31`, `14:30`). Each action prints what it changed (new address,
-`"67.00" -> "62.00"`, new rows and controls): read that instead of taking a snapshot.
+## Act
+`click T`, `fill T VALUE` (replaces), `type T TEXT` (appends), `select T LABEL`, `check T`, `uncheck T`,
+`press KEY`, `hover T`, `scroll down|T`, `upload T FILE`. T is a ref (`e4`) or what the page shows: `"Save"`,
+`button "Save"`, `"Edit" nth 2`, `"Edit" in "<row text>"`, `"Reply" after "<text>"`.
+Each action prints what it changed: read that instead of taking a snapshot.
+`STALE_REF`: use the fresh ref it printed.
 
 ## Many steps: one call
-Put known steps in one `tabref do`. It stops at the first failing step and reports what the last step changed.
+Put all known steps in one `tabref do`; each step prints its result. Snap only if the output
+did not show what you need. It stops at the first failing step.
 
     tabref do <<'EOF'
-    for name price in Cap 12.00 Mug 9.50
-      open /admin/products
-      click "Edit" in "{name}"
-      fill "Price" {price}
-      click "Save"
-    end
+    fill "Name" Ada
+    fill "Email" a@b.c
+    check "I agree"
+    click "Submit"
     EOF
 
+`for name qty in Pen 2 Cup 5` ... `end` runs the steps per pair as `{name}` and `{qty}`.
+Pages: loop the `Next` or `2` link's address with the page number as `{n}`:
+`for n in 2 3 4`, `open "<address with {n}>"`, `find TEXT`, `end`; no address: `click "Next"` in the loop.
+Lazy list: repeat `scroll down` in a `for` loop (`for n in 1 2 3 4 5 6`), then `find TEXT`.
 Steps: any action but `upload`, `open URL`, `expect text|gone|url X`,
 `expect T is visible|enabled|hidden|gone|value=X`, `read [T]`, `find TEXT`, `js "EXPR"`, `snap`.
-To load more of a list, repeat `scroll down` in a `for` loop (`for n in 1 2 3 4 5 6`), then `find`:
-each scroll waits for what it loads. `tabref js "EXPR"` returns a page value as JSON.
-Tabs: `tabref tabs`, `tabref tab N`, `tabref open --new-tab URL`.
-
-## Errors
-`ELEMENT_NOT_FOUND`: check close names. `AMBIGUOUS_TARGET`: add `nth N`, `in` or `after`. `STALE_REF`: use the fresh ref.
