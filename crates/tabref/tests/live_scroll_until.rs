@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::lazy_site::{lazy_site, rows};
+use common::lazy_site::{batch, lazy_site, rows};
 use common::{harness, live};
 
 const PAGE: &str = r#"<!doctype html><style>li{height:18px}</style><ol id=rows>ROWS</ol><p id=tail>More</p><script>
@@ -16,6 +16,35 @@ new IntersectionObserver(entries=>{
  });
 }).observe(document.getElementById('tail'));
 </script>"#;
+
+#[test]
+fn a_do_scroll_until_prints_the_summary_and_indented_find_refs() {
+    if !live() {
+        return;
+    }
+    let base = lazy_site(vec![("/", PAGE.replace("ROWS", &rows("li", "Entry", 30)))]);
+    let tabref = harness("do-scroll-until");
+    tabref.ok(&["open", &base]);
+    let run = batch(
+        &tabref,
+        "scroll down --until \"Entry 810\"\nscroll down --to-end\n",
+    );
+    assert!(run.ok, "{}\n{}", run.stdout, run.stderr);
+    assert!(
+        run.stdout.contains("ok found \"Entry 810\" after"),
+        "{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.lines().any(|line| line.starts_with("  ")
+            && line.contains("Entry 810")
+            && line.contains("@s")),
+        "{}",
+        run.stdout
+    );
+    assert!(run.stdout.contains("ok scrolled down"), "{}", run.stdout);
+    assert!(!run.stdout.contains("\n+ "), "{}", run.stdout);
+}
 
 #[test]
 fn one_command_reaches_a_late_lazy_row_and_returns_matches() {

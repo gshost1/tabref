@@ -3,6 +3,34 @@ use tabref_page::ScrollOutcome;
 use super::first_line;
 
 #[test]
+fn batch_scroll_loop_options_keep_quoted_text_and_scoped_containers() {
+    use crate::commands::step_words::split_words;
+    let parsed = super::parse_batch_scroll(
+        &split_words("down in list \"Messages\" --until \"Entry 810\"").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(parsed.direction, "down");
+    assert_eq!(parsed.until.as_deref(), Some("Entry 810"));
+    assert!(parsed.container.is_some());
+    assert!(!parsed.to_end);
+    let parsed = super::parse_batch_scroll(&split_words("--to-end").unwrap()).unwrap();
+    assert_eq!(parsed.direction, "down");
+    assert!(parsed.to_end);
+    for invalid in [
+        "down --until",
+        "down --until X --to-end",
+        "e1 --to-end",
+        "down --to-end --unknown",
+        "down --until X --until Y",
+    ] {
+        assert!(
+            super::parse_batch_scroll(&split_words(invalid).unwrap()).is_err(),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
 fn scroll_loop_flags_parse_and_conflict() {
     use crate::cli::Cli;
     use clap::Parser;
