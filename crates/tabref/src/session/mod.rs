@@ -55,7 +55,8 @@ use user_chrome_record::{choice_in_use, opt_in_guard};
 /// lives for one command; the daemon keeps one alive across commands and
 /// starts a new [`CommandScope`] for each, so the connection, the attached
 /// sessions and the domains they enabled are paid for once. A daemon command
-/// that only reads may also keep and reuse captures (see [`CaptureCache`]).
+/// that only reads may also keep and reuse captures; actions always read
+/// fresh (see [`capture_cache::CaptureCache`]).
 pub(crate) struct Session {
     connection: CdpConnection,
     browser: ReachedBrowser,

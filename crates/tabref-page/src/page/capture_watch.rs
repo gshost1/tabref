@@ -19,6 +19,18 @@
 //! soon as it knows. Form state includes a checkbox's `indeterminate` and a
 //! multi-select's whole selection; focus is followed into open shadow roots
 //! and same-origin frames.
+//!
+//! Every element's visibility is checked; pages above [`MAX_ELEMENTS`] are
+//! blind. Form validity and finished fill animations are watched too, since
+//! they can change rendering without mutations. Upgraded custom elements
+//! are blind: ElementInternals can change accessibility and custom states
+//! without observable mutations, including scoped registries. Manual slots,
+//! until-found content and container queries are blind. Opaque stylesheet
+//! identity, href, disabled and media state are recorded, but unreadable
+//! rules may contain container queries, so these sheets are blind too,
+//! including imports inside readable sheets. Other stylesheet errors and oversized
+//! form or stylesheet state are blind rather than sampled.
+//! Supported state pseudo-classes are fingerprinted by matched node identity.
 
 use serde_json::{Value, json};
 use tabref_cdp::is_timeout;
@@ -27,20 +39,28 @@ use tabref_core::{AppError, Deadline};
 use super::evaluate::evaluate_quietly;
 use crate::{CdpConnection, PageSession};
 
-const MAX_ELEMENTS: usize = 1_000;
+const MAX_ELEMENTS: usize = 30_000;
 
 const SCAN: &str = r"const scan = () => {
     const roots = [];
+    const sheetObjects = [];
+    const animations = [];
+    const states = [];
     let blind = false;
     let state = '';
     let total = 0;
     let visible = 0;
     let visibility = 0;
+    let forms = 0;
+    let styleSize = 0;
     const visibilityOptions = { opacityProperty: true, visibilityProperty: true };
     const frames = 'iframe, frame, object, embed';
     const moving = root => {
       try {
-        return root.getAnimations().some(animation => animation.pending || animation.playState === 'running');
+        const entries = root.getAnimations().map(animation => ({ animation,
+          playState: animation.playState, currentTime: animation.currentTime }));
+        animations.push(...entries);
+        return entries.some(entry => entry.animation.pending || entry.playState === 'running');
       } catch (error) { return true; }
     };
     const unreadable = root => {
@@ -51,17 +71,62 @@ const SCAN: &str = r"const scan = () => {
       }
       return false;
     };
+    const styles = (sheets, realm) => {
+      for (const sheet of sheets) {
+        sheetObjects.push(sheet, sheet.ownerNode, sheet.ownerRule);
+        state += '\u0008' + JSON.stringify([sheet.href, sheet.disabled, sheet.media.mediaText]);
+        if (sheet.media.mediaText) state += realm.matchMedia(sheet.media.mediaText).matches;
+        const rules = list => {
+          for (const rule of list) {
+            const text = rule.cssText;
+            if (text.startsWith('@container')) { blind = true; return; }
+            styleSize += text.length;
+            if (styleSize > 100_000) { blind = true; return; }
+            state += '\u0009' + text;
+            if (rule.media) state += realm.matchMedia(rule.media.mediaText).matches;
+            if (rule.styleSheet) styles([rule.styleSheet], realm);
+            else if (rule.cssRules) rules(rule.cssRules);
+            if (blind) return;
+          }
+        };
+        try { rules(sheet.cssRules); } catch (error) {
+          if (error.name === 'SecurityError') state += ':opaque';
+          blind = true;
+        }
+        if (blind) return;
+      }
+    };
     const walk = root => {
       roots.push(root);
-      if (root.nodeType === 9 && root.getElementsByTagName('*').length > MAX_ELEMENTS - total) {
-        blind = true;
-        return;
-      }
+      if (root.slotAssignment === 'manual') { blind = true; return; }
       if (moving(root) || unreadable(root)) { blind = true; return; }
       const elements = root.querySelectorAll('*');
       total += elements.length;
       if (total > MAX_ELEMENTS) { blind = true; return; }
       state += '\u0006' + (root.styleSheets?.length ?? 0) + ':' + (root.adoptedStyleSheets?.length ?? 0);
+      const doc = root.nodeType === 9 ? root : root.ownerDocument;
+      const realm = doc.defaultView;
+      const selectors = [':hover', ':active', ':fullscreen', ':focus-visible', ':focus-within',
+        ':user-invalid', ':user-valid', ':autofill', ':indeterminate', ':checked', ':modal', ':open',
+        ':popover-open', ':target', ':target-within', ':placeholder-shown', ':blank', ':playing',
+        ':paused', ':seeking', ':buffering', ':stalled', ':muted', ':volume-locked', ':picture-in-picture']
+        .filter(selector => { try { return realm.CSS.supports('selector(' + selector + ')'); } catch { return false; } });
+      if (selectors.length) {
+        for (const el of root.querySelectorAll(selectors.join(','))) {
+          for (let i = 0; i < selectors.length; i++) {
+            try { if (el.matches(selectors[i])) { state += '\u000a' + i; states.push(el); } } catch {}
+          }
+        }
+      }
+      for (const query of ['(prefers-color-scheme: dark)', '(prefers-color-scheme: light)',
+        '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)',
+        '(prefers-contrast: more)', '(prefers-contrast: less)', '(prefers-contrast: custom)',
+        '(prefers-contrast: no-preference)', '(forced-colors: active)', '(forced-colors: none)',
+        '(orientation: portrait)', '(orientation: landscape)']) state += ':' + realm.matchMedia(query).matches;
+      styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
+      if (blind) return;
+      state += ':' + doc.defaultView.scrollX + ':' + doc.defaultView.scrollY
+        + ':' + doc.defaultView.innerWidth + ':' + doc.defaultView.innerHeight;
       for (let index = 0; index < elements.length; index++) {
         if (blind) return;
         const el = elements[index];
@@ -71,14 +136,20 @@ const SCAN: &str = r"const scan = () => {
         }
         if (el.shadowRoot) walk(el.shadowRoot);
         const tag = el.localName;
+        if ((tag.includes('-') && el.matches(':defined')) || el.getAttribute('hidden') === 'until-found') { blind = true; return; }
         if (tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed') {
           let inner = null;
           try { inner = el.contentDocument; } catch (error) { inner = null; }
           if (inner) walk(inner); else blind = true;
         } else if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+          forms += 1;
+          if (forms > 1_000 || el.value.length > 100_000
+            || (el.options && el.options.length > 1_000)) { blind = true; return; }
           state += '\u0001' + el.value + '\u0002' + (el.checked ? 1 : 0) + (el.indeterminate ? 1 : 0)
             + '\u0002' + (el.selectedIndex ?? '');
+          state += '\u0002' + JSON.stringify([el.validity.valid, el.validationMessage]);
           if (el.multiple && el.selectedOptions) state += '\u0002' + [...el.selectedOptions].map(option => option.index).join(',');
+          if (state.length > 100_000) { blind = true; return; }
         }
         if (el.hasAttribute('popover')) {
           try { state += '\u0003' + (el.matches(':popover-open') ? 1 : 0); } catch (error) { blind = true; }
@@ -98,7 +169,7 @@ const SCAN: &str = r"const scan = () => {
     const box = document.documentElement;
     const place = [location.href, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio,
       box ? box.scrollWidth : 0, box ? box.scrollHeight : 0].join('\u0004');
-    return { roots, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
+    return { roots, sheets: sheetObjects, animations, states, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
   };";
 
 /// How long the arm script waits for an idle main thread before it arms
@@ -113,7 +184,7 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   const now = scan();
   if (now.blind) { delete window[key]; return { blind: true }; }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
-    active: now.active, print: now.print, blind: now.blind };
+    sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind };
   const restore = [];
   watch.stop = () => {
     if (watch.dirty) return;
@@ -140,6 +211,13 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
       if (root.nodeType !== 9) continue;
       const realm = root.defaultView;
       wrap(realm.Element.prototype, 'attachShadow');
+      wrap(realm.HTMLElement.prototype, 'attachInternals');
+      wrap(realm.HTMLSlotElement.prototype, 'assign');
+      wrap(realm.CSS, 'registerProperty');
+      for (const method of ['add', 'delete', 'clear']) wrap(realm.FontFaceSet.prototype, method);
+      const fonts = realm.document.fonts;
+      fonts.addEventListener('loadingdone', watch.stop);
+      restore.push(() => fonts.removeEventListener('loadingdone', watch.stop));
       wrap(realm.CustomElementRegistry.prototype, 'define');
       wrap(realm.CustomElementRegistry.prototype, 'upgrade');
     }
@@ -171,6 +249,12 @@ const CHECK: &str = r"(() => {
   const now = scan();
   if (now.blind) return 'blind';
   if (now.roots.length !== watch.roots.length || now.roots.some((root, i) => root !== watch.roots[i])) return 'roots';
+  if (now.sheets.length !== watch.sheets.length || now.sheets.some((sheet, i) => sheet !== watch.sheets[i])) return 'state';
+  if (now.states.length !== watch.states.length || now.states.some((node, i) => node !== watch.states[i])) return 'state';
+  if (now.animations.length !== watch.animations.length || now.animations.some((entry, i) => {
+    const old = watch.animations[i];
+    return entry.animation !== old.animation || entry.playState !== old.playState || entry.currentTime !== old.currentTime;
+  })) return 'state';
   if (now.active !== watch.active) return 'focus';
   if (now.print !== watch.print) return 'state';
   return 'same';

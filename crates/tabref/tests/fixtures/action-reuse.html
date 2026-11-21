@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Action reuse</title></head>
+<body><h1>Action reuse</h1>
+<button id="go" onclick="document.getElementById('out').textContent='done';const b=document.createElement('button');b.textContent='Undo';document.body.append(b)">Go</button>
+<button onclick="document.getElementById('out').textContent='wrong'">Go now</button>
+<button>Noop</button><button>Duplicate</button><button>Duplicate</button><p id="out">ready</p><table><tbody id="rows"></tbody></table>
+<script>
+let rows = '';
+for (let i = 0; i < 4400; i++) rows += `<tr><td>${i}</td><td>Item ${i}</td><td>Available</td><td>${i % 17}</td></tr>`;
+document.getElementById('rows').innerHTML = rows;
+</script></body></html>
