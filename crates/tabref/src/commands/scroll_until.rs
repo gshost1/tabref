@@ -3,10 +3,11 @@ use std::time::Duration;
 use serde_json::json;
 use tabref_cdp::is_timeout;
 use tabref_core::{AppError, Deadline};
-use tabref_page::ScrollOutcome;
+use tabref_page::{LocateIntent, ScrollOutcome};
 
 use super::{PAGE_STEP, report, step_outcome};
 use crate::commands::{find, scroll, target_spec::TargetSpec};
+use crate::commands::act_target::resolve_target;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::view::node_line::quote_text;
@@ -59,6 +60,9 @@ pub(super) fn scroll_loop(
         }
     };
     let deadline = deadline.capped(MAX_TIME);
+    let container = container
+        .map(|spec| resolve_target(session, spec, LocateIntent::Click, deadline))
+        .transpose()?;
     let mut total = ScrollOutcome::default();
     let mut steps = 0;
     let mut found = probe_until(session, until, deadline)?;
@@ -68,7 +72,7 @@ pub(super) fn scroll_loop(
             cap = Some(reason);
             break;
         }
-        let next = match step_outcome(session, container, delta, deadline) {
+        let next = match step_outcome(session, container.as_ref(), delta, deadline) {
             Ok(next) => next,
             Err(error) if is_timeout(&error) && deadline.is_expired() => {
                 cap = Some("time cap (8 s or session deadline)");

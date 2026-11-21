@@ -4,7 +4,7 @@ use tabref_page::{
     LocateIntent, ScrollOutcome, ScrollSite, cut_chars, scroll_and_settle, scroll_into_view,
 };
 
-use super::act_target::resolve_target;
+use super::act_target::{ActTarget, resolve_target};
 use super::target_spec::TargetSpec;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -69,19 +69,21 @@ pub(crate) fn scroll(
             ));
         }
     };
-    let outcome = step_outcome(session, container, delta, deadline)?;
+    let target = container
+        .map(|spec| resolve_target(session, spec, LocateIntent::Click, deadline))
+        .transpose()?;
+    let outcome = step_outcome(session, target.as_ref(), delta, deadline)?;
     Ok(report(direction, step, &outcome))
 }
 
 fn step_outcome(
     session: &mut Session,
-    container: Option<&TargetSpec>,
+    container: Option<&ActTarget>,
     delta: (f64, f64),
     deadline: Deadline,
 ) -> Result<ScrollOutcome, AppError> {
     match container {
-        Some(spec) => {
-            let target = resolve_target(session, spec, LocateIntent::Click, deadline)?;
+        Some(target) => {
             scroll_and_settle(
                 session.connection(),
                 &target.session,
