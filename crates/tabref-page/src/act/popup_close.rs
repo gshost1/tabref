@@ -35,28 +35,35 @@ pub(super) fn closed_popups(
             continue;
         };
         let role = popup["role"].as_str().unwrap_or_default();
-        if !matches!(role, "listbox" | "menu") {
+        let dialog = matches!(role, "dialog" | "alertdialog");
+        if !dialog && !matches!(role, "listbox" | "menu") {
             continue;
         }
         let Some(item_text) = popup["text"].as_str() else {
             continue;
         };
         let items = text_lines(item_text);
-        if items.is_empty() {
+        if items.is_empty() && !dialog {
             continue;
         }
-        let mut lines = text_lines(text);
-        let Some(start) = lines.windows(items.len()).position(|run| run == items) else {
-            continue;
-        };
-        lines.drain(start..start + items.len());
-        *text = lines.join("\n");
+        if !items.is_empty() {
+            let mut lines = text_lines(text);
+            let Some(start) = lines.windows(items.len()).position(|run| run == items) else {
+                continue;
+            };
+            lines.drain(start..start + items.len());
+            *text = lines.join("\n");
+        }
         let name = popup["name"].as_str().unwrap_or_default();
         let name = if name.is_empty() {
             String::new()
         } else {
             format!(" \"{}\"", crate::escape_line(name, true))
         };
+        if dialog {
+            closed.push(TextChange::Removed(format!("{role}{name} closed")));
+            continue;
+        }
         let count = popup["count"].as_u64().unwrap_or(0);
         let noun = if role == "listbox" {
             "options"
@@ -71,7 +78,10 @@ pub(super) fn closed_popups(
 }
 
 fn same_popup(before: &Value, after: &Value) -> bool {
-    if before["role"] != after["role"] {
+    let dialogs = [before, after]
+        .iter()
+        .all(|popup| matches!(popup["role"].as_str(), Some("dialog" | "alertdialog")));
+    if before["role"] != after["role"] && !dialogs {
         return false;
     }
     let identity = before["watch"].as_str().is_some()
@@ -83,7 +93,7 @@ fn same_popup(before: &Value, after: &Value) -> bool {
     let name = before["name"].as_str().unwrap_or_default();
     let items = before["text"].as_str().is_some() && before["text"] == after["text"];
     let count = before["count"].as_u64().is_some() && before["count"] == after["count"];
-    let shared = position
+    let shared = (position || (dialogs && before["block"] == after["block"]))
         && before["text"]
             .as_str()
             .zip(after["text"].as_str())
@@ -95,4 +105,8 @@ fn same_popup(before: &Value, after: &Value) -> bool {
         || shared
         || (position && before["name"] == after["name"] && (items || (!name.is_empty() && count)))
         || (before["block"] == after["block"] && items)
+        || (matches!(before["role"].as_str(), Some("dialog" | "alertdialog"))
+            && !name.is_empty()
+            && before["name"] == after["name"]
+            && before["block"] == after["block"])
 }
