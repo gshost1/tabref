@@ -22,6 +22,6 @@ fi
 id bench >/dev/null 2>&1 || useradd --create-home --shell /bin/bash bench
 chmod 700 /home/bench
 rm -rf /home/bench/tabref-bench && cp -R /tmp/tabref-bench /home/bench/tabref-bench && chown -R bench:bench /home/bench/tabref-bench
-sudo -u bench -H env BENCH_TOOLS=/home/bench/bench-tools PATH=/usr/local/bin:/usr/bin:/bin \
+cd /home/bench && sudo -u bench -H env BENCH_TOOLS=/home/bench/bench-tools PATH=/usr/local/bin:/usr/bin:/bin \
   bash /home/bench/tabref-bench/bench/tools/install.sh
 echo setup-done
