@@ -16,6 +16,7 @@ use crate::view::action_changes::prepare;
 use crate::view::bot_check::action_bot_check;
 use crate::view::node_line::{node_line, quote_text};
 use crate::view::ref_style::RefStyle;
+use crate::view::rows_replaced;
 
 const NOTHING_SEEN: &str = " (no visible change)";
 const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
@@ -44,7 +45,7 @@ pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome
 
 /// A `do` step's line: `ok fill "Price ($)" "67.00" -> "62.00"`, with
 /// where a navigation led and the first change on the same line. The last
-/// step of a batch adds the full block a single command prints.
+/// step and row replacements add the full block a single command prints.
 pub(crate) fn step_report(
     session: &mut Session,
     acted: Acted,
@@ -58,7 +59,12 @@ pub(crate) fn step_report(
     let Some(effects) = &acted.effects else {
         return Ok((line, data));
     };
-    if last {
+    if last
+        || effects
+            .page
+            .as_ref()
+            .is_some_and(|page| !page.replaced_rows.is_empty())
+    {
         let (lines, more) = effect_block(session, effects, &acted.known)?;
         for extra in lines {
             line.push('\n');
@@ -149,7 +155,7 @@ fn effect_block(
         prepare(
             &captured.tree,
             known,
-            &page.changes,
+            rows_replaced::other_changes(page),
             |target| captured.dom(target).zip(captured.dom_reply(target)),
             |controls| {
                 let found = control_lines(controls);
@@ -166,14 +172,20 @@ fn effect_block(
     let changes = counted(
         prepared
             .as_ref()
-            .map_or(&page.changes, |report| &report.changes),
+            .map_or(rows_replaced::other_changes(page), |report| &report.changes),
     );
     if effects.settled.navigated {
         lines.extend(reload_head(&changes));
     } else {
         lines.extend(within_budget(&changes));
     }
-    merge(&mut data, change_data(&counted(&page.changes)));
+    lines.extend(rows_replaced::preview(page));
+    let json_counts = counted(rows_replaced::other_changes(page));
+    let mut changes_data = change_data(&json_counts);
+    if let Some(rows) = rows_replaced::data(page) {
+        changes_data["rows_replaced"] = rows;
+    }
+    merge(&mut data, changes_data);
     lines.extend(text_check_note(page));
     if effects.settled.navigated {
         let report = current_page_view(session)?;

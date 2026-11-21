@@ -1,5 +1,7 @@
 use super::text_change::TextChange;
 
+pub type ReplacedRows = Vec<(usize, Vec<(u64, String)>)>;
+
 /// The page after an action, against the [`PageMark`](super::page_mark::PageMark)
 /// taken before it: its address and title now, how many DOM mutations the
 /// action caused (`None` when the document was replaced, so nothing was
@@ -16,6 +18,8 @@ pub struct PageChanges {
     /// own budget, separate from frames and shadow roots.
     pub unchecked_text_blocks: usize,
     pub changes: Vec<TextChange>,
+    /// Whole body replacements: old row count and new row IDs/text, also appended to `changes`.
+    pub replaced_rows: ReplacedRows,
 }
 
 impl PageChanges {

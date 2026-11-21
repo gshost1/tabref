@@ -23,6 +23,7 @@ pub(crate) mod outline_source;
 pub(crate) mod page_view;
 pub(crate) mod ref_style;
 pub(crate) mod row_window;
+pub(crate) mod rows_replaced;
 pub(crate) mod section;
 pub(crate) mod section_cut;
 pub(crate) mod snapshot_view;
