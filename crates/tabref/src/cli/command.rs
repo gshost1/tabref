@@ -126,6 +126,12 @@ pub(crate) enum Command {
         /// Distance in CSS pixels (default: most of a screen)
         #[arg(long)]
         px: Option<u32>,
+        /// Scroll repeatedly until this text is on the page
+        #[arg(long, value_name = "TEXT", conflicts_with = "to_end")]
+        until: Option<String>,
+        /// Scroll repeatedly until the page stops growing at its end
+        #[arg(long)]
+        to_end: bool,
     },
     /// Set the files of an <input type=file>
     Upload {

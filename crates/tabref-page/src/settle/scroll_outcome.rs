@@ -13,6 +13,7 @@ pub struct ScrollOutcome {
     pub watched: bool,
     pub at_end: bool,
     pub items: u64,
+    pub grew: bool,
     pub first: Option<String>,
     pub last: Option<String>,
     pub lines: Vec<String>,

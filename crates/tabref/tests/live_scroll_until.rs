@@ -39,3 +39,37 @@ fn one_command_reaches_a_late_lazy_row_and_returns_matches() {
         absent.stdout
     );
 }
+
+#[test]
+fn shadow_text_matches_case_and_spacing_before_scrolling() {
+    if !live() {
+        return;
+    }
+    let base = lazy_site(vec![("/", r#"<div id=host></div><script>host.attachShadow({mode:'open'}).innerHTML='<p>ALAN <b>  Turing</b></p>';</script>"#.into())]);
+    let tabref = harness("scroll-until-shadow");
+    tabref.ok(&["open", &base]);
+    let run = tabref.ok(&["--json", "scroll", "--until", "alan turing"]);
+    assert_eq!(run.json()["data"]["steps"], 0);
+    assert!(run.json()["data"]["count"].as_u64().unwrap() > 0);
+    let invalid = tabref.run(&["scroll", "e1", "--to-end"]);
+    assert!(!invalid.ok);
+    assert!(invalid.stderr.contains("not a REF"), "{}", invalid.stderr);
+}
+
+#[test]
+fn a_long_page_reports_the_step_cap_without_claiming_the_end() {
+    if !live() {
+        return;
+    }
+    let base = lazy_site(vec![(
+        "/",
+        "<div style='height:100000px'>Long page</div>".into(),
+    )]);
+    let tabref = harness("scroll-until-cap");
+    tabref.ok(&["open", &base]);
+    let run = tabref.ok(&["--json", "scroll", "--until", "Absent"]);
+    assert_eq!(run.json()["data"]["steps"], 60);
+    assert_eq!(run.json()["data"]["found"], false);
+    assert_eq!(run.json()["data"]["cap"], "60-step cap");
+    assert_eq!(run.json()["data"]["at_end"], false);
+}

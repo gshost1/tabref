@@ -117,6 +117,7 @@ fn watch(
     outcome.hidden = !framed;
     outcome.at_end = loaded.at_end;
     outcome.items = loaded.items;
+    outcome.grew = loaded.grew;
     outcome.first = loaded.first;
     outcome.last = loaded.last;
     outcome.lines = loaded.lines;

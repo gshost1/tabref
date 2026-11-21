@@ -14,6 +14,10 @@ const PAGE_STEP: u32 = 600;
 const LINE_CHARS: usize = 100;
 const ITEM_CHARS: usize = 40;
 
+#[path = "scroll_until.rs"]
+mod scroll_until;
+pub(crate) use scroll_until::run_loop;
+
 /// Scrolls the page, or the container that holds `target`, in `direction`;
 /// with a target in place of the direction, scrolls that element into view.
 pub(crate) fn run(
@@ -59,7 +63,17 @@ pub(crate) fn scroll(
             ));
         }
     };
-    let outcome = match container {
+    let outcome = step_outcome(session, container, delta, deadline)?;
+    Ok(report(direction, step, &outcome))
+}
+
+fn step_outcome(
+    session: &mut Session,
+    container: Option<&TargetSpec>,
+    delta: (f64, f64),
+    deadline: Deadline,
+) -> Result<ScrollOutcome, AppError> {
+    match container {
         Some(spec) => {
             let target = resolve_target(session, spec, LocateIntent::Click, deadline)?;
             scroll_and_settle(
@@ -68,7 +82,7 @@ pub(crate) fn scroll(
                 ScrollSite::Element(&target.token),
                 delta,
                 deadline,
-            )?
+            )
         }
         None => {
             let page = session.page()?;
@@ -78,11 +92,14 @@ pub(crate) fn scroll(
                 ScrollSite::Page,
                 delta,
                 deadline,
-            )?
+            )
         }
-    };
+    }
+}
+
+fn report(direction: &str, step: f64, outcome: &ScrollOutcome) -> Outcome {
     let mut report = Outcome::new(
-        first_line(direction, step, &outcome),
+        first_line(direction, step, outcome),
         json!({
             "action": "scroll",
             "direction": direction,
@@ -108,7 +125,7 @@ pub(crate) fn scroll(
             outcome.more_lines
         ));
     }
-    Ok(report)
+    report
 }
 
 /// `scrolled down 600px`, with what the scroll loaded or why it stopped:
