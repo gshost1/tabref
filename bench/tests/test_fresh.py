@@ -73,6 +73,10 @@ class Sealed(unittest.TestCase):
     def test_current_seal_is_not_spent(self):
         self.assertNotIn(fresh.SEAL, fresh.SPENT_SEALS.values())
 
+    def test_spent_sets_stay_spent(self):
+        self.assertEqual(sorted(fresh.SPENT_SEALS), ["v0.1", "v0.2"])
+        self.assertEqual(len(set(fresh.SPENT_SEALS.values())), 2)
+
     def test_edited_file_fails(self):
         (self.root / "web" / "server.py").write_text("pass  \n")
         with self.assertRaises(fresh.SealBroken):
@@ -110,7 +114,7 @@ class Sealed(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get("BENCH_FRESH_DIR"), "BENCH_FRESH_DIR not set")
     def test_real_folder_seal(self):
-        fresh.SEAL = "4603086733af2ee8a2a04c26ff3495b63a348b4c896b5689434bb523104733b3"
+        fresh.SEAL = "4aa5bccad9a75b0746131c784788402c997831d1d1464962cbcbc748eb07ad39"
         self.assertGreater(fresh.verify(fresh.fresh_dir()), 0)
 
 
