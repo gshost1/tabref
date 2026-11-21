@@ -49,6 +49,26 @@ fn short_bodies_inline_but_empty_long_and_truncated_bodies_do_not() {
     }
 }
 
+#[test]
+fn inline_selection_prefers_shallow_then_near_and_caps_total_bodies() {
+    let body = "x".repeat(100);
+    let text = format!("### Deep\n{body}\n## Near\n{body}\n## Far\n{body}");
+    let shown = outline(&text, 410);
+    assert!(shown.contains(&format!("## Near\n{body}")), "{shown}");
+    assert!(shown.contains(&format!("## Far\n{body}")), "{shown}");
+    assert!(shown.contains("### Deep (1 lines"), "{shown}");
+}
+
+#[test]
+fn truncated_and_multiline_bodies_stay_stubs() {
+    let options = ViewOptions::snap("http://fixture.test", false, RowWindow::default());
+    let mut source = lines("## Truncated\npartial\n## Pre\none");
+    source[1].cut = Some("+100 chars".to_owned());
+    source[3].text = "one\ntwo\nthree".to_owned();
+    let result = cut_outline(&source, 0, 1_000, &options.route, false);
+    assert!(result.lines.iter().all(|line| line.text.contains("--from")));
+}
+
 fn fixture(kind: &str) -> Vec<ViewLine> {
     let mut text = format!("# {kind}\n");
     for n in 0..80 {

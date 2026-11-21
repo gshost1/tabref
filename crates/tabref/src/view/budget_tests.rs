@@ -48,8 +48,8 @@ fn past_the_budget_a_marker_names_the_line_to_go_on_from_and_plain_headings_foll
         &shown[14..],
         &[
             "… lines 15-25 cut here to fit: tabref snap --from 15",
-            "## Early life (1 lines, --from 22)",
-            "## Death (1 lines, --from 24)",
+            "## Early life\npppppppppp",
+            "## Death\np",
         ]
     );
     assert_eq!(
@@ -109,19 +109,16 @@ fn deeper_headings_that_do_not_all_fit_leave_every_top_level_one_listed_and_fill
         outline,
         vec![
             "## Part 1 (8 lines, --from 31)",
-            "### Sub 1.1 (1 lines, --from 32)",
-            "### Sub 1.2 (1 lines, --from 34)",
-            "### Sub 1.3 (1 lines, --from 36)",
-            "### Sub 1.4 (1 lines, --from 38)",
+            "### Sub 1.1\nppppppppp",
+            "### Sub 1.2\nppppppppp",
             "## Part 2 (8 lines, --from 40)",
-            "### Sub 2.1 (1 lines, --from 41)",
             "## Part 3 (8 lines, --from 49)",
             "## Part 4 (8 lines, --from 58)",
             "## Part 5 (8 lines, --from 67)",
-            "… 15 more headings; tabref find <text> or tabref snap --from 43",
+            "… 18 more headings; tabref find <text> or tabref snap --from 36",
         ]
     );
-    assert_eq!((report.sections.count, report.sections.listed), (25, 10));
+    assert_eq!((report.sections.count, report.sections.listed), (25, 7));
     assert!(printed_cost(&kept) <= 1_800, "{}", printed_cost(&kept));
 }
 
@@ -139,7 +136,7 @@ fn too_many_top_level_headings_list_the_first_ones_in_order() {
         .iter()
         .position(|text| text.starts_with("… lines"))
         .unwrap();
-    assert_eq!(shown[at + 1], "### 2.0.0 (1 lines, --from 21)");
+    assert_eq!(shown[at + 1], "### 2.0.0\npppppppppppppppppppppppppppppp");
     let listed = report.sections.listed;
     assert!(listed > 0 && listed < 200, "{listed}");
     assert_eq!(report.sections.count, 200);
