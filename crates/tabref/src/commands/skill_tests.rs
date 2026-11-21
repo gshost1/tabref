@@ -280,7 +280,7 @@ fn the_guide_loops_pairs_and_pages_without_a_fixed_address() {
         .unwrap_or_default();
     assert!(paging.contains("`Next` or `2` link's address"), "{paging}");
     assert!(guide.contains("no address: `click \"Next\"` in the loop"));
-    assert!(guide.contains("A cut view ends with an outline of the rest: use its `--from N`"));
+    assert!(guide.contains("A cut view ends with an outline of the rest; if what you need is not shown, use its `--from N`"));
     assert!(guide.contains("`open \"<address with {n}>\"`"));
     for fixed in ["?p=", "?page=", "&page="] {
         assert!(!guide.contains(fixed), "{fixed}");

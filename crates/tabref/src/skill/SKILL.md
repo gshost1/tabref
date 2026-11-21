@@ -9,8 +9,8 @@ See `tabref skill more` for waits, `connect` to your own Chrome, downloads, dial
 `tabref snap`: one line per block; controls show refs: `[e5 button Save]`,
 `[e9 select Size = "M" options: S | M | L]`, links their address: `[e7 Next -> <address>]`.
 Count `N items:`, `table N rows:` and repeats `(1/3)` across the whole page, not the first block.
-A cut view ends with an outline of the rest: use its `--from N`, `tabref read --section "<heading>"`
-or `tabref find TEXT` (hidden text too). A `dialog` line at the top: click one of its buttons.
+A cut view ends with an outline of the rest; if what you need is not shown, use its `--from N`,
+`tabref read --section "<heading>"` or `tabref find TEXT` (hidden text too). A `dialog` line at the top: click one of its buttons.
 
 ## Act
 `click T`, `fill T VALUE` (replaces), `type T TEXT` (appends), `select T LABEL`, `check T`, `uncheck T`,
