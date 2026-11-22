@@ -38,7 +38,7 @@ pub(crate) fn find_lines_with_ax(
         lines.push(match_line(found, options));
     }
     lines.extend(ax.iter().cloned());
-    let listed = matches.len() + ax.len();
+    let listed = matches.iter().map(|row| row.hits).sum::<usize>() + ax.len();
     if total > listed {
         lines.push(format!(
             "… {} more; search a longer text, or read --section \"<heading>\"",

@@ -21,6 +21,7 @@ const MAX_MATCHES: usize = 20;
 /// that says how to load it.
 pub(crate) struct Found {
     pub count: usize,
+    pub covered: usize,
     pub head: String,
     pub lines: Vec<String>,
     pub more: Option<String>,
@@ -52,8 +53,7 @@ pub(crate) fn run(
 }
 
 /// [`run`]'s search, keeping `keep` match lines, for `tabref find` and
-/// the `find` step of `do`. The step keeps every matching line in JSON
-/// and applies the display limit only to its text.
+/// the `find` step of `do`. A summary row can cover several matches.
 pub(crate) fn search(
     session: &mut Session,
     text: &str,
@@ -68,35 +68,33 @@ pub(crate) fn search(
         let mut matches = find_matches(&captured.tree, text, role);
         let count = matches.len();
         matches.truncate(cap);
-        snapshot_result(&url, text, count, matches)
+        snapshot_result(&url, text, count, matches, keep)
     } else {
         let input = outline_input(session, Some(&captured))?;
-        let (matches, total, ax_only, overflow) =
-            merged_matches_counted(&input, &captured.tree, text, cap);
+        let (matches, total, ax_only) = merged_matches(&input, &captured.tree, text, cap);
         if ax_only {
             snapshot_result(
                 &url,
                 text,
                 total,
                 matches.into_iter().map(|hit| hit.line).collect(),
+                keep,
             )
         } else {
             let options = ViewOptions::snap(&url, false, RowWindow::default());
             let mut lines = find_lines_with_ax(text, &matches, &[], total, &options);
-            let mut head = lines.remove(0);
-            if overflow > 0 {
-                head.replace_range(..total.to_string().len(), &(total + overflow).to_string());
-            }
-            let more = (total > matches.len()).then(|| lines.pop()).flatten();
+            let head = lines.remove(0);
+            let more = (lines.len() > matches.len()).then(|| lines.pop()).flatten();
             let mut listed = lines.clone();
             listed.extend(more.clone());
             Found {
-                count: total + overflow,
+                count: total,
+                covered: matches.iter().take(keep).map(|row| row.hits).sum(),
                 head,
                 data: json!({
                     "snapshot_id": captured.snapshot_id,
                     "url": url,
-                    "count": total + overflow,
+                    "count": total,
                     "matches": listed,
                 }),
                 lines,
@@ -135,23 +133,12 @@ fn ax_search_text(root: &AccessibilityNode) -> Vec<(Option<&str>, String)> {
     texts
 }
 
-#[cfg(test)]
-fn merged_matches(
-    input: &OutlineInput,
-    tree: &AccessibilityNode,
-    needle: &str,
-    cap: usize,
-) -> (Vec<TextMatch>, usize, bool) {
-    let (hits, total, ax_only, overflow) = merged_matches_counted(input, tree, needle, cap);
-    (hits, total + overflow, ax_only)
-}
-
-fn merged_matches_counted<'a>(
+fn merged_matches<'a>(
     input: &'a OutlineInput,
     tree: &AccessibilityNode,
     needle: &str,
     cap: usize,
-) -> (Vec<TextMatch>, usize, bool, usize) {
+) -> (Vec<TextMatch>, usize, bool) {
     let trees: Vec<&DomTree> = input
         .trees
         .iter()
@@ -201,7 +188,7 @@ fn merged_matches_counted<'a>(
             });
         sources.insert((reference.clone(), source));
     };
-    let (dom, total, overflow) = TextMatch::search_located(input, needle, cap, observe, unique);
+    let (dom, total) = TextMatch::search_located(input, needle, cap, observe, unique);
     if total == 0 {
         let ax = find_matches(tree, needle, None);
         let total = ax.len();
@@ -209,6 +196,7 @@ fn merged_matches_counted<'a>(
             ax.into_iter()
                 .take(cap)
                 .map(|line| TextMatch {
+                    hits: 1,
                     section: Vec::new(),
                     line,
                     control: None,
@@ -218,7 +206,6 @@ fn merged_matches_counted<'a>(
                 .collect(),
             total,
             true,
-            0,
         );
     }
     let reverse: HashMap<&str, &(String, i64)> = input
@@ -292,6 +279,7 @@ fn merged_matches_counted<'a>(
         ordered.push((
             position,
             TextMatch {
+                hits: 1,
                 section,
                 line: texts.join(" "),
                 control,
@@ -307,7 +295,6 @@ fn merged_matches_counted<'a>(
         ordered.into_iter().take(cap).map(|(_, hit)| hit).collect(),
         total + ax_total,
         false,
-        overflow,
     )
 }
 
@@ -373,7 +360,7 @@ fn expand_coverage(trees: &[&DomTree], covered: &mut HashMap<&str, HashSet<i64>>
     }
 }
 
-fn snapshot_result(url: &str, text: &str, count: usize, shown: Vec<String>) -> Found {
+fn snapshot_result(url: &str, text: &str, count: usize, shown: Vec<String>, keep: usize) -> Found {
     let more = (count > shown.len()).then(|| {
         format!(
             "… {} more; search a longer text or pass --role",
@@ -387,6 +374,7 @@ fn snapshot_result(url: &str, text: &str, count: usize, shown: Vec<String>) -> F
     };
     Found {
         count,
+        covered: shown.len().min(keep),
         head,
         data: json!({ "url": url, "count": count, "matches": shown }),
         lines: shown,

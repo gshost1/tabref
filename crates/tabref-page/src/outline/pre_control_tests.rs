@@ -27,7 +27,8 @@ fn a_referenced_code_wrapper_keeps_capped_pre_lines_and_its_ref() {
     let mut input = input(dom);
     reference(&mut input, code, "button", "Copy");
     let (hits, total) = search_text(&input, "needle", 20);
-    assert_eq!(total, 4);
+    assert_eq!(total, 5);
+    assert_eq!(hits.len(), 4);
     for (index, hit) in hits[..3].iter().enumerate() {
         assert!(hit.line.starts_with(&format!("needle {}", index + 1)));
         assert_eq!(
@@ -36,6 +37,7 @@ fn a_referenced_code_wrapper_keeps_capped_pre_lines_and_its_ref() {
         );
     }
     assert_eq!(hits[3].line, "… 2 more in this block");
+    assert_eq!(hits[3].hits, 2);
 }
 
 #[test]
@@ -47,10 +49,12 @@ fn a_referenced_pre_does_not_repeat_its_matched_lines_as_a_control() {
     reference(&mut input, pre, "button", "Copy");
     let (hits, total) = search_text(&input, "needle", 20);
     assert_eq!(total, 2);
-    assert_eq!(
-        hits[0].control.as_ref().unwrap().ref_text.as_deref(),
-        Some("@s1:e1")
-    );
+    for hit in hits {
+        assert_eq!(
+            hit.control.as_ref().unwrap().ref_text.as_deref(),
+            Some("@s1:e1")
+        );
+    }
 }
 
 #[test]
@@ -87,23 +91,32 @@ fn man_page_links_count_toward_the_pre_line_cap_without_duplicate_hits() {
         links.push(link);
     }
     let mut input = input(dom);
-    for link in links {
+    for (line, link) in links.into_iter().enumerate() {
         reference(&mut input, link, "link", "open(2)");
+        input
+            .refs
+            .get_mut(&("T1".into(), i64::try_from(link).unwrap() + 1))
+            .unwrap()
+            .ref_text = format!("@s1:e{}", line + 1);
     }
     let (hits, total) = search_text(&input, "open(2)", 20);
     assert_eq!(total, 6);
     assert_eq!(hits.len(), 4);
+    assert_eq!(hits[3].hits, 3);
     for (line, hit) in hits[..3].iter().enumerate() {
         assert!(
             hit.line
                 .starts_with(&format!("{}. See open(2) for details.", line + 1))
         );
         assert_eq!(
-            hit.control.as_ref().unwrap().ref_text.as_deref(),
-            Some("@s1:e1")
+            hit.control.as_ref().unwrap().ref_text,
+            Some(format!("@s1:e{}", line + 1))
         );
     }
-    assert_eq!(hits[3].line, "… 3 more in this block");
+    assert_eq!(
+        hits[3].line,
+        "… 3 more in this block (@s1:e4 @s1:e5 @s1:e6)"
+    );
 }
 
 #[test]
@@ -153,7 +166,7 @@ fn large_referenced_code_wrappers_scale_with_the_number_of_lines() {
         let (hits, total) = search_text(&input, "needle", 20);
         let duration = start.elapsed();
         eprintln!("{lines} lines: {:.3} ms", duration.as_secs_f64() * 1000.0);
-        assert_eq!(total, 4);
+        assert_eq!(total, lines);
         assert_eq!(hits[3].line, format!("… {} more in this block", lines - 3));
         elapsed.push(duration);
     }

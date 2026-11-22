@@ -9,6 +9,9 @@ use crate::view::row_window::RowWindow;
 use crate::view::section::section_lines;
 use crate::view::view_options::ViewOptions;
 
+#[path = "find_pre_spec_tests.rs"]
+mod pre_spec;
+
 fn input(dom: TestDom) -> OutlineInput {
     OutlineInput {
         trees: vec![dom.tree],
@@ -79,12 +82,14 @@ fn a_long_pre_leaves_room_for_later_sections_golden() {
     dom.text(heading, "Summary", true);
     let prose = dom.element(2, "p", &[], Some("block"));
     dom.text(prose, "We let the later prose stay visible.", true);
-    let (hits, total) = search_text(&input(dom), "let", 20);
-    assert_eq!(total, 5);
+    let input = input(dom);
+    let (hits, total) = search_text(&input, "let", 20);
+    assert_eq!(total, 101);
     assert_eq!(
         find_lines_with_ax("let", &hits, &[], total, &options()).join("\n"),
-        "5 matches for \"let\"\n- Example 0 | let value = 1;\n- Example 0 | let value = 1;\n- Example 0 | let value = 1;\n- Example 0 | … 97 more in this block\n- Summary | We let the later prose stay visible."
+        "101 matches for \"let\"\n- Example 0 | let value = 1;\n- Example 0 | let value = 1;\n- Example 0 | let value = 1;\n- Example 0 | … 97 more in this block\n- Summary | We let the later prose stay visible."
     );
+    pre_spec::assert_capped_long_pre(&input);
 }
 
 #[test]

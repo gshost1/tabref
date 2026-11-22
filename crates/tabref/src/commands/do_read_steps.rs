@@ -255,10 +255,10 @@ pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone
         text.push_str("\n  ");
         text.push_str(line);
     }
-    if found.count > found.lines.len() {
+    if found.count > found.covered {
         text.push_str(&format!(
             "\n  +{} more: tabref find {}",
-            found.count - found.lines.len(),
+            found.count - found.covered,
             quote_text(&needle)
         ));
     }

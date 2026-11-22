@@ -60,7 +60,10 @@ fn pre_controls_keep_their_reference_beyond_the_block_line_cap() {
         },
     );
     let (hits, total) = search_text(&input, "widget btn", 20);
-    assert_eq!(total, 5);
+    assert_eq!(total, 9);
+    assert_eq!(hits.len(), 5);
+    assert_eq!(hits[3].hits, 5);
+    assert_eq!(hits.iter().map(|hit| hit.hits).sum::<usize>(), total);
     let control = hits
         .iter()
         .filter_map(|hit| hit.control.as_ref())

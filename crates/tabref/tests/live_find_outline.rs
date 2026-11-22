@@ -3,6 +3,94 @@
 mod common;
 
 #[test]
+fn do_find_applies_the_five_row_budget_to_weighted_results() {
+    if !common::live() {
+        return;
+    }
+    let tabref = common::harness("find-weighted-do");
+    let prose: String = (1..=7).map(|i| format!("<p>needle {i}</p>")).collect();
+    let linked: String = (1..=6)
+        .map(|i| format!("{i}. See <a href='/open.2'>open(2)</a> for details.\n"))
+        .collect();
+    let linked = format!("<pre>{linked}</pre>");
+    let long = format!(
+        "<p>first let</p><p>second let</p><h2>Example</h2><pre>{}</pre><h2>Summary</h2><p>after let</p>",
+        "let value = 1;\n".repeat(100)
+    );
+    let port = common::serve(&[("/prose", &prose), ("/linked", &linked), ("/long", &long)]);
+    let open = |path| {
+        tabref.ok(&["open", &format!("http://127.0.0.1:{port}/{path}")]);
+    };
+    let step = |query: &str| tabref.ok(&["do", &format!("find '{query}'")]).stdout;
+    let step_json = |query: &str| {
+        tabref
+            .ok(&["--json", "do", &format!("find '{query}'")])
+            .json()["data"]["steps"][0]["data"]
+            .clone()
+    };
+    open("prose");
+    let output = step("needle");
+    assert!(
+        output.contains("ok find \"needle\" (7 matches)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("  +2 more: tabref find \"needle\""),
+        "{output}"
+    );
+    let prose = step_json("needle");
+    assert_eq!(prose["count"], 7);
+    let rows = prose["matches"].as_array().unwrap();
+    for (i, row) in rows[..5].iter().enumerate() {
+        assert_eq!(row.as_str().unwrap(), format!("- needle {}", i + 1));
+    }
+    assert_eq!(rows.len(), 6);
+    assert!(rows[5].as_str().unwrap().starts_with("… 2 more;"));
+
+    open("linked");
+    let output = step("open(2)");
+    assert!(
+        output.contains("ok find \"open(2)\" (6 matches)"),
+        "{output}"
+    );
+    assert_eq!(
+        output
+            .lines()
+            .filter(|line| line.starts_with("  - "))
+            .count(),
+        4,
+        "{output}"
+    );
+    assert!(output.contains("… 3 more in this block (@s"), "{output}");
+    assert!(!output.contains("more: tabref find"), "{output}");
+    let linked = step_json("open(2)");
+    assert_eq!(linked["count"], 6);
+    assert_eq!(linked["matches"].as_array().unwrap().len(), 4);
+
+    open("long");
+    let output = step("let");
+    let rows: Vec<_> = output
+        .lines()
+        .filter(|line| line.starts_with("  - "))
+        .collect();
+    assert_eq!(rows.len(), 5, "{output}");
+    assert_eq!(rows[4], "  - Example | let value = 1;");
+    assert!(output.contains("ok find \"let\" (103 matches)"), "{output}");
+    assert!(
+        output.contains("  +98 more: tabref find \"let\""),
+        "{output}"
+    );
+    let long = step_json("let");
+    assert_eq!(long["count"], 103);
+    assert!(
+        long["matches"][5]
+            .as_str()
+            .unwrap()
+            .starts_with("… 98 more;")
+    );
+}
+
+#[test]
 fn inline_pre_links_count_as_lines_without_an_extra_overflow_footer() {
     if !common::live() {
         return;
@@ -124,7 +212,7 @@ fn long_pre_find_stays_within_the_match_and_snapshot_budgets() {
     let opened = tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
     assert!(opened.stdout.chars().count() <= 12_000);
     let found = tabref.ok(&["find", "SIGWINCH"]).stdout;
-    assert!(found.starts_with("4 matches for "), "{found}");
+    assert!(found.starts_with("500 matches for "), "{found}");
     assert_eq!(found.lines().count(), 5);
     assert!(found.contains("… 497 more in this block"), "{found}");
     assert!(found.chars().count() < 4_000);
