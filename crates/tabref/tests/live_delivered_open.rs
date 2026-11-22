@@ -10,9 +10,10 @@ use serde_json::Value;
 
 const START: &str = "<!doctype html><title>Start</title><h1>Start</h1>";
 const OTHER: &str = "<!doctype html><title>Other</title><h1>Other</h1>";
+const HOP: &str = "<!doctype html><title>Hop</title><script>history.replaceState(null, '', '/landed')</script><h1>Hop</h1>";
 
 fn unreadable(name: &str) -> (Harness, String) {
-    let port = serve(&[("/", START), ("/other", OTHER)]);
+    let port = serve(&[("/", START), ("/other", OTHER), ("/hop", HOP)]);
     let tabref = harness(name);
     let base = format!("http://127.0.0.1:{port}");
     tabref.ok(&["open", &format!("{base}/")]);
@@ -51,14 +52,45 @@ fn an_unreadable_page_after_open_keeps_the_open() {
     }
     let (tabref, base) = unreadable("delivered-open");
     let opened = tabref.ok(&["open", &format!("{base}/other")]);
-    assert!(opened.stdout.starts_with("opened "), "{}", opened.stdout);
+    let first = opened.stdout.lines().next().unwrap();
+    assert_eq!(
+        first,
+        format!("page \"Other\" {base}/other"),
+        "{}",
+        opened.stdout
+    );
     note(&opened.stdout);
     let envelope = tabref.ok(&["--json", "open", "/"]).json();
     assert_eq!(envelope["ok"], true, "{envelope}");
     let data = &envelope["data"];
     assert_eq!(data["load_finished"], true, "{envelope}");
+    assert_eq!(data["url"], format!("{base}/"), "{envelope}");
+    assert_eq!(data["title"], "Start", "{envelope}");
     let said = data["report_error"].as_str().unwrap();
     assert!(said.starts_with("could not read the page ("), "{envelope}");
+}
+
+#[test]
+fn an_unreadable_page_after_open_names_the_address_it_ended_at() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = unreadable("delivered-open-moved");
+    let opened = tabref.ok(&["open", &format!("{base}/hop")]);
+    let first = opened.stdout.lines().next().unwrap();
+    assert_eq!(
+        first,
+        format!("page \"Hop\" {base}/landed"),
+        "{}",
+        opened.stdout
+    );
+    note(&opened.stdout);
+    let envelope = tabref
+        .ok(&["--json", "open", &format!("{base}/hop")])
+        .json();
+    let data = &envelope["data"];
+    assert_eq!(data["url"], format!("{base}/landed"), "{envelope}");
+    assert_eq!(data["title"], "Hop", "{envelope}");
 }
 
 #[test]
@@ -69,7 +101,7 @@ fn an_unreadable_page_after_open_in_a_new_tab_keeps_the_open() {
     let (tabref, base) = unreadable("delivered-open-new-tab");
     let opened = tabref.ok(&["open", "--new-tab", &format!("{base}/other")]);
     assert!(
-        opened.stdout.starts_with("new tab [1]\nopened "),
+        opened.stdout.starts_with("new tab [1]\npage \"Other\" "),
         "{}",
         opened.stdout
     );
