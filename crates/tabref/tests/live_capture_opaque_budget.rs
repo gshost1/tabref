@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 
 #[test]
-fn four_large_opaque_sheets_get_a_classification_budget() {
+fn four_large_opaque_sheets_skip_classification_and_do_not_reuse() {
     if !common::live() {
         return;
     }
@@ -25,7 +25,7 @@ fn four_large_opaque_sheets_get_a_classification_budget() {
             let _ = stream.read(&mut request);
             let _ = write!(
                 stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{css}",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\nTiming-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{css}",
                 css.len()
             );
         }
@@ -37,6 +37,7 @@ fn four_large_opaque_sheets_get_a_classification_budget() {
     let html = format!("<!doctype html><head>{links}</head><body><button>Go</button></body>");
     let port = common::serve(&[("/", &html)]);
     let harness = common::harness("opaque-budget");
+    let trace = harness.home.join("capture-trace.jsonl");
     let run = |args: &[&str]| {
         let output = std::process::Command::new(env!("CARGO_BIN_EXE_tabref"))
             .args([
@@ -48,6 +49,7 @@ fn four_large_opaque_sheets_get_a_classification_budget() {
             ])
             .args(args)
             .env("TABREF_HOME", &harness.home)
+            .env("TABREF_CAPTURE_TRACE", &trace)
             .env_remove("TABREF_NO_DAEMON")
             .output()
             .unwrap();
@@ -62,5 +64,17 @@ fn four_large_opaque_sheets_get_a_classification_budget() {
     let open = run(&["open", &format!("http://127.0.0.1:{port}/")]);
     let find = run(&["find", "Go"]);
     run(&["daemon", "stop"]);
-    assert_eq!(open["data"]["snapshot_id"], find["data"]["snapshot_id"]);
+    assert_ne!(open["data"]["snapshot_id"], find["data"]["snapshot_id"]);
+    let events: Vec<Value> = std::fs::read_to_string(trace)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"] == "opaque.skip"
+                && event["details"]["reason"] == "size-limit")
+    );
+    assert!(!events.iter().any(|event| event["event"] == "opaque.drain"));
 }

@@ -13,6 +13,10 @@ use tabref_core::Deadline;
 use tabref_page::{arm_capture_watch, check_capture_watch};
 
 fn stylesheet(body: &str) -> u16 {
+    stylesheet_with_timing(body, true)
+}
+
+fn stylesheet_with_timing(body: &str, timing: bool) -> u16 {
     let body = body.to_owned();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -20,8 +24,13 @@ fn stylesheet(body: &str) -> u16 {
         for mut stream in listener.incoming().flatten() {
             let mut request = [0; 8192];
             let _ = stream.read(&mut request);
+            let timing = if timing {
+                "Timing-Allow-Origin: *\r\n"
+            } else {
+                ""
+            };
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\n{timing}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
             let _ = stream.write_all(response.as_bytes());
@@ -52,10 +61,20 @@ fn check_opaque_sheet(imported: bool, body: &str, blind: bool) {
 }
 
 fn check_changes(imported: bool, body: &str, blind: bool, changes: &[&str]) {
+    check_changes_with_timing(imported, body, blind, changes, true);
+}
+
+fn check_changes_with_timing(
+    imported: bool,
+    body: &str,
+    blind: bool,
+    changes: &[&str],
+    timing: bool,
+) {
     if !common::live() {
         return;
     }
-    let css = stylesheet(body);
+    let css = stylesheet_with_timing(body, timing);
     let href = format!("http://127.0.0.1:{css}/style.css");
     let style = if imported {
         format!("<style>@import url('{href}');</style>")
@@ -149,6 +168,17 @@ fn check_changes(imported: bool, body: &str, blind: bool, changes: &[&str]) {
 #[test]
 fn a_safe_opaque_link_sheet_is_watched() {
     check_opaque_sheet(false, "#go { visibility: visible }", false);
+}
+
+#[test]
+fn an_opaque_sheet_without_resource_timing_sizes_is_blind() {
+    check_changes_with_timing(
+        false,
+        "#go { visibility: visible }",
+        true,
+        &["sheet.disabled=true"],
+        false,
+    );
 }
 
 #[test]

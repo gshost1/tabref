@@ -210,9 +210,25 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   const now = scan(opaque);
   if (now.blind) { delete window[key]; return { blind: true, why: now.why }; }
   if (now.opaque.length) {
+    const opaqueBytes = (() => {
+      try {
+        const timings = performance.getEntriesByType('resource');
+        let total = 0;
+        for (const sheet of now.opaque) {
+          let largest = 0;
+          for (const entry of timings) if (entry.name === sheet.href) {
+            const size = entry.decodedBodySize;
+            if (!Number.isSafeInteger(size) || size <= 0) return null;
+            largest = Math.max(largest, size);
+          }
+          if (largest === 0 || !Number.isSafeInteger(total += largest)) return null;
+        }
+        return total;
+      } catch { return null; }
+    })();
     window[Symbol.for('tabref.capture-opaque')] = {token: TOKEN, entries: now.opaque};
     delete window[key];
-    return {blind: true, opaque: now.opaque.map(entry => entry.href)};
+    return {blind: true, opaque: now.opaque.map(entry => entry.href), opaqueBytes};
   }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
     scan, sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind, opaque };

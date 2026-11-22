@@ -6,6 +6,8 @@ use tabref_core::{AppError, Deadline};
 use super::{ARM, CaptureWatch, evaluate_quietly, opaque, script, trace};
 use crate::{CdpConnection, PageSession};
 
+const MAX_OPAQUE_BYTES: u64 = 256 * 1024;
+
 impl CaptureWatch {
     pub fn arm_with_budget(
         connection: &mut CdpConnection,
@@ -53,13 +55,28 @@ fn arm(
         .get("why")
         .and_then(Value::as_str)
         .is_some_and(|why| !why.is_empty());
-    if other_blind_reason {
+    if other_blind_reason || reply.get("opaque").is_some() {
         reply["blind"] = Value::Bool(true);
+    }
+
+    let opaque_bytes = reply.get("opaqueBytes").and_then(Value::as_u64);
+    let known_small = opaque_bytes.is_some_and(|bytes| bytes > 0 && bytes <= MAX_OPAQUE_BYTES);
+    if reply.get("opaque").is_some() && !other_blind_reason && !known_small {
+        trace::record("opaque.skip", || {
+            json!({
+                "bytes":opaque_bytes,
+                "reason":if opaque_bytes.is_some_and(|bytes| bytes > MAX_OPAQUE_BYTES) {
+                    "size-limit"
+                } else {
+                    "unknown-size"
+                }
+            })
+        });
     }
     if let Some(urls) = reply
         .get("opaque")
         .and_then(Value::as_array)
-        .filter(|_| !other_blind_reason)
+        .filter(|urls| !other_blind_reason && known_small && !urls.is_empty())
     {
         let deadline = deadline.capped(Duration::from_millis(500));
         match opaque::prepare(connection, session, token, urls, deadline) {

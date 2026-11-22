@@ -6,6 +6,9 @@ use tabref_core::{AppError, Deadline};
 
 use super::super::{CaptureWatch, IDLE_WAIT_MS, arm_capture_watch};
 
+#[path = "capture_watch_opaque_size_tests.rs"]
+mod opaque_size;
+
 fn session() -> PageSession {
     PageSession {
         target_id: "T".into(),
@@ -37,7 +40,7 @@ fn opaque_preparation_retains_its_shared_budget_and_cleanup_allowance() {
         }
     }
     let transport = ScriptedTransport::new()
-        .expect("Runtime.evaluate", evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"]})))
+        .expect("Runtime.evaluate", evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"],"opaqueBytes":12})))
         .expect("DOM.enable", json!({}))
         .expect_with_events("CSS.enable", vec![json!({"method":"CSS.styleSheetAdded","sessionId":"S","params":{"header":{
             "sourceURL":"https://example.org/a.css","isInline":false,"length":3,"styleSheetId":"a"
@@ -78,7 +81,7 @@ fn another_blind_reason_skips_opaque_preparation() {
     let transport = ScriptedTransport::new().expect(
         "Runtime.evaluate",
         evaluated(json!({
-            "blind":true,"why":"animation:pulse","opaque":["https://example.org/a.css"]
+            "blind":true,"why":"animation:pulse","opaque":["https://example.org/a.css"],"opaqueBytes":12
         })),
     );
     let sent = transport.sent_log();
@@ -103,7 +106,7 @@ fn rejection_stops_before_fetching_the_next_sheet_or_rearming() {
             "sourceURL":format!("https://example.org/{id}.css"),"isInline":false,"length":first.len(),"styleSheetId":id
         }}})).to_vec();
         let mut transport = ScriptedTransport::new()
-            .expect("Runtime.evaluate", evaluated(json!({"blind":true,"opaque":["https://example.org/a.css","https://example.org/b.css"]})))
+            .expect("Runtime.evaluate", evaluated(json!({"blind":true,"opaque":["https://example.org/a.css","https://example.org/b.css"],"opaqueBytes":24})))
             .expect("DOM.enable", json!({}))
             .expect_with_events("CSS.enable", headers, json!({"result":{}}))
             .expect("CSS.getStyleSheetText", json!({"text":first}));
@@ -166,7 +169,9 @@ fn css_errors_do_not_approve_an_opaque_sheet() {
     let transport = ScriptedTransport::new()
         .expect(
             "Runtime.evaluate",
-            evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"]})),
+            evaluated(
+                json!({"blind":true,"opaque":["https://example.org/a.css"],"opaqueBytes":12}),
+            ),
         )
         .expect("DOM.enable", json!({}))
         .expect_error("CSS.enable", -32000, "CSS unavailable")
@@ -195,7 +200,9 @@ fn dropped_events_cannot_approve_even_a_safe_sheet() {
     let transport = ScriptedTransport::new()
         .expect(
             "Runtime.evaluate",
-            evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"]})),
+            evaluated(
+                json!({"blind":true,"opaque":["https://example.org/a.css"],"opaqueBytes":12}),
+            ),
         )
         .expect("DOM.enable", json!({}))
         .expect_with_events("CSS.enable", events, json!({"result":{}}))
@@ -218,7 +225,7 @@ fn dropped_events_cannot_approve_even_a_safe_sheet() {
 #[test]
 fn font_inventory_events_do_not_discard_classified_rules() {
     let transport = ScriptedTransport::new()
-        .expect("Runtime.evaluate", evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"]})))
+        .expect("Runtime.evaluate", evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"],"opaqueBytes":12})))
         .expect("DOM.enable", json!({}))
         .expect_with_events("CSS.enable", vec![json!({"method":"CSS.styleSheetAdded","sessionId":"S","params":{"header":{"sourceURL":"https://example.org/a.css","isInline":false,"length":12,"styleSheetId":"sheet"}}})], json!({"result":{}}))
         .expect_with_events("CSS.getStyleSheetText", vec![json!({"method":"CSS.fontsUpdated","sessionId":"S","params":{"font":{"fontFamily":"Example"}}})], json!({"result":{"text":"a{color:red}"}}))
@@ -266,7 +273,9 @@ fn late_stylesheet_events_still_refuse_approval() {
         let transport = ScriptedTransport::new()
             .expect(
                 "Runtime.evaluate",
-                evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"]})),
+                evaluated(
+                    json!({"blind":true,"opaque":["https://example.org/a.css"],"opaqueBytes":12}),
+                ),
             )
             .expect("DOM.enable", json!({}))
             .expect("CSS.enable", json!({}))
