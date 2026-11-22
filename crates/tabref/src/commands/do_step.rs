@@ -7,6 +7,7 @@ use super::action_report::step_report;
 use super::batch_step::BatchStep;
 use super::do_read_steps::{expect_step, find_step, js_step, open_step, read_step, snap_step};
 use super::page_url::short_url;
+use super::page_view::{record_unread, unread_note};
 use super::step_done::StepDone;
 use super::target_spec::TargetSpec;
 use super::{check, click, fill, focus, hover, press, scroll, select, type_text};
@@ -85,13 +86,21 @@ pub(crate) fn run_step(
         }
     };
     let late = match (&acted.effects, last, step.verb().as_str()) {
-        (Some(effects), false, "click" | "double-click" | "press") => session
-            .follow_late(effects, deadline)?
-            .map(|page| (effects.url_before.clone(), page)),
+        (Some(effects), false, "click" | "double-click" | "press") => {
+            match session.follow_late(effects, deadline) {
+                Ok(page) => page.map(|page| Ok((effects.url_before.clone(), page))),
+                Err(error) => Some(Err(unread_note("where the step led", &error))),
+            }
+        }
         _ => None,
     };
-    let (mut text, data) = step_report(session, acted, last)?;
-    if let Some((before, page)) = late {
+    let (mut text, mut data) = step_report(session, acted, last)?;
+    if let Some(Err(note)) = &late {
+        text.push('\n');
+        text.push_str(note);
+        record_unread(&mut data, note);
+    }
+    if let Some(Ok((before, page))) = late {
         let summary_end = text.find('\n').unwrap_or(text.len());
         text.insert_str(
             summary_end,
