@@ -36,7 +36,9 @@ pub(super) fn prepare(
         "opaque.events",
         || json!({"late":late.iter().map(|event| json!({"method":event.method,"params":event.params})).collect::<Vec<_>>(),"dropped":connection.dropped_event_count() - dropped,"graph":graph.len()}),
     );
-    if connection.dropped_event_count() != dropped || !late.is_empty() {
+    if connection.dropped_event_count() != dropped
+        || late.iter().any(|event| event.method != "CSS.fontsUpdated")
+    {
         return Ok(());
     }
     let graph = json!(graph);
@@ -124,6 +126,10 @@ fn collect(
             .as_u64()
             .is_none_or(|length| length > 1_000_000)
         {
+            record(
+                "opaque.reject",
+                || json!({"url":url,"construct":"header-size-or-missing-length"}),
+            );
             graph.push((url.to_owned(), None));
             continue;
         }

@@ -71,14 +71,16 @@ const SCAN: &str = r"const scan = (approved = []) => {
         const entries = root.getAnimations().map(animation => ({ animation,
           playState: animation.playState, currentTime: animation.currentTime }));
         animations.push(...entries);
-        return entries.some(entry => entry.animation.pending || entry.playState === 'running');
-      } catch (error) { return true; }
+        const active = entries.find(entry => entry.animation.pending || entry.playState === 'running');
+        if (active) fail('animation:' + (active.animation.animationName ?? active.animation.constructor.name));
+        return !!active;
+      } catch (error) { fail('animation:' + error.name); return true; }
     };
     const unreadable = root => {
       for (const el of root.querySelectorAll(frames)) {
         let inner = null;
         try { inner = el.contentDocument; } catch (error) { inner = null; }
-        if (!inner) return true;
+        if (!inner) { fail('frame:' + el.localName + ':' + (el.getAttribute('src') ?? el.getAttribute('data') ?? '')); return true; }
       }
       return false;
     };
@@ -114,7 +116,7 @@ const SCAN: &str = r"const scan = (approved = []) => {
     const walk = root => {
       roots.push(root);
       if (root.slotAssignment === 'manual') { fail('manual-slot'); return; }
-      if (moving(root) || unreadable(root)) { fail('animation-or-frame'); return; }
+      if (moving(root) || unreadable(root)) return;
       const elements = root.querySelectorAll('*');
       total += elements.length;
       if (total > MAX_ELEMENTS) { fail('element-count'); return; }
@@ -298,12 +300,25 @@ pub fn arm_capture_watch(
     token: &str,
     deadline: Deadline,
 ) -> Result<CaptureWatch, AppError> {
-    let mut reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
+    let mut reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)
+        .inspect_err(|error| {
+            trace::record(
+                "arm.error",
+                || json!({"token":token,"step":"initial","error":error.to_string()}),
+            );
+        })?;
     trace::record("arm.scan", || json!({"token":token,"reply":reply}));
     if let Some(urls) = reply.get("opaque").and_then(Value::as_array) {
         match opaque::prepare(connection, session, token, urls, deadline) {
             Ok(()) => {
-                reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
+                let rearm = ARM.replace("if (document.visibilityState === 'hidden')", "if (true)");
+                reply = evaluate_quietly(connection, session, &script(&rearm, token), deadline)
+                    .inspect_err(|error| {
+                        trace::record(
+                            "arm.error",
+                            || json!({"token":token,"step":"approved","error":error.to_string()}),
+                        );
+                    })?;
                 trace::record("arm.approved", || json!({"token":token,"reply":reply}));
             }
             Err(error) => trace::record(

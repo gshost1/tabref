@@ -93,3 +93,80 @@ fn dropped_events_cannot_approve_even_a_safe_sheet() {
     );
     assert!(connection.dropped_event_count() > 0);
 }
+
+#[test]
+fn font_inventory_events_do_not_discard_classified_rules() {
+    let transport = ScriptedTransport::new()
+        .expect("Runtime.evaluate", evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"]})))
+        .expect("DOM.enable", json!({}))
+        .expect_with_events("CSS.enable", vec![json!({"method":"CSS.styleSheetAdded","sessionId":"S","params":{"header":{"sourceURL":"https://example.org/a.css","isInline":false,"length":12,"styleSheetId":"sheet"}}})], json!({"result":{}}))
+        .expect_with_events("CSS.getStyleSheetText", vec![json!({"method":"CSS.fontsUpdated","sessionId":"S","params":{"font":{"fontFamily":"Example"}}})], json!({"result":{"text":"a{color:red}"}}))
+        .expect("CSS.disable", json!({}))
+        .expect("DOM.disable", json!({}))
+        .expect("Runtime.evaluate", evaluated(json!([["https://example.org/a.css",[]]])))
+        .expect("Runtime.evaluate", evaluated(Value::Null))
+        .expect("Runtime.evaluate", evaluated(json!({"blind":false})));
+    let sent = transport.sent_log();
+    let mut connection = CdpConnection::new(transport.boxed());
+    assert!(
+        !arm_capture_watch(
+            &mut connection,
+            &session(),
+            "token",
+            Deadline::after(1000).unwrap()
+        )
+        .unwrap()
+        .blind
+    );
+    let sent = sent.lock().unwrap();
+    assert!(
+        sent[0]["params"]["expression"]
+            .as_str()
+            .unwrap()
+            .contains("if (document.visibilityState === 'hidden') arm();")
+    );
+    assert!(
+        sent.last().unwrap()["params"]["expression"]
+            .as_str()
+            .unwrap()
+            .contains("if (true) arm();")
+    );
+}
+
+#[test]
+fn late_stylesheet_events_still_refuse_approval() {
+    for method in [
+        "CSS.styleSheetChanged",
+        "CSS.styleSheetRemoved",
+        "CSS.styleSheetAdded",
+        "CSS.mediaQueryResultChanged",
+        "CSS.unknown",
+    ] {
+        let transport = ScriptedTransport::new()
+            .expect(
+                "Runtime.evaluate",
+                evaluated(json!({"blind":true,"opaque":["https://example.org/a.css"]})),
+            )
+            .expect("DOM.enable", json!({}))
+            .expect("CSS.enable", json!({}))
+            .expect_with_events(
+                "CSS.disable",
+                vec![json!({"method":method,"sessionId":"S","params":{}})],
+                json!({"result":{}}),
+            )
+            .expect("DOM.disable", json!({}))
+            .expect("Runtime.evaluate", evaluated(json!({"blind":true})));
+        let mut connection = CdpConnection::new(transport.boxed());
+        assert!(
+            arm_capture_watch(
+                &mut connection,
+                &session(),
+                "token",
+                Deadline::after(1000).unwrap()
+            )
+            .unwrap()
+            .blind,
+            "{method}"
+        );
+    }
+}
