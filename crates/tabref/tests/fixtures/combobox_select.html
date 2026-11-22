@@ -1,0 +1,54 @@
+<!doctype html><title>Combobox choices</title>
+<button id=controlled role=combobox aria-controls=areas aria-label="Service area" aria-expanded=false>North</button>
+<ul id=areas role=listbox hidden>
+  <li role=option>North</li>
+  <li role=option aria-label="South West">SW</li>
+  <li role=option>South East</li>
+</ul>
+<button id=owned role=combobox aria-owns=teams aria-label=Team aria-expanded=false>Support</button>
+<ul id=teams role=listbox hidden>
+  <li role=option>Support</li>
+  <li role=option>Platform</li>
+</ul>
+<input id=city role=combobox aria-controls=cities aria-label=City aria-autocomplete=list aria-expanded=false value=Lisbon>
+<ul id=cities role=listbox hidden></ul>
+<button id=implicit role=combobox aria-label=Priority aria-expanded=false>Normal</button>
+<ul id=priorities role=listbox hidden><li role=option>High</li></ul>
+<ul role=listbox><li role=option id=decoy>High</li></ul>
+<button id=broken role=combobox aria-label=Unavailable aria-expanded=false>None</button>
+<script>
+const wire = (box, list, openOnClick = true) => {
+  const show = open => {
+    list.hidden = !open;
+    box.setAttribute('aria-expanded', String(open));
+  };
+  if (openOnClick) box.onclick = () => setTimeout(() => show(true), 120);
+  box.onkeydown = event => { if (event.key === 'Escape') show(false); };
+  list.onclick = event => {
+    const option = event.target.closest('[role=option]');
+    if (!option) return;
+    if (box instanceof HTMLInputElement) box.value = option.textContent;
+    else box.textContent = option.textContent;
+    show(false);
+  };
+  return show;
+};
+wire(controlled, areas);
+wire(owned, teams);
+wire(implicit, priorities);
+broken.onkeydown = event => {
+  if (event.key === 'Escape') broken.dataset.escaped = 'yes';
+};
+const showCities = wire(city, cities, false);
+city.oninput = () => {
+  const matches = ['Lisbon', 'Kyoto', 'Toronto'].filter(name =>
+    name.toLowerCase().startsWith(city.value.toLowerCase()));
+  cities.replaceChildren(...matches.map(name => {
+    const option = document.createElement('li');
+    option.setAttribute('role', 'option');
+    option.textContent = name;
+    return option;
+  }));
+  showCities(matches.length > 0);
+};
+</script>
