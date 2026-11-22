@@ -119,7 +119,8 @@ fn focus_and_settle(
         token,
         MOVE_WINDOW,
         deadline,
-    )?;
+    )
+    .map_err(after_delivery)?;
     let effects = match session.finish_action(&watched, deadline) {
         Ok(effects) => effects,
         Err(error) => {
