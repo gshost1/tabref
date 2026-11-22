@@ -19,9 +19,6 @@ const SKIPPED_TAGS: &[&str] = &[
 
 const SECTIONING: &[&str] = &["ARTICLE", "ASIDE", "MAIN", "NAV", "SECTION"];
 
-pub(crate) const SEARCH_ATTRIBUTES: &[&str] =
-    &["aria-label", "title", "alt", "placeholder", "value"];
-
 pub(crate) fn pre_control_text<'a>(
     tree: &'a DomTree,
     index: usize,
@@ -37,10 +34,17 @@ pub(crate) fn pre_control_text<'a>(
 }
 
 pub(crate) fn attribute_text(node: &DomNode) -> impl Iterator<Item = String> + '_ {
-    SEARCH_ATTRIBUTES
-        .iter()
+    ["aria-label", "title", "alt", "placeholder", "value"]
+        .into_iter()
         .filter_map(|name| node.attr(name))
         .map(squash)
+}
+
+pub(crate) fn ref_near<'a>(input: &'a OutlineInput, dom: &DomTree, at: usize) -> Option<&'a str> {
+    dom.ancestors(at).into_iter().find_map(|index| {
+        let key = (dom.target_id.clone(), dom.nodes[index].backend_id);
+        input.refs.get(&key).map(|label| label.ref_text.as_str())
+    })
 }
 
 pub(crate) fn matching_field(
@@ -105,7 +109,7 @@ pub(crate) fn add_pre_pointers(
     found: &mut [(String, i64, TextMatch)],
     pointers: Vec<Option<String>>,
     sources: HashMap<String, usize>,
-    mut unique: impl FnMut(&str) -> bool,
+    mut unique: impl FnMut(&str, i64, &str) -> bool,
 ) {
     if !pointers.iter().any(Option::is_some) {
         return;
@@ -114,7 +118,7 @@ pub(crate) fn add_pre_pointers(
         .into_iter()
         .map(|(text, count)| (fold(&text).into_iter().collect::<String>(), count))
         .collect();
-    for ((_, _, hit), pointer) in found.iter_mut().zip(pointers) {
+    for ((target, backend, hit), pointer) in found.iter_mut().zip(pointers) {
         let Some(query) = pointer else { continue };
         let folded = fold(&query).into_iter().collect::<String>();
         let mut occurrences = 0;
@@ -126,7 +130,7 @@ pub(crate) fn add_pre_pointers(
                 }
             }
         }
-        if occurrences == 1 && unique(&query) {
+        if occurrences == 1 && unique(target, *backend, &query) {
             let separator = if query.starts_with('-') { "-- " } else { "" };
             hit.line.push_str(&format!(
                 " (tabref find {separator}'{}')",

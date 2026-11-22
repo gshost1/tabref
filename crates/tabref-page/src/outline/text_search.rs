@@ -4,7 +4,7 @@ use super::block_kind::BlockKind;
 use super::dom_tree::DomTree;
 use super::element_kind::{
     add_pre_pointers, attribute_text, has_svg_name, heading_path, is_heading_text, matching_field,
-    node_outside_svg, pre_control_text, pre_has_break, search_control, search_coverage,
+    node_outside_svg, pre_control_text, pre_has_break, ref_near, search_control, search_coverage,
     semantic_kind, skipped_nodes, svg_metadata, svg_search_text, version_badge,
 };
 use super::expander::{expander_for, is_hidden_at};
@@ -17,7 +17,7 @@ use super::text_runs::{cut_chars, squash, subtree_text};
 const CONTROL_SCAN: usize = 400;
 enum Source {
     Both,
-    Coverage,
+    Coverage(bool),
     Pointer,
 }
 
@@ -40,15 +40,8 @@ impl TextMatch {
             input,
             needle,
             keep,
-            |tree, index, text| {
-                let reference = tree.ancestors(index).into_iter().find_map(|index| {
-                    input
-                        .refs
-                        .get(&(tree.target_id.clone(), tree.nodes[index].backend_id))
-                });
-                observe(reference.map(|label| label.ref_text.as_str()), text);
-            },
-            |_| true,
+            |tree, index, text| observe(ref_near(input, tree, index), text),
+            |_, _, _| true,
         );
         (found.into_iter().map(|(_, _, hit)| hit).collect(), total)
     }
@@ -60,7 +53,7 @@ impl TextMatch {
         needle: &str,
         keep: usize,
         mut observe: impl FnMut(&'a DomTree, usize, &str),
-        unique_pointer: impl FnMut(&str) -> bool,
+        mut unique_pointer: impl FnMut(&str, &str, Option<&str>) -> bool,
     ) -> (Vec<(String, i64, Self)>, usize) {
         let needle = fold(&squash(needle));
         if needle.is_empty() {
@@ -69,7 +62,7 @@ impl TextMatch {
         let mut found = Vec::new();
         let mut pointers = Vec::new();
         let mut sources = HashMap::new();
-        let mut total = 0;
+        let (mut total, mut pre_sources) = (0, HashMap::new());
         for tree in input.trees.iter().chain(input.frames.values().flatten()) {
             let (more, count) = search_tree(
                 input,
@@ -77,11 +70,15 @@ impl TextMatch {
                 &needle,
                 keep.saturating_sub(found.len()),
                 &mut |tree, index, text, kind| {
-                    if keep > 0 && !matches!(kind, Source::Coverage) {
-                        if let Some(count) = sources.get_mut(text) {
-                            *count += 1;
-                        } else {
-                            sources.insert(text.to_owned(), 1usize);
+                    if keep > 0 {
+                        match kind {
+                            Source::Coverage(true) => {
+                                let key = (tree.target_id.as_str(), tree.nodes[index].backend_id);
+                                pre_sources
+                                    .insert(key, (text.to_owned(), ref_near(input, tree, index)));
+                            }
+                            Source::Coverage(false) => {}
+                            _ => *sources.entry(text.to_owned()).or_insert(0) += 1,
                         }
                     }
                     if !matches!(kind, Source::Pointer) {
@@ -95,7 +92,11 @@ impl TextMatch {
             }));
             total += count;
         }
-        add_pre_pointers(&mut found, pointers, sources, unique_pointer);
+        add_pre_pointers(&mut found, pointers, sources, |target, backend, query| {
+            pre_sources
+                .get(&(target, backend))
+                .is_some_and(|(raw, reference)| unique_pointer(query, raw, *reference))
+        });
         (found, total)
     }
 }
@@ -285,13 +286,13 @@ fn pre_matches<'a>(
     let mut total = 0;
     let mut found = Vec::new();
     for raw_line in raw.split_inclusive('\n') {
-        let start = offset + raw_line.len() - raw_line.trim_start().len();
-        let end = start + raw_line.trim().len();
         offset += raw_line.len();
         let line = squash(raw_line);
         if find_folded(&fold(&line), needle).is_none() {
             continue;
         }
+        let start = offset - raw_line.trim_start().len();
+        let end = start + raw_line.trim().len();
         let first = origins.partition_point(|(_, end, _)| *end <= start);
         let last = origins.partition_point(|(start, _, _)| *start < end);
         let mut nodes = origins[first..last].iter().map(|(_, _, index)| *index);
@@ -334,7 +335,8 @@ fn pre_matches<'a>(
         ));
     }
     if total > 0 {
-        observe(tree, pre, &squash(&raw), Source::Coverage);
+        let has_pointer = found.iter().any(|(_, pointer)| pointer.is_some());
+        observe(tree, pre, &squash(&raw), Source::Coverage(has_pointer));
     }
     if total > 3 && found.len() < room {
         found.push((
