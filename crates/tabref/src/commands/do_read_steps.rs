@@ -249,7 +249,7 @@ pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone
     if needle.is_empty() {
         return Err(AppError::invalid_args("find needs the text to look for"));
     }
-    let found = find::search(session, &needle, None, FOUND_SHOWN, true)?;
+    let found = find::search(session, &needle, None, FOUND_SHOWN, false)?;
     let note = found
         .note
         .as_ref()
@@ -263,10 +263,10 @@ pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone
         text.push_str("\n  ");
         text.push_str(line);
     }
-    if found.count > found.lines.len() {
+    if found.count > found.covered {
         text.push_str(&format!(
             "\n  +{} more: tabref find {}",
-            found.count - found.lines.len(),
+            found.count - found.covered,
             quote_text(&needle)
         ));
     }

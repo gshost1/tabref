@@ -28,12 +28,25 @@ pub(crate) fn find_matches(
     needle: &str,
     role: Option<&str>,
 ) -> Vec<String> {
-    let needle = needle.to_lowercase();
-    let role = role.map(normalize_role);
     let mut found = Vec::new();
-    let mut ancestors = Vec::new();
-    visit(root, &needle, role.as_deref(), &mut ancestors, &mut found);
+    visit_matches(root, needle, role, |_, _, line| found.push(line()));
     found
+}
+
+/// Visits each AX hit with its nearest ref and matching source text.
+pub(crate) fn visit_matches(
+    root: &AccessibilityNode,
+    needle: &str,
+    role: Option<&str>,
+    mut hit: impl FnMut(Option<&str>, &[&str], &dyn Fn() -> String),
+) {
+    visit(
+        root,
+        &needle.to_lowercase(),
+        role.map(normalize_role).as_deref(),
+        &mut Vec::new(),
+        &mut hit,
+    );
 }
 
 fn visit<'a>(
@@ -41,29 +54,37 @@ fn visit<'a>(
     needle: &str,
     role: Option<&str>,
     ancestors: &mut Vec<&'a AccessibilityNode>,
-    found: &mut Vec<String>,
-) {
-    let before = found.len();
+    hit: &mut impl FnMut(Option<&str>, &[&str], &dyn Fn() -> String),
+) -> bool {
+    let mut descendant_matched = false;
     ancestors.push(node);
     for child in &node.children {
-        visit(child, needle, role, ancestors, found);
+        descendant_matched |= visit(child, needle, role, ancestors, hit);
     }
     ancestors.pop();
-    let own_match = role.is_none_or(|role| node.role == role) && contains(node, needle);
-    if own_match && found.len() == before {
-        found.push(describe(node, ancestors));
+    if descendant_matched || role.is_some_and(|role| node.role != role) {
+        return descendant_matched;
     }
-}
-
-fn contains(node: &AccessibilityNode, needle: &str) -> bool {
-    [
+    let mut matching = [
         node.display_name(),
         node.identity.value.as_deref(),
         node.identity.description.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|text| text.to_lowercase().contains(needle))
+    ];
+    matching.iter_mut().for_each(|text| {
+        *text = text.filter(|text| text.to_lowercase().contains(needle));
+    });
+    let texts: Vec<&str> = matching.into_iter().flatten().collect();
+    if texts.is_empty() {
+        return false;
+    }
+    let reference = node.ref_id.as_deref().or_else(|| {
+        ancestors
+            .iter()
+            .rev()
+            .find_map(|ancestor| ancestor.ref_id.as_deref())
+    });
+    hit(reference, &texts, &|| describe(node, ancestors));
+    true
 }
 
 fn describe(node: &AccessibilityNode, ancestors: &[&AccessibilityNode]) -> String {

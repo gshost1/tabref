@@ -230,15 +230,22 @@ fn find_in_a_batch_prints_the_lines_find_prints() {
     let json = tabref.ok(&["--json", "do", "find Entry 4"]).json();
     let result = &json["data"]["steps"][0]["data"];
     let matches = result["matches"].as_array().unwrap();
-    assert!(matches.len() > 5, "{json}");
-    assert_eq!(
-        result["count"].as_u64(),
-        Some(matches.len() as u64),
-        "{json}"
-    );
+    assert_eq!(matches.len(), 6, "{json}");
+    let cli = tabref.ok(&["--json", "find", "Entry 4"]).json();
+    assert_eq!(result["count"], cli["data"]["count"], "{json}");
+    assert!(result["count"].as_u64().unwrap() > 5, "{json}");
+    let cli_matches = cli["data"]["matches"].as_array().unwrap();
+    for (step, standalone) in matches.iter().take(5).zip(cli_matches) {
+        assert_eq!(
+            strip_refs(step.as_str().unwrap()),
+            strip_refs(standalone.as_str().unwrap()),
+        );
+    }
+    assert!(matches[5].as_str().unwrap().starts_with("… "), "{json}");
     assert!(
         matches
             .iter()
+            .take(5)
             .all(|line| line.as_str().is_some_and(|s| s.contains("-> /entry/"))),
         "{json}"
     );
