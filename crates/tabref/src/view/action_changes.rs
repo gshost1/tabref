@@ -114,7 +114,7 @@ fn token(node: &AccessibilityNode) -> Option<ElementToken> {
     ElementToken::parse(node.identity.retained_object.as_deref()?).ok()
 }
 
-fn location<'a>(
+pub(crate) fn location<'a>(
     node: &AccessibilityNode,
     documents: &impl Fn(&str) -> Option<&'a [DomTree]>,
 ) -> Option<(&'a DomTree, usize)> {
