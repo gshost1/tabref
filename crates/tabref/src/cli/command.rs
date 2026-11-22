@@ -37,7 +37,7 @@ pub(crate) enum Command {
         /// Print only the part of the page inside this ref
         #[arg(long, value_name = "REF")]
         root: Option<String>,
-        /// Rows of long tables and lists to print: 21-40, 21- or 5
+        /// Rows of long tables and lists to print: 21-40, 21- or 5 (data rows by position; tables label them #N)
         #[arg(long, value_name = "FROM-TO")]
         rows: Option<String>,
         /// Print every line whole: no paragraph, code, dialog or option cuts
@@ -160,7 +160,7 @@ pub(crate) enum Command {
         /// The section under the heading with this text (exact match first)
         #[arg(long, value_name = "HEADING", conflicts_with = "target")]
         section: Option<String>,
-        /// Rows of long tables and lists to print: 21-40, 21- or 5
+        /// Rows of long tables and lists to print: 21-40, 21- or 5 (data rows by position; tables label them #N)
         #[arg(long, value_name = "FROM-TO")]
         rows: Option<String>,
         /// Start at this line of the text (the cut markers name it)
