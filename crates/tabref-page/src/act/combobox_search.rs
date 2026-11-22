@@ -19,7 +19,8 @@ use crate::{
 
 #[path = "combobox_scan.rs"]
 mod scan;
-use scan::{Observation, Scan, ScrollPosition};
+pub(super) use scan::incomplete_error;
+use scan::{Observation, Scan, ScrollPosition, has_exact, search_window};
 
 const POPUP_WAIT: Duration = Duration::from_millis(900);
 const POLL: Duration = Duration::from_millis(40);
@@ -57,15 +58,17 @@ impl PopupSearch<'_> {
         connection: &mut CdpConnection,
         deadline: Deadline,
         mode: SearchMode,
+        initial: Option<(i64, AccessibilityNode)>,
     ) -> Result<(Located, i64), AppError> {
-        let remaining = deadline.remaining();
-        let reserve = match mode {
-            SearchMode::ReserveFilter => remaining / 2,
-            _ => (remaining / 3).min(Duration::from_millis(350)),
-        };
-        let wait = deadline.capped(remaining.saturating_sub(reserve));
+        let wait = search_window(deadline, matches!(mode, SearchMode::ReserveFilter));
         let query = normalize(self.locator.name.as_deref().unwrap_or_default());
         let mut scan = Scan::default();
+        if let Some((popup, options)) = initial {
+            if has_exact(&options, &query) {
+                return self.pick(&options, popup);
+            }
+            scan.note_visible_options(options.children.len());
+        }
         match self.browse(connection, &query, &mut scan, wait) {
             Ok(Some(pick)) => return Ok(pick),
             Err(error) if !is_timeout(&error) || !wait.is_expired() => return Err(error),
@@ -96,23 +99,20 @@ impl PopupSearch<'_> {
         wait: Deadline,
     ) -> Result<Option<(Located, i64)>, AppError> {
         let discovery = wait.capped(POPUP_WAIT);
-        while wait.remaining() > POLL {
+        while !wait.is_expired() {
             let dom = frame_dom(connection, self.session, self.combo, wait)?;
             let Some(popup) = self.popup(&dom, None).map(|node| node.backend_id) else {
                 if !scan.has_options() && discovery.is_expired() {
                     break;
                 }
-                std::thread::sleep(POLL);
+                std::thread::sleep(POLL.min(wait.remaining()));
                 continue;
             };
             let options = self.options(connection, popup, wait)?;
-            if options
-                .children
-                .iter()
-                .any(|option| rank(option, query) == Some(EXACT_NAME))
-            {
+            if has_exact(&options, query) {
                 return self.pick(&options, popup).map(Some);
             }
+            scan.note_visible_options(options.children.len());
             let position = self.scroll(connection, popup, Value::Null, wait)?;
             match scan.observe(popup, options, &dom, position) {
                 Observation::Reset => {
@@ -128,7 +128,7 @@ impl PopupSearch<'_> {
                     }
                 }
             }
-            std::thread::sleep(POLL);
+            std::thread::sleep(POLL.min(wait.remaining()));
         }
         Ok(None)
     }
@@ -293,18 +293,21 @@ impl PopupSearch<'_> {
             .filter(|node| is_popup(node) && !self.baseline.contains(&node.backend_id)))
     }
 
-    pub fn open(
+    pub fn visible_option_count(
         &self,
         connection: &mut CdpConnection,
         dom: &DomTree,
         known: Option<i64>,
         deadline: Deadline,
-    ) -> Result<bool, AppError> {
+    ) -> Result<usize, AppError> {
         if is_collapsed(dom, self.combo) {
-            return Ok(false);
+            return Ok(0);
         }
         if let Some(popup) = self.popup(dom, known) {
-            return self.has_options(connection, popup.backend_id, deadline);
+            return Ok(self
+                .options(connection, popup.backend_id, deadline)?
+                .children
+                .len());
         }
         if known.is_none() && !linked_popup(dom, self.combo).0 {
             for popup in dom
@@ -312,24 +315,16 @@ impl PopupSearch<'_> {
                 .iter()
                 .filter(|node| is_popup(node) && !self.baseline.contains(&node.backend_id))
             {
-                if self.has_options(connection, popup.backend_id, deadline)? {
-                    return Ok(true);
+                let count = self
+                    .options(connection, popup.backend_id, deadline)?
+                    .children
+                    .len();
+                if count > 0 {
+                    return Ok(count);
                 }
             }
         }
-        Ok(false)
-    }
-
-    fn has_options(
-        &self,
-        connection: &mut CdpConnection,
-        popup: i64,
-        deadline: Deadline,
-    ) -> Result<bool, AppError> {
-        Ok(!self
-            .options(connection, popup, deadline)?
-            .children
-            .is_empty())
+        Ok(0)
     }
 }
 

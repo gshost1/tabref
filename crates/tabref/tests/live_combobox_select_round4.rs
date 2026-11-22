@@ -103,6 +103,80 @@ fn a_multiselect_option_transitions_to_selected_then_stays_selected_on_repick() 
 }
 
 #[test]
+fn multiselect_hover_is_not_a_selection_transition() {
+    if !live() {
+        return;
+    }
+    let tabref = open("combo-multi-hover");
+    js(
+        &tabref,
+        "hoverMenu.setAttribute('aria-multiselectable', 'true'); hoverBox.dataset.hoverOnly = 'yes'; 1",
+    );
+    let reply = tabref.run(&["--json", "select", "Hover", "Two"]).json();
+    not_kept(&reply);
+    assert_eq!(js(&tabref, "hoverBox.textContent"), "None");
+}
+
+#[test]
+fn an_option_intercepted_before_press_is_retry_safe_after_cleanup() {
+    if !live() {
+        return;
+    }
+    let tabref = open("combo-covered-option");
+    js(&tabref, "stuck.dataset.cover = 'yes'; 1");
+    let reply = tabref.run(&["--json", "select", "Stuck", "South"]).json();
+    let error = &reply["error"];
+    assert_eq!(error["code"], "ACTION_FAILED", "{reply}");
+    assert_eq!(error["details"]["kind"], "cdp_click_intercepted", "{reply}");
+    assert_eq!(error["disposition"]["delivery"], "not_delivered", "{reply}");
+    assert_eq!(
+        js(
+            &tabref,
+            "stuck.textContent + ':' + stuckMenu.hidden + ':' + stuckEscapes"
+        ),
+        "North:true:1"
+    );
+}
+
+#[test]
+fn failed_autocomplete_dismisses_then_restores_without_another_input_event() {
+    if !live() {
+        return;
+    }
+    let tabref = open("combo-restore-after-escape");
+    js(&tabref, "auto.dataset.clearOpen = 'yes'; 1");
+    let reply = tabref.run(&["--json", "select", "Auto", "Kiwi"]).json();
+    assert_eq!(reply["error"]["code"], "ELEMENT_NOT_FOUND", "{reply}");
+    assert_eq!(
+        reply["error"]["disposition"]["delivery"], "not_delivered",
+        "{reply}"
+    );
+    assert_eq!(
+        js(
+            &tabref,
+            "auto.value + ':' + autoMenu.hidden + ':' + autoInputs + ':' + autoEscapes"
+        ),
+        "Banana:true:1:1"
+    );
+}
+
+#[test]
+fn closing_the_popup_on_mouse_down_does_not_confirm_the_typed_value() {
+    if !live() {
+        return;
+    }
+    let tabref = open("combo-typed-unconfirmed");
+    js(&tabref, "auto.dataset.mouseDownClose = 'yes'; 1");
+    let reply = tabref.ok(&["--json", "select", "Auto", "Cherry"]).json();
+    assert_eq!(reply["data"]["value"], "Cherry", "{reply}");
+    assert_eq!(reply["data"]["verified"], false, "{reply}");
+    assert_eq!(
+        reply["data"]["note"], "could not confirm the pick; the box shows the typed text",
+        "{reply}"
+    );
+}
+
+#[test]
 fn growing_non_scrollable_options_are_incomplete_until_stable() {
     if !live() {
         return;

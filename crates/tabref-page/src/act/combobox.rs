@@ -5,15 +5,17 @@ use tabref_cdp::is_timeout;
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::combobox_popup_report::{PopupText, WATCHED_TEXT};
-use super::combobox_search::{PopupSearch, SearchMode, initially_open, is_popup};
-use super::combobox_state::{ComboboxEvidence, ComboboxState, option_selected, read};
+use super::combobox_search::{PopupSearch, SearchMode, incomplete_error, initially_open, is_popup};
+use super::combobox_state::{
+    ComboboxEvidence, ComboboxState, option_selected, read, restore_value,
+};
 use crate::act::element_call::ElementCall;
 use crate::act::element_errors::stale;
 use crate::act::remote_element::{call_on_element, prove_document};
 use crate::locate::name_match::normalize;
 use crate::{
     ActionNeed, CdpConnection, DomTree, ElementToken, Locator, PageSession, SelectOutcome,
-    capture_dom, click, fill, press_key, wait_actionable,
+    capture_dom, click, fill, hover, press_key, wait_actionable,
 };
 
 const CLOSE_WAIT: Duration = Duration::from_millis(250);
@@ -29,6 +31,11 @@ const FOCUS_FOR_ESCAPE: &str = r"function() {
   if (!active || active === this.ownerDocument.body) this.focus({preventScroll: true});
 }";
 
+struct Attempt {
+    previous: ComboboxState,
+    typed: Option<String>,
+}
+
 pub(super) fn choose(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -36,7 +43,10 @@ pub(super) fn choose(
     choice: &str,
     deadline: Deadline,
 ) -> Result<SelectOutcome, AppError> {
-    let previous = read(connection, session, combo, deadline)?;
+    let mut attempt = Attempt {
+        previous: read(connection, session, combo, deadline)?,
+        typed: None,
+    };
     let before = frame_dom(connection, session, combo, deadline)?;
     let already_open = initially_open(&before, combo).map(|node| node.backend_id);
     let search = PopupSearch {
@@ -54,16 +64,13 @@ pub(super) fn choose(
             ..Locator::default()
         },
     };
-    let reused = if let Some(backend) = already_open
-        && !search
-            .options(connection, backend, deadline)?
-            .children
-            .is_empty()
-    {
-        Some(backend)
+    let initial = if let Some(backend) = already_open {
+        let options = search.options(connection, backend, deadline)?;
+        (!options.children.is_empty()).then_some((backend, options))
     } else {
         None
     };
+    let reused = initial.as_ref().map(|(backend, _)| *backend);
     let popup_text = if let Some(backend) = reused {
         call(
             connection,
@@ -79,29 +86,31 @@ pub(super) fn choose(
         ensure_clickable(connection, session, combo, "the combobox", deadline)
             .map_err(|error| error.with_disposition(DeliverySemantics::not_delivered()))?;
         if let Err(error) = click(connection, session, combo, deadline) {
-            return Err(failed(connection, &search, &previous, error, deadline));
+            return Err(failed(connection, &search, &attempt, error, deadline));
         }
         None
     };
 
-    let mut before_query = None;
-    let initial_search = if previous.editable {
+    let initial_search = if attempt.previous.editable {
         SearchMode::ReserveFilter
     } else {
         SearchMode::All
     };
     let picked = (|| {
-        let (found, backend) = match search.find(connection, deadline, initial_search) {
+        let (found, backend) = match search.find(connection, deadline, initial_search, initial) {
             Err(error)
-                if previous.editable
+                if attempt.previous.editable
                     && error.code == ErrorCode::ElementNotFound
-                    && (previous.autocomplete
+                    && (attempt.previous.autocomplete
                         || error.details.as_ref().is_some_and(|details| {
                             details["kind"] == "combobox_list_incomplete"
                         })) =>
             {
-                before_query = Some(read(connection, session, combo, deadline)?);
-                fill(connection, session, combo, choice, deadline)?;
+                attempt.typed = Some(choice.to_owned());
+                if let Some(observed) = fill(connection, session, combo, choice, deadline)?.observed
+                {
+                    attempt.typed = Some(observed);
+                }
                 let mode = if error
                     .details
                     .as_ref()
@@ -111,7 +120,7 @@ pub(super) fn choose(
                 } else {
                     SearchMode::All
                 };
-                search.find(connection, deadline, mode)?
+                search.find(connection, deadline, mode, None)?
             }
             other => other?,
         };
@@ -128,7 +137,7 @@ pub(super) fn choose(
             .collect::<Vec<_>>();
         let was_selected = option_selected(connection, session, &found.token, deadline);
         let already_selected =
-            was_selected == Some(true) || previous.has_matching_chip(&option_texts);
+            was_selected == Some(true) || attempt.previous.has_matching_chip(&option_texts);
         if !already_selected {
             ensure_clickable(
                 connection,
@@ -138,13 +147,24 @@ pub(super) fn choose(
                 deadline,
             )?;
         }
+        let before_press = if !already_selected && was_selected == Some(false) {
+            hover(connection, session, &found.token, deadline)?;
+            option_selected(connection, session, &found.token, deadline)
+        } else {
+            None
+        };
         let before_pick = read(connection, session, combo, deadline)?;
         let selected = if already_selected {
             false
         } else {
-            click(connection, session, &found.token, deadline)
-                .map_err(|error| error.with_disposition(DeliverySemantics::uncertain()))?;
-            was_selected == Some(false)
+            click(connection, session, &found.token, deadline).map_err(|error| {
+                if error.disposition == DeliverySemantics::not_delivered() {
+                    error
+                } else {
+                    error.with_disposition(DeliverySemantics::uncertain())
+                }
+            })?;
+            before_press == Some(false)
                 && option_selected(connection, session, &found.token, deadline) == Some(true)
         };
         Ok((
@@ -159,13 +179,7 @@ pub(super) fn choose(
     let (backend, label, option_texts, before_pick, selected, already_selected) = match picked {
         Ok(picked) => picked,
         Err(error) => {
-            if before_query.is_some()
-                && read(connection, session, combo, deadline)
-                    .is_ok_and(|state| state.value != previous.value)
-            {
-                let _ = fill(connection, session, combo, &previous.value, deadline);
-            }
-            return Err(failed(connection, &search, &previous, error, deadline));
+            return Err(failed(connection, &search, &attempt, error, deadline));
         }
     };
     let closure = if already_selected && reused == Some(backend) {
@@ -175,12 +189,13 @@ pub(super) fn choose(
     };
     let uncommitted = !matches!(closure, Some(Ok(PopupClosure::AlreadyClosed)));
     let popup_error = match closure {
-        Some(Ok(PopupClosure::StillOpen)) => {
+        Some(Ok(PopupClosure::StillOpen(_))) => {
             Some("the combobox popup stayed open after Escape".to_owned())
         }
         Some(Err(error)) => Some(error.message),
         _ => None,
     };
+    let Attempt { previous, typed } = attempt;
     Ok(SelectOutcome {
         label,
         previous: Some(previous.value.clone()),
@@ -192,7 +207,7 @@ pub(super) fn choose(
         readback: Some(ComboboxEvidence {
             previous,
             before_pick,
-            before_query,
+            typed,
             selected,
             already_selected,
             uncommitted,
@@ -249,21 +264,21 @@ pub(super) fn frame_dom(
         .ok_or_else(|| stale(combo, "the combobox is no longer in its document"))
 }
 
-fn popup_open(
+fn visible_options(
     connection: &mut CdpConnection,
     search: &PopupSearch<'_>,
     popup: Option<i64>,
     deadline: Deadline,
-) -> Result<bool, AppError> {
+) -> Result<usize, AppError> {
     let dom = frame_dom(connection, search.session, search.combo, deadline)?;
-    search.open(connection, &dom, popup, deadline)
+    search.visible_option_count(connection, &dom, popup, deadline)
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum PopupClosure {
     AlreadyClosed,
-    Dismissed,
-    StillOpen,
+    Dismissed(usize),
+    StillOpen(usize),
 }
 
 fn close(
@@ -272,7 +287,8 @@ fn close(
     popup: Option<i64>,
     deadline: Deadline,
 ) -> Result<PopupClosure, AppError> {
-    if !popup_open(connection, search, popup, deadline)? {
+    let seen = visible_options(connection, search, popup, deadline)?;
+    if seen == 0 {
         return Ok(PopupClosure::AlreadyClosed);
     }
     let _ = call(
@@ -282,20 +298,20 @@ fn close(
         FOCUS_FOR_ESCAPE,
         deadline,
     );
-    if !popup_open(connection, search, popup, deadline)? {
-        return Ok(PopupClosure::Dismissed);
+    if visible_options(connection, search, popup, deadline)? == 0 {
+        return Ok(PopupClosure::Dismissed(seen));
     }
     press_key(connection, search.session, "Escape", deadline)?;
     let wait = deadline.capped(CLOSE_WAIT);
     loop {
-        match popup_open(connection, search, popup, deadline) {
-            Ok(false) => return Ok(PopupClosure::Dismissed),
-            Ok(true) => {}
-            Err(error) if is_timeout(&error) => return Ok(PopupClosure::StillOpen),
+        match visible_options(connection, search, popup, deadline) {
+            Ok(0) => return Ok(PopupClosure::Dismissed(seen)),
+            Ok(_) => {}
+            Err(error) if is_timeout(&error) => return Ok(PopupClosure::StillOpen(seen)),
             Err(error) => return Err(error),
         }
         if wait.is_expired() {
-            return Ok(PopupClosure::StillOpen);
+            return Ok(PopupClosure::StillOpen(seen));
         }
         std::thread::sleep(POLL.min(wait.remaining()));
     }
@@ -304,15 +320,40 @@ fn close(
 fn failed(
     connection: &mut CdpConnection,
     search: &PopupSearch<'_>,
-    previous: &ComboboxState,
-    error: AppError,
+    attempt: &Attempt,
+    mut error: AppError,
     deadline: Deadline,
 ) -> AppError {
-    let restored = matches!(
-        close(connection, search, None, deadline),
-        Ok(PopupClosure::AlreadyClosed | PopupClosure::Dismissed)
-    ) && read(connection, search.session, search.combo, deadline)
-        .is_ok_and(|state| &state == previous);
+    let closure = close(connection, search, None, deadline);
+    if let Ok(PopupClosure::Dismissed(seen) | PopupClosure::StillOpen(seen)) = closure
+        && error.code == ErrorCode::ElementNotFound
+        && error
+            .details
+            .as_ref()
+            .is_some_and(|details| details["options_total"] == 0)
+    {
+        error = incomplete_error(seen).with_disposition(error.disposition);
+    }
+    let closed = matches!(
+        closure,
+        Ok(PopupClosure::AlreadyClosed | PopupClosure::Dismissed(_))
+    );
+    let still_closed = attempt.typed.is_none()
+        || match restore_value(
+            connection,
+            search.session,
+            search.combo,
+            &attempt.previous.value,
+            deadline,
+        ) {
+            Ok(false) => true,
+            Ok(true) => visible_options(connection, search, None, deadline) == Ok(0),
+            Err(_) => false,
+        };
+    let restored = closed
+        && still_closed
+        && read(connection, search.session, search.combo, deadline)
+            .is_ok_and(|state| state == attempt.previous);
     let disposition = if restored && error.disposition != DeliverySemantics::uncertain() {
         DeliverySemantics::not_delivered()
     } else {

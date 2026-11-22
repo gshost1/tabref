@@ -21,6 +21,7 @@ const wire = (box, list, openOnClick = true) => {
   const show = open => {
     list.hidden = !open;
     box.setAttribute('aria-expanded', String(open));
+    if (!open) box.removeAttribute('aria-activedescendant');
   };
   if (openOnClick) box.onclick = () => setTimeout(() => show(true), 120);
   box.onkeydown = event => { if (event.key === 'Escape') show(false); };
@@ -43,12 +44,14 @@ const showCities = wire(city, cities, false);
 city.oninput = () => {
   const matches = ['Lisbon', 'Kyoto', 'Toronto'].filter(name =>
     name.toLowerCase().startsWith(city.value.toLowerCase()));
-  cities.replaceChildren(...matches.map(name => {
+  cities.replaceChildren(...matches.map((name, index) => {
     const option = document.createElement('li');
     option.setAttribute('role', 'option');
+    option.id = 'city-option-' + index;
     option.textContent = name;
     return option;
   }));
+  if (matches.length) city.setAttribute('aria-activedescendant', cities.firstElementChild.id);
   showCities(matches.length > 0);
 };
 </script>

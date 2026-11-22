@@ -27,6 +27,7 @@ pub struct ComboboxReadback {
     pub text: String,
     pub kept: bool,
     pub changed_to: Option<String>,
+    pub typed_only: bool,
 }
 
 impl SelectOutcome {
@@ -43,24 +44,29 @@ impl SelectOutcome {
             .readback
             .as_ref()
             .ok_or_else(|| AppError::internal("combobox selection has no read-back baseline"))?;
-        let matches = state.matches(&self.option_texts);
-        let repicked = matches && evidence.previous.matches(&self.option_texts);
-        let typed = !evidence.uncommitted
-            && evidence
-                .before_query
-                .as_ref()
-                .is_some_and(|before| state.changed_to_match(before, &self.option_texts));
-        let kept = state.changed_to_match(&evidence.before_pick, &self.option_texts)
-            || repicked
-            || typed
-            || evidence.selected
-            || evidence.already_selected;
+        let shows_typed = evidence.typed.as_ref() == Some(&state.value);
+        let typed_commit = evidence.typed.is_some()
+            && !evidence.uncommitted
+            && state.value_matches(&self.option_texts)
+            && (!shows_typed || state.shows_commit_beyond_value(&evidence.before_pick));
+        let kept = evidence.selected
+            || evidence.already_selected
+            || typed_commit
+            || if shows_typed {
+                state.changed_beyond_value_to_match(&evidence.before_pick, &self.option_texts)
+            } else {
+                state.changed_to_match(&evidence.before_pick, &self.option_texts)
+                    || (state.matches(&self.option_texts)
+                        && evidence.previous.matches(&self.option_texts))
+            };
+        let typed_only = shows_typed && !evidence.uncommitted && !kept;
         let changed_to = state.change_from(&evidence.before_pick).map(str::to_owned);
         Ok(ComboboxReadback {
             value: state.value,
             text: state.text,
             kept,
             changed_to,
+            typed_only,
         })
     }
 

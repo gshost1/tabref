@@ -3,12 +3,30 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::json;
-use tabref_core::{AccessibilityNode, AppError, ErrorCode};
+use tabref_core::{AccessibilityNode, AppError, Deadline, ErrorCode};
 
-use crate::locate::name_match::rank;
+use crate::locate::name_match::{EXACT_NAME, rank};
 use crate::{DomTree, ElementToken, cut_chars};
 
 const STABLE_WAIT: Duration = Duration::from_millis(350);
+const CLEANUP_RESERVE: Duration = Duration::from_millis(250);
+
+pub(super) fn search_window(deadline: Deadline, reserve_filter: bool) -> Deadline {
+    let remaining = deadline.remaining();
+    let reserve = if reserve_filter {
+        remaining / 2
+    } else {
+        (remaining / 3).min(STABLE_WAIT)
+    };
+    deadline.capped(remaining.saturating_sub(reserve.max(CLEANUP_RESERVE)))
+}
+
+pub(super) fn has_exact(options: &AccessibilityNode, query: &str) -> bool {
+    options
+        .children
+        .iter()
+        .any(|option| rank(option, query) == Some(EXACT_NAME))
+}
 
 #[derive(Clone, Copy, Deserialize)]
 pub(super) struct ScrollPosition {
@@ -133,6 +151,10 @@ impl Scan {
         self.seen > 0
     }
 
+    pub fn note_visible_options(&mut self, count: usize) {
+        self.seen = self.seen.max(count);
+    }
+
     pub fn original_scroll(&self) -> Option<(i64, f64)> {
         self.popup.zip(self.original_top)
     }
@@ -142,12 +164,7 @@ impl Scan {
     }
 
     pub fn incomplete_error(&self) -> AppError {
-        let seen = self.seen;
-        AppError::new(
-            ErrorCode::ElementNotFound,
-            format!("list not fully searched (saw {seen} options)"),
-        )
-        .with_details(json!({ "kind": "combobox_list_incomplete", "options_seen": seen }))
+        incomplete_error(self.seen)
     }
 
     pub fn describe_missing(&self, mut error: AppError) -> AppError {
@@ -188,6 +205,14 @@ impl Scan {
             .filter(|entry| rank(&entry.option, query).is_some())
             .collect()
     }
+}
+
+pub(in crate::act) fn incomplete_error(seen: usize) -> AppError {
+    AppError::new(
+        ErrorCode::ElementNotFound,
+        format!("list not fully searched (saw {seen} options)"),
+    )
+    .with_details(json!({ "kind": "combobox_list_incomplete", "options_seen": seen }))
 }
 
 pub(super) struct SeenOption {

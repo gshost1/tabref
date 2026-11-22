@@ -5,7 +5,7 @@
 <ul id=fruitMenu role=listbox></ul>
 <div><label for=tagInput>Tags</label><input id=tagInput role=combobox aria-controls=tags aria-expanded=false><div id=chips><button aria-label="Remove Existing">Existing</button></div></div>
 <ul id=tags role=listbox aria-multiselectable=true hidden><li role=option>Alpha</li></ul>
-<label for=place>Place</label><input id=place role=combobox aria-controls=places aria-expanded=false readonly value=None>
+<div><label for=place>Place</label><input id=place role=combobox aria-controls=places aria-expanded=false readonly value=None><input id=chosenPlace name=place type=hidden></div>
 <div id=places role=listbox hidden style="height:80px;overflow:auto;position:relative"><div id=spacer></div></div>
 <button id=prefix role=combobox aria-controls=prefixMenu aria-label=Prefix aria-expanded=false>None</button>
 <ul id=prefixMenu role=listbox hidden><li role=option>New Belgium</li><li role=option>Spain</li></ul>
@@ -93,7 +93,7 @@ places.onscroll = () => {
     }, 160);
   }
 };
-connect(place, places, option => { place.value = option.textContent; });
+connect(place, places, option => { place.value = option.textContent; chosenPlace.value = option.textContent; });
 place.onclick = () => { show(place, places, true); update(); };
 place.oninput = () => {
   place.dataset.filter = place.value;

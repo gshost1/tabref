@@ -236,6 +236,7 @@ fn an_incomplete_scan_cannot_pick_a_partial_match_or_claim_the_total() {
     assert!(error["details"].get("options_total").is_none(), "{reply}");
     assert_eq!(error["disposition"]["retry"], "safe", "{reply}");
     assert_eq!(tabref.ok(&["js", "place.value"]).stdout.trim(), "None");
+    assert_eq!(tabref.ok(&["js", "places.hidden"]).stdout.trim(), "true");
 }
 
 #[test]
@@ -278,6 +279,10 @@ fn an_editable_combobox_filters_after_an_incomplete_scan() {
     assert_eq!(picked["data"]["verified"], true, "{picked}");
     assert_eq!(
         tabref.ok(&["js", "place.dataset.filter"]).stdout.trim(),
+        "Place 099"
+    );
+    assert_eq!(
+        tabref.ok(&["js", "chosenPlace.value"]).stdout.trim(),
         "Place 099"
     );
 }

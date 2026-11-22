@@ -156,6 +156,7 @@ fn combobox_report(
     };
     if let Ok(current) = &reading
         && !current.kept
+        && !current.typed_only
         && current.changed_to.is_none()
     {
         let value = &current.value;
@@ -217,10 +218,16 @@ fn combobox_report(
     match reading {
         Err(error) => add_unread(&mut acted, "the combobox's value", &error),
         Ok(current) => {
-            if !current.kept
-                && let Some(display) = &current.changed_to
-            {
-                let note = format!("{label} now reads {}", quote_text(display));
+            let note = if current.kept {
+                None
+            } else if current.typed_only {
+                Some("could not confirm the pick; the box shows the typed text".to_owned())
+            } else {
+                current
+                    .changed_to
+                    .map(|display| format!("{label} now reads {}", quote_text(&display)))
+            };
+            if let Some(note) = note {
                 acted.summary.push_str(&format!("\nnote: {note}"));
                 acted.data["note"] = json!(note);
             }

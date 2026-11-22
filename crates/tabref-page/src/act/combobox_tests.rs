@@ -57,6 +57,6 @@ fn a_timed_out_close_probe_counts_as_still_open() {
     let mut connection = CdpConnection::new(transport.boxed());
     assert_eq!(
         close(&mut connection, &search, Some(2), deadline()),
-        Ok(PopupClosure::StillOpen)
+        Ok(PopupClosure::StillOpen(1))
     );
 }

@@ -11,6 +11,7 @@
 <ul id=stuckMenu role=listbox hidden><li role=option>South</li></ul>
 <label for=auto>Auto</label><input id=auto role=combobox aria-controls=autoMenu aria-autocomplete=list aria-expanded=false value=Banana>
 <ul id=autoMenu role=listbox hidden></ul>
+<div id=cover hidden aria-hidden=true style="position:fixed;inset:40px 0 0;z-index:10"></div>
 <script>
 const show = (box, list, open) => {
   list.hidden = !open;
@@ -31,12 +32,12 @@ setup(city, cities, option => {
   if (city.dataset.ignore !== 'yes') city.textContent = wrong[option.textContent] ?? option.textContent;
 });
 hoverMenu.onmouseover = e => {
-  if (hoverMenu.getAttribute('aria-multiselectable') === 'true') return;
+  if (hoverMenu.getAttribute('aria-multiselectable') === 'true' && !hoverBox.dataset.hoverOnly) return;
   const hovered = e.target.closest('[role=option]');
   if (hovered) for (const option of hoverMenu.children) option.setAttribute('aria-selected', String(option === hovered));
 };
 setup(hoverBox, hoverMenu, option => {
-  if (hoverMenu.getAttribute('aria-multiselectable') === 'true') {
+  if (hoverMenu.getAttribute('aria-multiselectable') === 'true' && !hoverBox.dataset.hoverOnly) {
     option.setAttribute('aria-selected', String(option.getAttribute('aria-selected') !== 'true'));
   }
 });
@@ -64,23 +65,52 @@ document.addEventListener('keydown', e => {
   closedEscapes++;
   closedBox.textContent = '';
 });
-stuck.onclick = () => show(stuck, stuckMenu, true);
+stuck.onclick = () => {
+  show(stuck, stuckMenu, true);
+  if (stuck.dataset.cover) {
+    cover.style.top = stuckMenu.getBoundingClientRect().top + 'px';
+    cover.hidden = false;
+  }
+};
 let stuckEscapes = 0;
-stuck.onkeydown = e => { if (e.key === 'Escape') stuckEscapes++; };
+stuck.onkeydown = e => {
+  if (e.key !== 'Escape') return;
+  stuckEscapes++;
+  if (stuck.dataset.cover) {
+    cover.hidden = true;
+    show(stuck, stuckMenu, false);
+  }
+};
 stuckMenu.onclick = () => { if (stuck.dataset.commit) stuck.textContent = 'South'; };
+let autoInputs = 0;
+let autoEscapes = 0;
 auto.oninput = () => {
+  autoInputs++;
+  if (auto.dataset.clearOpen) {
+    autoMenu.innerHTML = '<li role=option>Different option</li>';
+    show(auto, autoMenu, true);
+    return;
+  }
   const matches = ['Apple','Banana','Cherry'].filter(name => name.toLowerCase().includes(auto.value.toLowerCase()));
   autoMenu.innerHTML = matches.map(name => '<li role=option>' + name + '</li>').join('');
   show(auto, autoMenu, !!auto.value && matches.length > 0);
+  if (matches.length) auto.setAttribute('aria-activedescendant', 'suggestion');
+  if (autoMenu.firstElementChild) autoMenu.firstElementChild.id = 'suggestion';
 };
 auto.onkeydown = e => {
   if (e.key !== 'Escape') return;
+  autoEscapes++;
+  if (auto.dataset.clearOpen && !autoMenu.hidden) auto.value = '';
   if (autoMenu.hidden) auto.value = '';
   show(auto, autoMenu, false);
+};
+autoMenu.onmousedown = () => {
+  if (auto.dataset.mouseDownClose) show(auto, autoMenu, false);
 };
 autoMenu.onclick = e => {
   if (auto.dataset.dead) return;
   auto.value = e.target.textContent;
+  auto.removeAttribute('aria-activedescendant');
   show(auto, autoMenu, false);
 };
 </script>
