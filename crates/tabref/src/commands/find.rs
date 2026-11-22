@@ -108,8 +108,27 @@ pub(crate) fn search(
     Ok(found)
 }
 
-fn merged_matches(
-    input: &OutlineInput,
+fn ax_search_text(root: &AccessibilityNode) -> Vec<String> {
+    let mut texts = Vec::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        texts.extend(
+            [
+                node.display_name(),
+                node.identity.value.as_deref(),
+                node.identity.description.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .map(str::to_lowercase),
+        );
+        pending.extend(&node.children);
+    }
+    texts
+}
+
+fn merged_matches<'a>(
+    input: &'a OutlineInput,
     tree: &AccessibilityNode,
     needle: &str,
     cap: usize,
@@ -123,7 +142,16 @@ fn merged_matches(
     let mut sources = HashSet::new();
     let mut nearest = HashMap::new();
     let folded = squash(needle).to_lowercase();
-    let (dom, total) = TextMatch::search_located(input, needle, cap, |tree, index, source| {
+    let mut ax_text = None;
+    let unique = |query: &str| {
+        let lower = query.to_lowercase();
+        !ax_text
+            .get_or_insert_with(|| ax_search_text(tree))
+            .iter()
+            .any(|text| text.contains(&lower))
+            || merged_matches(input, tree, query, 0).1 == 1
+    };
+    let observe = |tree: &'a DomTree, index: usize, source: &str| {
         let source = source.to_lowercase();
         if folded.is_empty() || !source.contains(&folded) {
             return;
@@ -147,7 +175,8 @@ fn merged_matches(
                 None
             });
         sources.insert((reference.clone(), source));
-    });
+    };
+    let (dom, total) = TextMatch::search_located(input, needle, cap, observe, unique);
     if total == 0 {
         let ax = find_matches(tree, needle, None);
         let total = ax.len();
@@ -173,11 +202,13 @@ fn merged_matches(
         .collect();
     let mut positions = HashMap::new();
     let mut offset = 0;
-    for tree in &trees {
-        for (index, node) in tree.nodes.iter().enumerate() {
-            positions.insert((tree.target_id.clone(), node.backend_id), offset + index);
+    if cap > 0 {
+        for tree in &trees {
+            for (index, node) in tree.nodes.iter().enumerate() {
+                positions.insert((tree.target_id.clone(), node.backend_id), offset + index);
+            }
+            offset += tree.nodes.len();
         }
-        offset += tree.nodes.len();
     }
     expand_coverage(&trees, &mut covered);
     let mut ordered: Vec<(usize, TextMatch)> = dom

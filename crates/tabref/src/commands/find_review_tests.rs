@@ -35,6 +35,40 @@ fn reference(input: &mut OutlineInput, index: usize, number: usize, role: &str, 
 }
 
 #[test]
+fn a_dash_prefixed_pre_pointer_round_trips_through_the_cli() {
+    use clap::Parser;
+
+    for line in ["-v, --verbose needle mode", "- name: build", "--role admin"] {
+        let mut dom = TestDom::new();
+        let pre = dom.element(2, "pre", &[], Some("block"));
+        dom.text(pre, line, true);
+        let (hits, _) = search_text(&input(dom), line.split_whitespace().last().unwrap(), 20);
+        let (_, pointer) = hits[0].line.split_once(" (").unwrap();
+        let words =
+            crate::commands::step_words::split_words(pointer.strip_suffix(')').unwrap()).unwrap();
+        let cli =
+            crate::cli::Cli::try_parse_from(words.iter().map(|word| word.text.as_str())).unwrap();
+        let crate::cli::command::Command::Find { text, role } = &cli.command else {
+            panic!("pointer did not parse as find");
+        };
+        assert_eq!(text, &[line]);
+        assert_eq!(*role, None);
+    }
+}
+
+#[test]
+fn a_pre_pointer_is_omitted_when_the_query_also_matches_ax_only_text() {
+    let mut dom = TestDom::new();
+    let pre = dom.element(2, "pre", &[], Some("block"));
+    let line = "foo needle bar";
+    dom.text(pre, line, true);
+    let input = input(dom);
+    let tree = ax("foo needle bar baz", None);
+    assert_eq!(merged_matches(&input, &tree, line, 20).1, 2);
+    assert_eq!(merged_matches(&input, &tree, "needle", 20).0[0].line, line);
+}
+
+#[test]
 fn a_long_pre_leaves_room_for_later_sections_golden() {
     let mut dom = TestDom::new();
     let heading = dom.element(2, "h2", &[], Some("block"));

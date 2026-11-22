@@ -2,8 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use super::block_kind::BlockKind;
 use super::control::Control;
+use super::control_build::control_of;
 use super::dom_node::DomNode;
 use super::dom_tree::DomTree;
+use super::node_kind::NodeKind;
+use super::outline_input::OutlineInput;
 use super::search_blocks::{find_folded, fold};
 use super::text_match::TextMatch;
 use super::text_runs::{squash, subtree_text};
@@ -16,27 +19,69 @@ const SKIPPED_TAGS: &[&str] = &[
 
 const SECTIONING: &[&str] = &["ARTICLE", "ASIDE", "MAIN", "NAV", "SECTION"];
 
-pub(crate) fn pre_control_text(
-    tree: &DomTree,
+pub(crate) const SEARCH_ATTRIBUTES: &[&str] =
+    &["aria-label", "title", "alt", "placeholder", "value"];
+
+pub(crate) fn pre_control_text<'a>(
+    tree: &'a DomTree,
     index: usize,
-    control: &Control,
-    needle: &[char],
-    attributes: &[&str],
-) -> String {
+    control: &'a Control,
+) -> impl Iterator<Item = String> + 'a {
     [
         control.name.clone(),
         control.value.clone().unwrap_or_default(),
         subtree_text(tree, index),
     ]
     .into_iter()
-    .chain(
-        attributes
-            .iter()
-            .filter_map(|attribute| tree.nodes[index].attr(attribute))
-            .map(squash),
+    .chain(attribute_text(&tree.nodes[index]))
+}
+
+pub(crate) fn attribute_text(node: &DomNode) -> impl Iterator<Item = String> + '_ {
+    SEARCH_ATTRIBUTES
+        .iter()
+        .filter_map(|name| node.attr(name))
+        .map(squash)
+}
+
+pub(crate) fn matching_field(
+    texts: impl Iterator<Item = String>,
+    needle: &[char],
+    mut alternative: impl FnMut(&str),
+) -> String {
+    let mut matches = texts.filter(|text| find_folded(&fold(text), needle).is_some());
+    let first = matches.next().unwrap_or_default();
+    for text in matches {
+        alternative(&text);
+    }
+    first
+}
+
+pub(crate) fn search_control(
+    input: &OutlineInput,
+    tree: &DomTree,
+    index: usize,
+) -> Option<Control> {
+    let node = tree.node(index)?;
+    control_of(
+        tree,
+        index,
+        input.refs.get(&(tree.target_id.clone(), node.backend_id)),
     )
-    .find(|text| find_folded(&fold(text), needle).is_some())
-    .unwrap_or_default()
+}
+
+pub(crate) fn pre_has_break(tree: &DomTree, root: usize, skipped: &HashSet<usize>) -> bool {
+    let mut pending = vec![root];
+    while let Some(index) = pending.pop() {
+        if skipped.contains(&index) {
+            continue;
+        }
+        let node = &tree.nodes[index];
+        if node.tag() == "BR" || matches!(&node.kind, NodeKind::Text(text) if text.contains('\n')) {
+            return true;
+        }
+        pending.extend(node.children.iter().copied());
+    }
+    false
 }
 
 pub(crate) fn heading_path(
@@ -60,6 +105,7 @@ pub(crate) fn add_pre_pointers(
     found: &mut [(String, i64, TextMatch)],
     pointers: Vec<Option<String>>,
     sources: HashMap<String, usize>,
+    mut unique: impl FnMut(&str) -> bool,
 ) {
     if !pointers.iter().any(Option::is_some) {
         return;
@@ -80,9 +126,10 @@ pub(crate) fn add_pre_pointers(
                 }
             }
         }
-        if occurrences == 1 {
+        if occurrences == 1 && unique(&query) {
+            let separator = if query.starts_with('-') { "-- " } else { "" };
             hit.line.push_str(&format!(
-                " (tabref find '{}')",
+                " (tabref find {separator}'{}')",
                 query.replace('\'', "'\\''")
             ));
         }

@@ -1,12 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use super::block_kind::BlockKind;
-use super::control_build::control_of;
 use super::dom_tree::DomTree;
 use super::element_kind::{
-    add_pre_pointers, has_svg_name, heading_path, is_heading_text, node_outside_svg,
-    pre_control_text, search_coverage, semantic_kind, skipped_nodes, svg_metadata, svg_search_text,
-    version_badge,
+    add_pre_pointers, attribute_text, has_svg_name, heading_path, is_heading_text, matching_field,
+    node_outside_svg, pre_control_text, pre_has_break, search_control, search_coverage,
+    semantic_kind, skipped_nodes, svg_metadata, svg_search_text, version_badge,
 };
 use super::expander::{expander_for, is_hidden_at};
 use super::node_kind::NodeKind;
@@ -16,7 +15,11 @@ use super::text_match::TextMatch;
 use super::text_runs::{cut_chars, squash, subtree_text};
 
 const CONTROL_SCAN: usize = 400;
-const ATTRIBUTES: &[&str] = &["aria-label", "title", "alt", "placeholder", "value"];
+enum Source {
+    Both,
+    Coverage,
+    Pointer,
+}
 
 /// Searches captured documents in page order, including hidden text.
 /// Preformatted blocks contribute at most three matching lines and one
@@ -33,19 +36,20 @@ impl TextMatch {
         keep: usize,
         mut observe: impl FnMut(Option<&str>, &str),
     ) -> (Vec<Self>, usize) {
-        let (found, total) = Self::search_located(input, needle, keep, |tree, index, text| {
-            let mut at = Some(index);
-            let mut reference = None;
-            while let Some(index) = at {
-                let node = &tree.nodes[index];
-                reference = input.refs.get(&(tree.target_id.clone(), node.backend_id));
-                if reference.is_some() {
-                    break;
-                }
-                at = node.parent;
-            }
-            observe(reference.map(|label| label.ref_text.as_str()), text);
-        });
+        let (found, total) = Self::search_located(
+            input,
+            needle,
+            keep,
+            |tree, index, text| {
+                let reference = tree.ancestors(index).into_iter().find_map(|index| {
+                    input
+                        .refs
+                        .get(&(tree.target_id.clone(), tree.nodes[index].backend_id))
+                });
+                observe(reference.map(|label| label.ref_text.as_str()), text);
+            },
+            |_| true,
+        );
         (found.into_iter().map(|(_, _, hit)| hit).collect(), total)
     }
 
@@ -56,6 +60,7 @@ impl TextMatch {
         needle: &str,
         keep: usize,
         mut observe: impl FnMut(&'a DomTree, usize, &str),
+        unique_pointer: impl FnMut(&str) -> bool,
     ) -> (Vec<(String, i64, Self)>, usize) {
         let needle = fold(&squash(needle));
         if needle.is_empty() {
@@ -71,15 +76,17 @@ impl TextMatch {
                 tree,
                 &needle,
                 keep.saturating_sub(found.len()),
-                &mut |tree, index, text, count_source| {
-                    if count_source {
+                &mut |tree, index, text, kind| {
+                    if keep > 0 && !matches!(kind, Source::Coverage) {
                         if let Some(count) = sources.get_mut(text) {
                             *count += 1;
                         } else {
                             sources.insert(text.to_owned(), 1usize);
                         }
                     }
-                    observe(tree, index, text);
+                    if !matches!(kind, Source::Pointer) {
+                        observe(tree, index, text);
+                    }
                 },
             );
             found.extend(more.into_iter().map(|(index, hit, pointer)| {
@@ -88,7 +95,7 @@ impl TextMatch {
             }));
             total += count;
         }
-        add_pre_pointers(&mut found, pointers, sources);
+        add_pre_pointers(&mut found, pointers, sources, unique_pointer);
         (found, total)
     }
 }
@@ -98,7 +105,7 @@ fn search_tree<'a>(
     tree: &'a DomTree,
     needle: &[char],
     room: usize,
-    observe: &mut dyn FnMut(&'a DomTree, usize, &str, bool),
+    observe: &mut dyn FnMut(&'a DomTree, usize, &str, Source),
 ) -> (Vec<(usize, TextMatch, Option<String>)>, usize) {
     let mut found = Vec::new();
     let mut total = 0usize;
@@ -143,19 +150,13 @@ fn search_tree<'a>(
             && (node.tag() == "SVG"
                 || has_svg_name(node)
                 || svg_metadata(tree, node).next().is_some());
-        let pre_control = pre[index].and_then(|_| {
-            matches!(node.kind, NodeKind::Element(_))
-                .then(|| {
-                    control_of(
-                        tree,
-                        index,
-                        input.refs.get(&(tree.target_id.clone(), node.backend_id)),
-                    )
-                })
-                .flatten()
-        });
+        let pre_control = pre[index]
+            .filter(|pre| *pre != index && matches!(node.kind, NodeKind::Element(_)))
+            .and_then(|_| search_control(input, tree, index))
+            .filter(|_| !pre_has_break(tree, index, &skipped));
+        let alternative = |text: &str| observe(tree, index, text, Source::Pointer);
         let text = if let Some(control) = &pre_control {
-            pre_control_text(tree, index, control, needle, ATTRIBUTES)
+            matching_field(pre_control_text(tree, index, control), needle, alternative)
         } else {
             match &node.kind {
                 NodeKind::Text(text) if !text.trim().is_empty() => {
@@ -185,15 +186,10 @@ fn search_tree<'a>(
                     }
                     own_text(tree, block)
                 }
-                NodeKind::Element(_) if svg_label => {
-                    svg_search_text(tree, node, &mut |_, text| observe(tree, index, text, true))
-                }
-                NodeKind::Element(_) => ATTRIBUTES
-                    .iter()
-                    .filter_map(|name| node.attr(name))
-                    .map(squash)
-                    .find(|value| find_folded(&fold(value), needle).is_some())
-                    .unwrap_or_default(),
+                NodeKind::Element(_) if svg_label => svg_search_text(tree, node, &mut |_, text| {
+                    observe(tree, index, text, Source::Both)
+                }),
+                NodeKind::Element(_) => matching_field(attribute_text(node), needle, alternative),
                 _ => continue,
             }
         };
@@ -205,7 +201,12 @@ fn search_tree<'a>(
         } else {
             block
         };
-        observe(tree, search_coverage(tree, index, block), &text, true);
+        observe(
+            tree,
+            search_coverage(tree, index, block),
+            &text,
+            Source::Both,
+        );
         if !matched.insert(block) {
             continue;
         }
@@ -260,7 +261,7 @@ fn pre_matches<'a>(
     needle: &[char],
     skipped: &HashSet<usize>,
     section: &[String],
-    observe: &mut dyn FnMut(&'a DomTree, usize, &str, bool),
+    observe: &mut dyn FnMut(&'a DomTree, usize, &str, Source),
 ) -> (Vec<(TextMatch, Option<String>)>, usize) {
     let mut raw = String::new();
     let mut origins = Vec::new();
@@ -274,17 +275,6 @@ fn pre_matches<'a>(
         match &node.kind {
             NodeKind::Text(text) => raw.push_str(text),
             NodeKind::Element(tag) if tag == "BR" => raw.push('\n'),
-            NodeKind::Element(_)
-                if index != pre
-                    && control_of(
-                        tree,
-                        index,
-                        input.refs.get(&(tree.target_id.clone(), node.backend_id)),
-                    )
-                    .is_some() =>
-            {
-                raw.push(' ')
-            }
             _ => pending.extend(node.children.iter().rev().copied()),
         }
         if raw.len() > start {
@@ -294,23 +284,41 @@ fn pre_matches<'a>(
     let mut offset = 0;
     let mut total = 0;
     let mut found = Vec::new();
-    for line in raw.split_inclusive('\n') {
-        let start = offset;
-        offset += line.len();
-        let line = squash(line);
+    for raw_line in raw.split_inclusive('\n') {
+        let start = offset + raw_line.len() - raw_line.trim_start().len();
+        let end = start + raw_line.trim().len();
+        offset += raw_line.len();
+        let line = squash(raw_line);
         if find_folded(&fold(&line), needle).is_none() {
             continue;
         }
-        observe(tree, pre, &line, true);
+        let first = origins.partition_point(|(_, end, _)| *end <= start);
+        let last = origins.partition_point(|(start, _, _)| *start < end);
+        let mut nodes = origins[first..last].iter().map(|(_, _, index)| *index);
+        let control = nodes.clone().find_map(|index| {
+            std::iter::successors(Some(index), |at| {
+                (*at != pre).then(|| tree.nodes[*at].parent).flatten()
+            })
+            .find_map(|ancestor| search_control(input, tree, ancestor).map(|c| (ancestor, c)))
+        });
+        if let Some((index, control)) = &control {
+            if *index != pre
+                && nodes
+                    .clone()
+                    .all(|node| tree.ancestors(node).contains(index))
+                && !pre_has_break(tree, *index, skipped)
+                && pre_control_text(tree, *index, control)
+                    .any(|text| find_folded(&fold(&text), needle).is_some())
+            {
+                continue;
+            }
+        }
+        observe(tree, pre, &line, Source::Both);
         total += 1;
         if total > 3 || found.len() == room {
             continue;
         }
-        let hidden_node = origins
-            .iter()
-            .filter(|(a, b, _)| *a < offset && *b > start)
-            .map(|(_, _, index)| *index)
-            .find(|index| is_hidden_at(tree, *index));
+        let hidden_node = nodes.find(|index| is_hidden_at(tree, *index));
         let pointer =
             (line.chars().count() <= 160 && fold(&line) != needle && !line.contains(['[', ']']))
                 .then(|| line.clone());
@@ -318,7 +326,7 @@ fn pre_matches<'a>(
             TextMatch {
                 section: section.to_vec(),
                 line: window(&line, needle),
-                control: None,
+                control: control.map(|(_, control)| control),
                 hidden: hidden_node.is_some(),
                 expander: hidden_node.and_then(|index| expander_for(input, tree, index)),
             },
@@ -326,7 +334,7 @@ fn pre_matches<'a>(
         ));
     }
     if total > 0 {
-        observe(tree, pre, &squash(&raw), false);
+        observe(tree, pre, &squash(&raw), Source::Coverage);
     }
     if total > 3 && found.len() < room {
         found.push((
@@ -350,12 +358,8 @@ fn control_near(
     index: usize,
     block: usize,
 ) -> Option<super::control::Control> {
-    let label_of = |at: usize| {
-        let node = tree.node(at)?;
-        input.refs.get(&(tree.target_id.clone(), node.backend_id))
-    };
     for ancestor in tree.ancestors(index) {
-        if let Some(control) = control_of(tree, ancestor, label_of(ancestor)) {
+        if let Some(control) = search_control(input, tree, ancestor) {
             return Some(control);
         }
         if ancestor == block && node_outside_svg(tree, index) {
@@ -370,8 +374,8 @@ fn control_near(
             break;
         }
         if current != block {
-            if let Some(control) = control_of(tree, current, label_of(current))
-                .filter(|control| control.ref_text.is_some())
+            if let Some(control) =
+                search_control(input, tree, current).filter(|control| control.ref_text.is_some())
             {
                 return Some(control);
             }

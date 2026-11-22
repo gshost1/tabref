@@ -113,6 +113,10 @@ fn input(dom: TestDom) -> OutlineInput {
     }
 }
 
+#[cfg(test)]
+#[path = "pre_control_tests.rs"]
+mod pre_control_tests;
+
 #[test]
 fn hidden_text_is_found_with_its_section_and_the_control_that_shows_it() {
     let mut dom = TestDom::new();
