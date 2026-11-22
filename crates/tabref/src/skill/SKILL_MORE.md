@@ -23,7 +23,7 @@ Apps built on Chrome (Electron, reached with `--cdp PORT`): `open URL`, `open --
 as the windows are the app; read and act with snap, click and fill (js to read).
 
 A slice of a long view: `tabref snap --from 1 --to 40` prints lines 1-40 (`read` takes both too).
-Long tables: `tabref snap --rows 21-40` picks data rows by position, labelled `row N:`, not by the table's own numbers.
+Long tables: `tabref snap --rows 21-40` picks data rows by position, labelled `#N`, not by the table's own numbers.
 
 Screenshots: `tabref screenshot --out FILE` saves a PNG of the page (`tabref screenshot T` of element T) and prints its path.
 

@@ -74,14 +74,14 @@ fn a_rows_window_counts_data_rows_below_a_two_row_header_and_labels_them() {
     assert_eq!(
         shown,
         [
-            "  row 62: 62 | Peak 62 | 7,400",
-            "  row 63: 63 | Peak 63 | 7,400",
-            "  row 64: 64 | Peak 64 | 7,400",
+            "  #62 62 | Peak 62 | 7,400",
+            "  #63 63 | Peak 63 | 7,400",
+            "  #64 64 | Peak 64 | 7,400",
         ],
         "{lines:#?}"
     );
     assert!(
-        lines.last().unwrap().contains("row N is the Nth data row"),
+        lines.last().unwrap().contains("#N is the Nth data row"),
         "{lines:#?}"
     );
 }
@@ -93,7 +93,7 @@ fn a_rows_window_label_shows_the_position_when_unranked_rows_shift_the_ranks() {
     let ranks: Vec<&str> = ranks.iter().map(String::as_str).collect();
     let lines = render(&peaks(&ranks), RowWindow::parse("62-64").unwrap());
     assert!(
-        lines.contains(&"  row 62: 61 | Peak 61 | 7,400".to_owned()),
+        lines.contains(&"  #62 61 | Peak 61 | 7,400".to_owned()),
         "{lines:#?}"
     );
 }

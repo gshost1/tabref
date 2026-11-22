@@ -112,7 +112,7 @@ impl BlockRenderer<'_> {
                 continue;
             }
             let label = if labelled {
-                format!("row {}: ", position + 1)
+                format!("#{} ", position + 1)
             } else {
                 String::new()
             };
@@ -138,7 +138,7 @@ impl BlockRenderer<'_> {
         };
         self.stats.next_row.get_or_insert(next);
         let counted = if window.chosen {
-            format!("{total} in all; row N is the Nth data row")
+            format!("{total} in all; #N is the Nth data row")
         } else {
             format!("{total} in all")
         };
