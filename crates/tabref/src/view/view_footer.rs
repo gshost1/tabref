@@ -56,7 +56,7 @@ pub(crate) fn footer_line(
     }
     if let Some(first) = shortened.first() {
         cut.push(format!("{} lines cut short", shortened.len()));
-        more.push(route.starting_at(first.number, true));
+        more.push(options.rows.whole_from(route, first.number));
     }
     if frames_unread > 0 {
         cut.push(format!("{frames_unread} frames not read in time"));

@@ -1,4 +1,5 @@
 use super::RowWindow;
+use crate::view::view_route::ViewRoute;
 
 #[test]
 fn row_ranges_parse_open_closed_and_single() {
@@ -16,4 +17,26 @@ fn bad_ranges_are_refused() {
     for text in ["", "0-3", "9-2", "a-", "-4"] {
         assert!(RowWindow::parse(text).is_err(), "{text}");
     }
+}
+
+#[test]
+fn the_whole_line_command_keeps_a_chosen_window_so_line_numbers_match() {
+    let route = ViewRoute::default();
+    let window = |text: &str| RowWindow::parse(text).unwrap();
+    assert_eq!(
+        window("22-24").whole_from(&route, 85),
+        "tabref snap --full --rows 22-24 --from 85"
+    );
+    assert_eq!(
+        window("21-").whole_from(&route, 9),
+        "tabref snap --full --rows 21- --from 9"
+    );
+    assert_eq!(
+        window("5").whole_from(&route, 9),
+        "tabref snap --full --rows 5 --from 9"
+    );
+    assert_eq!(
+        RowWindow::default().whole_from(&route, 9),
+        "tabref snap --full --from 9"
+    );
 }

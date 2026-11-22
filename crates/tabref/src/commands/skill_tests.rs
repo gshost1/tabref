@@ -190,6 +190,7 @@ fn the_guide_stays_short_and_points_to_the_rare_commands() {
     let guide = run(None).text;
     assert!(guide.len() <= 2_100, "{} bytes", guide.len());
     assert!(guide.contains("tabref skill more` for waits, `connect` to your own Chrome"));
+    assert!(guide.contains("`tabref js \"EXPR\"` returns a page value as JSON."));
     let more = run(Some("more")).text;
     for rare in [
         "--user-chrome",
@@ -198,7 +199,6 @@ fn the_guide_stays_short_and_points_to_the_rare_commands() {
         "Electron",
         "wait --download",
         "tabref tabs",
-        "tabref js",
         "`focus T`",
         "`double-click T`",
         "`press KEY [T]`",
