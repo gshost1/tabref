@@ -228,6 +228,7 @@ def write_profile(profile, downloads):
     profile.mkdir(parents=True)
     (profile / "Default").mkdir()
     prefs = {"download": {"default_directory": str(downloads), "prompt_for_download": False},
+             "download_bubble": {"partial_view_enabled": False},
              "profile": {"default_content_setting_values": {"automatic_downloads": 1}},
              "browser": {"has_seen_welcome_page": True}}
     staged = profile / "Default" / "Preferences.tmp"

@@ -4,11 +4,14 @@ parsers. No Chrome, no network, no model.
 Run: python3 -I -m unittest discover -s bench/tests -p 'test_*.py'   (and bench/heldout/tests for the verifiers)
 """
 import importlib.util
+import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 BENCH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BENCH / "harness"))
@@ -150,6 +153,47 @@ class ArmsNotesMatchTheCode(unittest.TestCase):
         for arm, text in blocks.items():
             want = arms.web_system_prompt(arm, "PORT").replace(str(arms.skills_dir()), "SKILLS")
             self.assertEqual(text, want, arm)
+
+
+class ChromeProfile(unittest.TestCase):
+    def assert_download_prefs(self, profile, downloads):
+        prefs_path = profile / "Default" / "Preferences"
+        self.assertTrue(prefs_path.is_file(), "Preferences file must be written")
+        self.assertFalse((profile / "Default" / "Preferences.tmp").exists())
+        prefs = json.loads(prefs_path.read_text())
+        self.assertEqual(prefs["download"], {"default_directory": str(downloads), "prompt_for_download": False})
+        self.assertIs(prefs["download_bubble"]["partial_view_enabled"], False)
+        self.assertEqual(prefs["profile"]["default_content_setting_values"]["automatic_downloads"], 1)
+        self.assertIs(prefs["browser"]["has_seen_welcome_page"], True)
+
+    def test_write_profile_disables_download_bubble_partial_view_and_keeps_download_prefs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "profile"
+            downloads = root / "downloads"
+            core.write_profile(profile, downloads)
+            self.assert_download_prefs(profile, downloads)
+
+    def test_both_chrome_launchers_write_download_bubble_pref_for_every_arm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            display = core.Display("xvfb", root / "logs")
+
+            cdp_profile, cdp_downloads = root / "cdp-profile", root / "cdp-downloads"
+            with mock.patch.object(core.subprocess, "Popen", return_value=mock.MagicMock()) as popen, \
+                    mock.patch.object(core, "http_json", return_value={"Browser": "Chrome"}):
+                core.launch_chrome(cdp_profile, 9222, cdp_downloads, display, {})
+            popen.assert_called_once()
+            self.assert_download_prefs(cdp_profile, cdp_downloads)
+
+            ad_profile, ad_downloads = root / "ad-profile", root / "ad-downloads"
+            fake_done = mock.MagicMock(stdout=json.dumps({"ok": True, "data": {"pid": 12345}}), stderr="")
+            with mock.patch.object(core, "ad_bin", return_value=root / "agent-desktop"), \
+                    mock.patch.object(core.subprocess, "run", return_value=fake_done) as run:
+                pid = core.launch_chrome_ad(root / "ad-home", ad_profile, ad_downloads, display, {})
+            run.assert_called_once()
+            self.assertEqual(pid.pid, 12345)
+            self.assert_download_prefs(ad_profile, ad_downloads)
 
 
 if __name__ == "__main__":
