@@ -45,14 +45,12 @@ fn aria_owns_works_by_ref_in_a_do_step() {
     let target = opened.ref_for("combobox Team");
     let picked = tabref.ok(&[
         "do",
-        &format!("select {target} Platform\nexpect Team is visible"),
+        &format!("select {target} Platform\nexpect {target} is visible"),
     ]);
     let line = picked.stdout.lines().next().unwrap();
-    assert!(line.starts_with("ok select "), "{}", picked.stdout);
-    assert!(
-        line.ends_with(r#"combobox "Support" -> "Platform""#),
-        "{}",
-        picked.stdout
+    assert_eq!(
+        line,
+        format!(r#"ok select {target} combobox "Support" -> "Platform""#)
     );
     assert_eq!(picked.stdout.lines().count(), 2, "{}", picked.stdout);
 }
@@ -127,7 +125,7 @@ fn no_popup_sends_escape_and_reports_the_missing_option() {
     assert!(text.contains("ELEMENT_NOT_FOUND"), "{text}");
     assert_eq!(
         tabref.ok(&["js", "broken.dataset.escaped"]).stdout.trim(),
-        r#""yes""#
+        "yes"
     );
 }
 
@@ -144,7 +142,7 @@ fn dw7_category_exact_match_wins_and_picks_the_hidden_form_value() {
     );
     assert_eq!(
         tabref.ok(&["js", "catval.value"]).stdout.trim(),
-        r#""Engineering""#
+        "Engineering"
     );
 }
 

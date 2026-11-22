@@ -9,10 +9,16 @@ use super::remote_element::call_on_element;
 use super::select_outcome::SelectOutcome;
 use crate::{CdpConnection, ElementToken, PageSession, cut_chars};
 
+#[path = "combobox.rs"]
+pub(super) mod combobox;
+
 const DETAILED: usize = 30;
 
 const READ_OPTIONS: &str = r"function() {
-  if (this.localName !== 'select') return { error: 'not_select' };
+  if (this.localName !== 'select') {
+    const role = (this.getAttribute('role') || '').trim().split(/\s+/)[0];
+    return role === 'combobox' ? { combobox: true } : { error: 'not_select' };
+  }
   return { options: Array.from(this.options).map(o => ({
     label: o.label, text: o.text, value: o.value,
     disabled: o.disabled || (o.parentElement && o.parentElement.localName === 'optgroup' && o.parentElement.disabled),
@@ -31,13 +37,9 @@ const CHOOSE_OPTION: &str = r"function(index, value) {
   return { value: this.value, label: match.label.trim(), previous };
 }";
 
-/// Selects the `<option>` of a `<select>` that `choice` names, in any form
-/// tabref prints an option (see `pick_option`). Fires `input` and `change`
-/// as a user's pick would; a native select's popup cannot be driven with
-/// page input, so the value is set directly. A choice that names several
-/// options, a disabled one or none fails with the options as the view
-/// prints them: thirty at most, in the message and in the details, which
-/// count them all in `options_total`. All are read for the match.
+/// Selects the option that `choice` names. Opens an ARIA combobox with
+/// pointer input and clicks the option. For a native select, matches the
+/// options as printed by tabref, sets the value, and fires input and change.
 pub fn select_option(
     connection: &mut CdpConnection,
     session: &PageSession,
@@ -55,6 +57,9 @@ pub fn select_option(
         },
         deadline,
     )?;
+    if read["combobox"] == true {
+        return combobox::choose(connection, session, token, choice, deadline);
+    }
     if read.get("error").is_some() {
         return Err(AppError::new(
             ErrorCode::ActionNotSupported,
@@ -90,6 +95,7 @@ pub fn select_option(
         value: text("value").unwrap_or_default(),
         label: text("label").unwrap_or_default(),
         previous: text("previous"),
+        combobox: false,
     })
 }
 
