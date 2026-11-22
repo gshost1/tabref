@@ -130,8 +130,7 @@ fn search_tree(
                             found.push(describe(
                                 input,
                                 tree,
-                                index,
-                                pre,
+                                (index, pre),
                                 heading_path(tree, index, &headings, needle),
                                 snippet,
                             ));
@@ -144,7 +143,7 @@ fn search_tree(
                 }
                 own_text(tree, block)
             }
-            NodeKind::Element(_) if svg_label => svg_search_text(tree, node, observe),
+            NodeKind::Element(_) if svg_label => svg_search_text(tree, node, reference(), observe),
             NodeKind::Element(_) => ATTRIBUTES
                 .iter()
                 .filter_map(|name| node.attr(name))
@@ -173,8 +172,7 @@ fn search_tree(
             found.push(describe(
                 input,
                 tree,
-                index,
-                block,
+                (index, block),
                 heading_path(tree, index, &headings, needle),
                 snippet,
             ));
@@ -203,8 +201,7 @@ fn heading_path(
 fn describe(
     input: &OutlineInput,
     tree: &DomTree,
-    index: usize,
-    block: usize,
+    (index, block): (usize, usize),
     section: Vec<String>,
     line: String,
 ) -> TextMatch {
@@ -242,6 +239,12 @@ fn preformatted_text(tree: &DomTree, block: usize, skipped: &HashSet<usize>) -> 
 }
 
 fn version_badge(tree: &DomTree, heading: usize) -> Option<String> {
+    if !tree.ancestors(heading).iter().any(|ancestor| {
+        tree.node(*ancestor)
+            .is_some_and(|node| node.tag() == "SUMMARY")
+    }) {
+        return None;
+    }
     let parent = tree.node(tree.node(heading)?.parent?)?;
     let mut pending: Vec<usize> = parent.children.iter().rev().copied().collect();
     for _ in 0..CONTROL_SCAN {
@@ -283,6 +286,7 @@ fn is_svg_content(tree: &DomTree, index: usize) -> bool {
 fn svg_search_text(
     tree: &DomTree,
     node: &DomNode,
+    reference: Option<&str>,
     observe: &mut dyn FnMut(Option<&str>, &str),
 ) -> String {
     let mut parts = Vec::new();
@@ -293,7 +297,7 @@ fn svg_search_text(
         .chain(svg_metadata(tree, node).map(|child| subtree_text(tree, child)))
     {
         if !part.is_empty() && !parts.contains(&part) {
-            observe(None, &part);
+            observe(reference, &part);
             parts.push(part);
         }
     }

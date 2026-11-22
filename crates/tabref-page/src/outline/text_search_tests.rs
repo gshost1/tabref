@@ -195,6 +195,18 @@ fn rustdoc_signature_find_includes_its_version_badge() {
 }
 
 #[test]
+fn heading_outside_a_summary_does_not_gain_sibling_badges() {
+    let mut dom = TestDom::new();
+    let heading = dom.element(2, "h4", &[], Some("block"));
+    dom.text(heading, "pub fn unzip(self)", true);
+    let since = dom.element(2, "span", &[("class", "since")], Some("inline"));
+    dom.text(since, "1.66.0", true);
+    let (found, total) = search_text(&input(dom), "fn unzip", 20);
+    assert_eq!(total, 1);
+    assert_eq!(found[0].line, "pub fn unzip(self)");
+}
+
+#[test]
 fn chart_find_keeps_accessible_svg_labels_and_metadata_once_each() {
     let mut dom = TestDom::new();
     let caption = dom.element(2, "p", &[], Some("block"));

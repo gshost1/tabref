@@ -168,3 +168,7 @@ fn snapshot_result(url: &str, text: &str, count: usize, shown: Vec<String>) -> F
         note: None,
     }
 }
+
+#[cfg(test)]
+#[path = "find_tests.rs"]
+mod tests;
