@@ -133,7 +133,7 @@ fn merged_matches(
             .or_default()
             .insert(tree.nodes[index].backend_id);
         let reference = nearest
-            .entry((tree.target_id.as_str(), index))
+            .entry((tree.target_id.as_str(), tree.nodes[index].backend_id))
             .or_insert_with(|| {
                 let mut at = Some(index);
                 while let Some(index) = at {

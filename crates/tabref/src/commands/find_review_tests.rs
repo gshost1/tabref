@@ -231,6 +231,44 @@ fn ax_description_outside_a_matched_inline_source_is_retained() {
 }
 
 #[test]
+fn svg_reference_cache_distinguishes_documents_on_the_same_target() {
+    let mut input = OutlineInput::default();
+    let mut children = Vec::new();
+    for (number, name) in [(1, "install first"), (2, "install second")] {
+        let mut dom = TestDom::new();
+        let link = dom.element(2, "a", &[("href", "/chart")], Some("inline"));
+        let svg = dom.element(link, "svg", &[], Some("inline"));
+        dom.element(
+            svg,
+            "rect",
+            &[("role", "img"), ("aria-label", name)],
+            Some("inline"),
+        );
+        for node in &mut dom.tree.nodes {
+            node.backend_id += number * 100;
+        }
+        let reference = format!("@s1:e{number}");
+        input.refs.insert(
+            ("T1".into(), dom.tree.nodes[link].backend_id),
+            RefLabel {
+                ref_text: reference.clone(),
+                ..RefLabel::default()
+            },
+        );
+        input.trees.push(dom.tree);
+        children.push(ax(name, Some(&reference)));
+    }
+    let tree = AccessibilityNode {
+        children,
+        ..AccessibilityNode::default()
+    };
+    let (hits, total, ax_only) = merged_matches(&input, &tree, "install", 20);
+    assert!(!ax_only);
+    assert_eq!(total, 2, "{hits:?}");
+    assert_eq!(hits.len(), 2);
+}
+
+#[test]
 fn heading_only_summary_and_rustdoc_summary_have_distinct_golden_views() {
     let mut dom = TestDom::new();
     let details = dom.element(2, "details", &[], Some("block"));
