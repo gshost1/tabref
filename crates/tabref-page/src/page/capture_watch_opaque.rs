@@ -114,6 +114,7 @@ fn collect(
         return Ok(Vec::new());
     }
     let mut graph = Vec::new();
+    let mut sheets = Vec::new();
     for event in events {
         let header = &event.params["header"];
         let Some(url) = header["sourceURL"].as_str().filter(|url| !url.is_empty()) else {
@@ -133,23 +134,31 @@ fn collect(
             graph.push((url.to_owned(), None));
             continue;
         }
-        let reply = cdp(
-            connection,
-            page,
-            "CSS.getStyleSheetText",
-            json!({"styleSheetId":header["styleSheetId"]}),
-            deadline,
-        )?;
-        let parsed = reply["text"].as_str().and_then(|text| {
-            super::css::classify(header["styleSheetId"].as_str().unwrap_or(""), text)
-        });
+        sheets.push((url.to_owned(), header["styleSheetId"].clone()));
+    }
+    let calls: Vec<_> = sheets
+        .iter()
+        .map(|(_, id)| ("CSS.getStyleSheetText", json!({"styleSheetId":id})))
+        .collect();
+    let replies = connection
+        .call_all(&calls, session, deadline)
+        .inspect_err(|error| {
+            record(
+                "opaque.cdp_error",
+                || json!({"step":"CSS.getStyleSheetText","error":error.to_string()}),
+            );
+        })?;
+    for ((url, id), reply) in sheets.into_iter().zip(replies) {
+        let parsed = reply["text"]
+            .as_str()
+            .and_then(|text| super::css::classify(id.as_str().unwrap_or(""), text));
         if parsed.is_none() {
             record(
                 "opaque.reject",
                 || json!({"url":url,"construct":reply["text"].as_str().map(super::css::reject_reason)}),
             );
         }
-        graph.push((url.to_owned(), parsed));
+        graph.push((url, parsed));
     }
     let changed = connection.drain_events(|event| {
         event.session_id.as_deref() == session

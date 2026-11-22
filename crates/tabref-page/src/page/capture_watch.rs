@@ -34,12 +34,16 @@
 
 use serde_json::{Value, json};
 use tabref_cdp::is_timeout;
-use tabref_core::{AppError, Deadline};
+use tabref_core::Deadline;
 
 use super::evaluate::evaluate_quietly;
 use crate::{CdpConnection, PageSession};
 
 const MAX_ELEMENTS: usize = 30_000;
+
+#[path = "capture_watch_arm.rs"]
+mod arm;
+pub use arm::arm_capture_watch;
 
 #[path = "capture_watch_css.rs"]
 mod css;
@@ -211,7 +215,7 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
     return {blind: true, opaque: now.opaque.map(entry => entry.href)};
   }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
-    sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind, opaque };
+    scan, sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind, opaque };
   const restore = [];
   watch.stop = () => {
     if (watch.dirty) return;
@@ -273,7 +277,7 @@ const CHECK: &str = r"(() => {
   if (watch.observers.some(observer => observer.takeRecords().length > 0)) watch.stop();
   if (watch.dirty) return 'mutated';
   if (watch.blind) return 'blind';
-  const now = scan(watch.opaque);
+  const now = watch.scan(watch.opaque);
   if (now.blind || now.opaque.length) return 'blind';
   if (now.roots.length !== watch.roots.length || now.roots.some((root, i) => root !== watch.roots[i])) return 'roots';
   if (now.sheets.length !== watch.sheets.length || now.sheets.some((sheet, i) => sheet !== watch.sheets[i])) return 'state';
@@ -293,46 +297,6 @@ const CHECK: &str = r"(() => {
 pub struct CaptureWatch {
     pub token: String,
     pub blind: bool,
-}
-
-/// Arms a watch named `token` in the page, replacing any earlier one.
-pub fn arm_capture_watch(
-    connection: &mut CdpConnection,
-    session: &PageSession,
-    token: &str,
-    deadline: Deadline,
-) -> Result<CaptureWatch, AppError> {
-    let mut reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)
-        .inspect_err(|error| {
-            trace::record(
-                "arm.error",
-                || json!({"token":token,"step":"initial","error":error.to_string()}),
-            );
-        })?;
-    trace::record("arm.scan", || json!({"token":token,"reply":reply}));
-    if let Some(urls) = reply.get("opaque").and_then(Value::as_array) {
-        match opaque::prepare(connection, session, token, urls, deadline) {
-            Ok(()) => {
-                let rearm = ARM.replace("if (document.visibilityState === 'hidden')", "if (true)");
-                reply = evaluate_quietly(connection, session, &script(&rearm, token), deadline)
-                    .inspect_err(|error| {
-                        trace::record(
-                            "arm.error",
-                            || json!({"token":token,"step":"approved","error":error.to_string()}),
-                        );
-                    })?;
-                trace::record("arm.approved", || json!({"token":token,"reply":reply}));
-            }
-            Err(error) => trace::record(
-                "opaque.error",
-                || json!({"token":token,"error":error.to_string()}),
-            ),
-        }
-    }
-    Ok(CaptureWatch {
-        token: token.to_owned(),
-        blind: reply.get("blind").and_then(Value::as_bool).unwrap_or(true),
-    })
 }
 
 /// What the page says about `watch` now: `same` when nothing it watches
@@ -380,7 +344,11 @@ pub fn has_closed_shadow_root(capture: &Value) -> bool {
 }
 
 fn script(template: &str, token: &str) -> String {
-    let head = format!("const key = Symbol.for('tabref.capture-watch');\n  {SCAN}");
+    let head = if template == CHECK {
+        "const key = Symbol.for('tabref.capture-watch');".to_owned()
+    } else {
+        format!("const key = Symbol.for('tabref.capture-watch');\n  {SCAN}")
+    };
     template
         .replace("KEY_AND_SCAN", &head)
         .replace("MAX_ELEMENTS", &MAX_ELEMENTS.to_string())

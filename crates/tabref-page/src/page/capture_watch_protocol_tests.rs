@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use tabref_cdp::{CdpConnection, PageSession, ScriptedTransport};
 use tabref_core::Deadline;
 
-use super::super::arm_capture_watch;
+use super::super::{CaptureWatch, IDLE_WAIT_MS, arm_capture_watch};
 
 fn session() -> PageSession {
     PageSession {
@@ -22,11 +22,12 @@ fn no_opaque_sheets_make_only_the_original_arm_evaluation() {
             ScriptedTransport::new().expect("Runtime.evaluate", evaluated(json!({"blind":blind})));
         let sent = transport.sent_log();
         let mut connection = CdpConnection::new(transport.boxed());
-        let watch = arm_capture_watch(
+        let watch = CaptureWatch::arm_with_budget(
             &mut connection,
             &session(),
             "token",
             Deadline::after(1000).unwrap(),
+            std::time::Duration::from_millis(IDLE_WAIT_MS + 11),
         )
         .unwrap();
         assert_eq!(watch.blind, blind);
