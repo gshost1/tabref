@@ -14,7 +14,7 @@ A cut view ends with an outline of the rest; if what you need is not shown, use 
 `tabref js "EXPR"` returns a page value as JSON.
 
 ## Act
-`click T`, `fill T VALUE` (replaces), `type T TEXT` (appends), `select T LABEL`, `check T`, `uncheck T`,
+`click T`, `fill T VALUE` (replaces), `type T TEXT` (appends), `select T LABEL` (comboboxes too), `check T`, `uncheck T`,
 `press KEY`, `hover T`, `scroll down|T`, `upload T FILE`. T is a ref (`e4`) or what the page shows: `"Save"`,
 `button "Save"`, `"Edit" nth 2`, `"Edit" in "<row text>"`, `"Reply" after "<text>"`.
 Each action prints its changes: read that instead of taking a snapshot.

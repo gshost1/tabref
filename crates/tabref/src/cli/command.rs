@@ -72,7 +72,7 @@ pub(crate) enum Command {
         target: String,
         text: String,
     },
-    /// Choose an option of a <select> by its label, value or text
+    /// Choose an option by label from a <select> or ARIA combobox (native selects also accept value or text)
     Select {
         #[arg(value_name = "TARGET")]
         target: String,

@@ -1,0 +1,55 @@
+<!doctype html><title>Combobox behavior</title>
+<button id=dead role=combobox aria-controls=deadlist aria-label=Dead>North</button>
+<ul id=deadlist role=listbox hidden><li role=option>North</li><li role=option>South</li></ul>
+<button id=country role=combobox aria-controls=countries aria-label=Country>None</button>
+<ul id=countries role=listbox aria-label=Countries hidden><li role=option>Canada</li><li role=option>Spain</li></ul>
+<div id=more hidden><label>Province <input name=province></label><button>Confirm province</button><p>Spain</p></div>
+<ul id=unrelated role=listbox aria-label=Unrelated><li role=option>Other</li></ul>
+<button id=toggle role=combobox aria-controls=choices aria-label=Toggle aria-expanded=false>Alpha</button>
+<ul id=choices role=listbox hidden><li role=option>Alpha</li><li role=option>Beta</li></ul>
+<button id=slow role=combobox aria-controls=slowlist aria-label=Category>Design</button>
+<ul id=slowlist role=listbox hidden></ul>
+<button id=virtual role=combobox aria-controls=virtualList aria-label=Topic>Design</button>
+<ul id=virtualList role=listbox hidden style="height:72px;overflow:auto">
+  <li role=option>Engineering Culture</li>
+  <li role=option>Research</li>
+  <li role=presentation aria-hidden=true style="height:220px"></li>
+</ul>
+<label>Native <select id=native onchange="queueMicrotask(() => this.selectedIndex = 0)">
+  <option>Old</option><option>New</option>
+</select></label>
+<script>
+const setup = (box, list, onpick) => {
+  const show = open => {
+    list.hidden = !open;
+    box.setAttribute('aria-expanded', String(open));
+  };
+  box.onclick = () => show(list.hidden);
+  box.onkeydown = event => { if (event.key === 'Escape') show(false); };
+  if (onpick) list.onclick = event => {
+    const option = event.target.closest('[role=option]');
+    if (!option) return;
+    box.textContent = option.textContent;
+    show(false);
+    onpick();
+  };
+};
+setup(dead, deadlist);
+setup(country, countries, () => { more.hidden = false; unrelated.hidden = true; });
+setup(toggle, choices, () => {});
+setup(slow, slowlist, () => {});
+const openSlow = slow.onclick;
+slow.onclick = () => {
+  openSlow();
+  slowlist.innerHTML = '<li role=option>Product Updates</li><li role=option>Research</li>';
+  setTimeout(() => { slowlist.insertAdjacentHTML('afterbegin', '<li role=option>Product</li>'); }, 300);
+};
+setup(document.getElementById('virtual'), virtualList, () => {});
+virtualList.onscroll = () => {
+  if (virtualList.scrollTop > 0 && !document.getElementById('exact')) {
+    virtualList.lastElementChild.insertAdjacentHTML('afterend', '<li role=option id=exact>Engineering</li>');
+  }
+};
+const cancel = dead.onkeydown;
+dead.onkeydown = event => { if (!dead.dataset.stuck) cancel(event); };
+</script>

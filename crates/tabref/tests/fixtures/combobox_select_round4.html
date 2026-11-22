@@ -1,0 +1,86 @@
+<!doctype html><title>Combobox verification and Escape</title>
+<button id=city role=combobox aria-controls=cities aria-label=City aria-expanded=false>Nowhere</button>
+<ul id=cities role=listbox hidden><li role=option>New York</li><li role=option>New York City</li><li role=option>Al</li><li role=option>Alice</li></ul>
+<button id=hoverBox role=combobox aria-controls=hoverMenu aria-label=Hover aria-expanded=false>None</button>
+<ul id=hoverMenu role=listbox hidden><li role=option aria-selected=false>One</li><li role=option aria-selected=false>Two</li></ul>
+<button id=grow role=combobox aria-controls=growing aria-label=Grow aria-expanded=false>None</button>
+<ul id=growing role=listbox hidden></ul>
+<button id=closedBox role=combobox aria-controls=closedMenu aria-label=Closed aria-expanded=false>Banana</button>
+<ul id=closedMenu role=listbox hidden><li role=option>Apple</li></ul>
+<button id=stuck role=combobox aria-controls=stuckMenu aria-label=Stuck aria-expanded=false>North</button>
+<ul id=stuckMenu role=listbox hidden><li role=option>South</li></ul>
+<label for=auto>Auto</label><input id=auto role=combobox aria-controls=autoMenu aria-autocomplete=list aria-expanded=false value=Banana>
+<ul id=autoMenu role=listbox hidden></ul>
+<script>
+const show = (box, list, open) => {
+  list.hidden = !open;
+  box.setAttribute('aria-expanded', String(open));
+};
+const setup = (box, list, pick) => {
+  box.onclick = () => show(box, list, true);
+  box.onkeydown = e => { if (e.key === 'Escape') show(box, list, false); };
+  list.onclick = e => {
+    const option = e.target.closest('[role=option]');
+    if (!option) return;
+    pick(option);
+    show(box, list, false);
+  };
+};
+const wrong = {'New York': 'New York City', Al: 'Alice'};
+setup(city, cities, option => {
+  if (city.dataset.ignore !== 'yes') city.textContent = wrong[option.textContent] ?? option.textContent;
+});
+hoverMenu.onmouseover = e => {
+  if (hoverMenu.getAttribute('aria-multiselectable') === 'true') return;
+  const hovered = e.target.closest('[role=option]');
+  if (hovered) for (const option of hoverMenu.children) option.setAttribute('aria-selected', String(option === hovered));
+};
+setup(hoverBox, hoverMenu, option => {
+  if (hoverMenu.getAttribute('aria-multiselectable') === 'true') {
+    option.setAttribute('aria-selected', String(option.getAttribute('aria-selected') !== 'true'));
+  }
+});
+const names = ['Virgin Alpha', ...Array.from({length: 8}, (_, i) => 'Filler ' + (i + 1)), 'Virgin Beta'];
+let timer;
+setup(grow, growing, option => { grow.textContent = option.textContent; });
+grow.onclick = () => {
+  clearInterval(timer);
+  growing.replaceChildren();
+  show(grow, growing, true);
+  let index = 0;
+  const append = () => {
+    if (growing.hidden || index === names.length) { clearInterval(timer); return; }
+    const option = document.createElement('li');
+    option.setAttribute('role', 'option');
+    option.textContent = names[index++];
+    growing.append(option);
+  };
+  append();
+  timer = setInterval(append, 150);
+};
+let closedEscapes = 0;
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  closedEscapes++;
+  closedBox.textContent = '';
+});
+stuck.onclick = () => show(stuck, stuckMenu, true);
+let stuckEscapes = 0;
+stuck.onkeydown = e => { if (e.key === 'Escape') stuckEscapes++; };
+stuckMenu.onclick = () => { if (stuck.dataset.commit) stuck.textContent = 'South'; };
+auto.oninput = () => {
+  const matches = ['Apple','Banana','Cherry'].filter(name => name.toLowerCase().includes(auto.value.toLowerCase()));
+  autoMenu.innerHTML = matches.map(name => '<li role=option>' + name + '</li>').join('');
+  show(auto, autoMenu, !!auto.value && matches.length > 0);
+};
+auto.onkeydown = e => {
+  if (e.key !== 'Escape') return;
+  if (autoMenu.hidden) auto.value = '';
+  show(auto, autoMenu, false);
+};
+autoMenu.onclick = e => {
+  if (auto.dataset.dead) return;
+  auto.value = e.target.textContent;
+  show(auto, autoMenu, false);
+};
+</script>
