@@ -3,6 +3,109 @@ use crate::outline::outline_input::OutlineInput;
 use crate::outline::ref_label::RefLabel;
 use crate::outline::test_dom::TestDom;
 
+#[test]
+fn pre_pointers_narrow_to_the_line_not_a_repeated_or_oversized_section() {
+    let mut dom = TestDom::new();
+    for number in 0..30 {
+        let heading = dom.element(2, "h2", &[], Some("block"));
+        dom.text(heading, "§ Examples", true);
+        let pre = dom.element(2, "pre", &[], Some("block"));
+        dom.text(
+            pre,
+            &format!("let mut vec = Vec::new();\nvec.push({number});\n"),
+            true,
+        );
+    }
+    let heading = dom.element(2, "h2", &[], Some("block"));
+    dom.text(heading, "DESCRIPTION top", true);
+    let pre = dom.element(2, "pre", &[], Some("block"));
+    dom.text(
+        pre,
+        &format!(
+            "{}\nSIGTARGET distinctive final line\n",
+            "ordinary signal prose\n".repeat(2_000)
+        ),
+        true,
+    );
+    let input = input(dom);
+    for (needle, target) in [
+        ("push(11)", "vec.push(11);"),
+        ("SIGTARGET", "SIGTARGET distinctive final line"),
+    ] {
+        let (hits, total) = search_text(&input, needle, 20);
+        assert_eq!(total, 1);
+        let suffix = format!(" (tabref find '{target}')");
+        assert!(hits[0].line.ends_with(&suffix), "{}", hits[0].line);
+        let (reached, total) = search_text(&input, target, 20);
+        assert_eq!(total, 1);
+        assert!(reached[0].line.contains(target));
+    }
+}
+
+#[test]
+fn pre_controls_keep_their_reference_beyond_the_block_line_cap() {
+    let mut dom = TestDom::new();
+    let pre = dom.element(2, "pre", &[], Some("block"));
+    dom.text(pre, &"widget btn in ordinary code\n".repeat(8), true);
+    let button = dom.element(pre, "button", &[], Some("inline-block"));
+    dom.text(button, "widget btn", true);
+    let mut input = input(dom);
+    input.refs.insert(
+        ("T1".into(), i64::try_from(button).unwrap() + 1),
+        RefLabel {
+            ref_text: "@s1:e1".into(),
+            role: "button".into(),
+            name: Some("widget btn".into()),
+            ..RefLabel::default()
+        },
+    );
+    let (hits, total) = search_text(&input, "widget btn", 20);
+    assert_eq!(total, 5);
+    let control = hits
+        .iter()
+        .filter_map(|hit| hit.control.as_ref())
+        .next()
+        .expect("matching pre button must survive the block cap");
+    assert_eq!(control.ref_text.as_deref(), Some("@s1:e1"));
+    assert_eq!(control.name, "widget btn");
+    assert!(
+        hits.iter()
+            .any(|hit| hit.line.starts_with("… 5 more in this block"))
+    );
+}
+
+#[test]
+fn pre_controls_keep_visible_text_and_attributes_when_the_accessible_name_differs() {
+    let mut dom = TestDom::new();
+    let pre = dom.element(2, "pre", &[], Some("block"));
+    let button = dom.element(
+        pre,
+        "button",
+        &[("title", "Tooltip hint")],
+        Some("inline-block"),
+    );
+    dom.text(button, "widget btn", true);
+    let mut input = input(dom);
+    input.refs.insert(
+        ("T1".into(), i64::try_from(button).unwrap() + 1),
+        RefLabel {
+            ref_text: "@s1:e1".into(),
+            role: "button".into(),
+            name: Some("Accessible name".into()),
+            ..RefLabel::default()
+        },
+    );
+    for needle in ["widget", "Accessible", "Tooltip"] {
+        let (hits, total) = search_text(&input, needle, 20);
+        assert_eq!(total, 1, "{needle}");
+        assert!(hits[0].line.contains(needle));
+        assert_eq!(
+            hits[0].control.as_ref().unwrap().ref_text.as_deref(),
+            Some("@s1:e1")
+        );
+    }
+}
+
 fn input(dom: TestDom) -> OutlineInput {
     OutlineInput {
         trees: vec![dom.tree],
@@ -128,9 +231,12 @@ fn man_page_pre_has_one_match_per_line_with_a_cap() {
     assert_eq!(total, 2);
     assert_eq!(
         found[0].line,
-        "SIGWINCH P2024 Ign Window resize signal (tabref snap --full)"
+        "SIGWINCH P2024 Ign Window resize signal (tabref find 'SIGWINCH P2024 Ign Window resize signal')"
     );
-    assert_eq!(found[1].line, "SIGWINCH 28 28 20 23 (tabref snap --full)");
+    assert_eq!(
+        found[1].line,
+        "SIGWINCH 28 28 20 23 (tabref find 'SIGWINCH 28 28 20 23')"
+    );
 
     let (found, total) = search_text(&search, "MIPS", 1);
     assert_eq!(total, 2);

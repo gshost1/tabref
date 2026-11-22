@@ -49,7 +49,7 @@ fn a_long_pre_leaves_room_for_later_sections_golden() {
     assert_eq!(total, 5);
     assert_eq!(
         find_lines_with_ax("let", &hits, &[], total, &options()).join("\n"),
-        "5 matches for \"let\"\n- Example 0 | let value = 1; (tabref read --section \"Example 0\")\n- Example 0 | let value = 1; (tabref read --section \"Example 0\")\n- Example 0 | let value = 1; (tabref read --section \"Example 0\")\n- Example 0 | … 97 more in this block (tabref read --section \"Example 0\")\n- Summary | We let the later prose stay visible."
+        "5 matches for \"let\"\n- Example 0 | let value = 1;\n- Example 0 | let value = 1;\n- Example 0 | let value = 1;\n- Example 0 | … 97 more in this block\n- Summary | We let the later prose stay visible."
     );
 }
 
@@ -70,8 +70,39 @@ fn pre_lines_use_their_own_visibility_and_do_not_borrow_links() {
     assert!(hits[0].hidden);
     assert!(!hits[1].hidden && !hits[2].hidden);
     assert!(hits.iter().all(|hit| hit.control.is_none()));
-    assert_eq!(hits[1].line, "install visible (tabref snap --full)");
-    assert_eq!(hits[2].line, "install split (tabref snap --full)");
+    assert_eq!(
+        hits[1].line,
+        "install visible (tabref find 'install visible')"
+    );
+    assert_eq!(hits[2].line, "install split (tabref find 'install split')");
+}
+
+#[test]
+fn ax_section_paths_follow_heading_levels_and_reset_for_peer_sections() {
+    let mut dom = TestDom::new();
+    let prose = dom.element(2, "p", &[], Some("block"));
+    dom.text(prose, "needle in DOM", true);
+    let mut buttons = Vec::new();
+    for (tag, title) in [("h1", "Outer"), ("h2", "Nested"), ("h2", "Peer")] {
+        let heading = dom.element(2, tag, &[], Some("block"));
+        dom.text(heading, title, true);
+        let button = dom.element(2, "button", &[], Some("inline-block"));
+        dom.text(button, "Continue", true);
+        buttons.push(button);
+    }
+    let mut input = input(dom);
+    let mut tree = AccessibilityNode::default();
+    for (index, button) in buttons.into_iter().enumerate() {
+        reference(&mut input, button, index + 1, "button", "Continue");
+        tree.children
+            .push(ax("needle in AX", Some(&format!("@s1:e{}", index + 1))));
+    }
+    let (hits, total, ax_only) = merged_matches(&input, &tree, "needle", 20);
+    assert_eq!(total, 4);
+    assert!(!ax_only);
+    assert_eq!(hits[1].section, ["Outer"]);
+    assert_eq!(hits[2].section, ["Outer", "Nested"]);
+    assert_eq!(hits[3].section, ["Outer", "Peer"]);
 }
 
 #[test]
