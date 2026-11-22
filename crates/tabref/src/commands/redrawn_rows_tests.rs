@@ -1,5 +1,5 @@
 use tabref_core::AccessibilityNode;
-use tabref_page::{DomNode, DomTree, NodeKind, TextChange};
+use tabref_page::{DomNode, DomTree, NodeKind, NodeLayout, TextChange};
 
 use super::preview_controls;
 
@@ -60,4 +60,43 @@ fn only_named_controls_inside_reordered_rows_are_summarized() {
         ["rows drawn again: 1 new refs, earlier refs in them are stale: tabref snap"]
     );
     assert_eq!(preview.shown, [1, 2]);
+}
+
+#[test]
+fn a_flat_container_uses_the_preceding_heading_for_each_control() {
+    let node = |kind, index: u32, parent, children| DomNode {
+        parent,
+        children,
+        kind,
+        backend_id: i64::from(index),
+        attrs: vec![],
+        layout: Some(NodeLayout {
+            display: "block".into(),
+            position: "static".into(),
+            visible: true,
+            bounds: [0.0, 0.0, 20.0, 20.0],
+        }),
+        form: Default::default(),
+    };
+    let tag = |name: &str| NodeKind::Element(name.into());
+    let documents = [DomTree {
+        frame_id: "frame".into(),
+        nodes: vec![
+            node(tag("DIV"), 0, None, vec![1, 3, 4, 6]),
+            node(tag("H3"), 1, Some(0), vec![2]),
+            node(NodeKind::Text("Card A".into()), 2, Some(1), vec![]),
+            node(tag("BUTTON"), 3, Some(0), vec![]),
+            node(tag("H3"), 4, Some(0), vec![5]),
+            node(NodeKind::Text("Card B".into()), 5, Some(4), vec![]),
+            node(tag("BUTTON"), 6, Some(0), vec![]),
+        ],
+        ..DomTree::default()
+    }];
+    let a = control("button", Some("Actions"), 3);
+    let b = control("button", Some("Actions"), 6);
+    let preview = preview_controls(&[], &[&a, &b], |_| Some(&documents));
+    assert_eq!(
+        preview.labels,
+        [Some("Card A".into()), Some("Card B".into())]
+    );
 }

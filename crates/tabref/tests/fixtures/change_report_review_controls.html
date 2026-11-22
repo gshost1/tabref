@@ -1,0 +1,35 @@
+<!doctype html>
+<title>Checkout</title>
+<div id="app">
+  <h1>Checkout</h1>
+  <button>Quiet</button>
+  <button onclick="reveal()">Reveal cards</button>
+  <button onclick="placeOrder()">Place order</button>
+  <main id="cards" hidden>
+    <div>
+      <h3>Card A</h3>
+      <p><button onclick="selectCard('Card A')">Actions</button></p>
+      <h3>Card B</h3>
+      <p><button onclick="selectCard('Card B')">Actions</button></p>
+    </div>
+  </main>
+  <div id="toast" hidden><button>Undo</button></div>
+  <p id="status"></p>
+  <output id="orders">0</output>
+</div>
+<script>
+function reveal() {
+  document.getElementById('cards').hidden = false;
+  document.getElementById('toast').hidden = false;
+}
+function selectCard(title) {
+  document.getElementById('status').textContent = 'Selected ' + title;
+}
+function placeOrder() {
+  const orders = document.getElementById('orders');
+  orders.value = Number(orders.value) + 1;
+  const receipt = document.createElement('button');
+  receipt.textContent = 'Receipt';
+  document.getElementById('app').append(receipt);
+}
+</script>

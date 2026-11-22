@@ -56,6 +56,10 @@ fn site() -> (Harness, String) {
             "/board",
             include_str!("fixtures/change_report_board_redraw.html"),
         ),
+        (
+            "/review",
+            include_str!("fixtures/change_report_review_controls.html"),
+        ),
     ]);
     (
         harness("new-control-report"),
@@ -281,4 +285,107 @@ fn board_redraw_labels_containers_and_prefers_distinct_controls() {
     let moved_ref = new_ref(&text, "button \"Card actions\" in \"Fix login bug\"");
     let reopened = tabref.ok(&["click", &moved_ref]).stdout;
     assert!(reopened.contains("Assign"), "{reopened}");
+}
+
+#[test]
+fn flat_cards_use_their_own_preceding_headings() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/review")]);
+    let text = tabref.ok(&["click", "Reveal cards"]).stdout;
+    let a = new_ref(&text, "button \"Actions\" in \"Card A\"");
+    let b = new_ref(&text, "button \"Actions\" in \"Card B\"");
+    assert_ne!(a, b, "{text}");
+    let clicked = tabref.ok(&["click", &b]).stdout;
+    assert!(clicked.contains("Selected Card B"), "{clicked}");
+}
+
+#[test]
+fn unique_new_control_does_not_inherit_the_page_heading() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/review")]);
+    let batch = tabref
+        .ok(&["--json", "do", "click \"Reveal cards\"\njs document.title"])
+        .json();
+    let step = &batch["data"]["steps"][0];
+    let text = step["text"].as_str().unwrap();
+    let undo = new_ref(text, "button \"Undo\"");
+    assert!(
+        text.lines()
+            .any(|line| line == format!("new {undo} button \"Undo\"")),
+        "{batch}"
+    );
+    let new = step["data"]["new"].as_array().unwrap();
+    assert_eq!(new.len(), 3, "{batch}");
+    assert!(
+        new.iter()
+            .all(|entry| !entry.as_str().unwrap().contains(" in \"")),
+        "{batch}"
+    );
+}
+
+#[test]
+fn failed_preview_capture_keeps_the_delivered_step_and_continues() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    tabref.ok(&["open", &format!("{base}/review")]);
+    let counter = tabref.home.join("refs-next");
+    std::fs::remove_file(&counter).unwrap();
+    std::fs::create_dir(&counter).unwrap();
+    let quiet = tabref
+        .ok(&["do", "click \"Quiet\"\njs document.title"])
+        .stdout;
+    assert!(!quiet.contains("new control refs unavailable"), "{quiet}");
+    let batch = tabref
+        .ok(&[
+            "--json",
+            "do",
+            "click \"Place order\"\njs document.getElementById('orders').value",
+        ])
+        .json();
+    let steps = batch["data"]["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 2, "{batch}");
+    assert_eq!(
+        steps[0]["data"]["control_preview_unavailable"], true,
+        "{batch}"
+    );
+    let order = steps[0]["text"].as_str().unwrap();
+    assert!(
+        order.starts_with("ok click") && order.contains("new control refs unavailable"),
+        "{batch}"
+    );
+    assert_eq!(steps[1]["data"]["value"], "1", "{batch}");
+}
+
+#[test]
+fn old_long_ref_uses_the_latest_known_controls_in_a_batch() {
+    if !live() {
+        return;
+    }
+    let (tabref, base) = site();
+    let opened = tabref.ok(&["open", &format!("{base}/review")]);
+    let order = opened.ref_for("button Place order");
+    let batch = tabref
+        .ok(&[
+            "--json",
+            "do",
+            &format!("click \"Reveal cards\"\nclick {order}\njs document.title"),
+        ])
+        .json();
+    let steps = batch["data"]["steps"].as_array().unwrap();
+    new_ref(steps[0]["text"].as_str().unwrap(), "button \"Undo\"");
+    let text = steps[1]["text"].as_str().unwrap();
+    new_ref(text, "button \"Receipt\"");
+    assert_eq!(
+        text.lines().filter(|line| line.starts_with("new ")).count(),
+        1,
+        "{batch}"
+    );
 }
