@@ -1,0 +1,86 @@
+<!doctype html>
+<title>Task board</title>
+<h1>Task board</h1>
+<div id="board"></div>
+<div id="menu-host"></div>
+<div id="toast"></div>
+<p id="status"></p>
+
+<script>
+const columns = [
+  {
+    name: 'Backlog',
+    cards: [
+      { title: 'Audit session cookies', owner: 'AL' },
+      { title: 'Fix login bug', owner: 'EA' },
+      { title: 'Trim bundle size', owner: 'MK' },
+      { title: 'Upgrade postgres driver', owner: 'JR' },
+    ],
+  },
+  {
+    name: 'In Progress',
+    cards: [
+      { title: 'Add dark mode', owner: 'DT' },
+      { title: 'Refactor billing webhook', owner: 'SP' },
+      { title: 'Cache avatar thumbnails', owner: 'LN' },
+      { title: 'Migrate email templates', owner: 'CW' },
+    ],
+  },
+  {
+    name: 'In Review',
+    cards: [
+      { title: 'Export CSV receipts', owner: 'NP' },
+      { title: 'Rate limit password reset', owner: 'GH' },
+      { title: 'Support passkey login', owner: 'VT' },
+      { title: 'Fix timezone offset', owner: 'RS' },
+    ],
+  },
+  {
+    name: 'Done',
+    cards: [
+      { title: 'Rotate signing keys', owner: 'BZ' },
+      { title: 'Add health check endpoint', owner: 'XK' },
+      { title: 'Document CLI flags', owner: 'PL' },
+      { title: 'Fix flaky checkout test', owner: 'QM' },
+    ],
+  },
+];
+
+function drawBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = columns.map((col, ci) => `
+    <section class="column">
+      <h2>${col.name} (${col.cards.length})</h2>
+      ${col.cards.map((card, ki) => `
+        <div class="card">
+          <h3>${card.title}</h3>
+          <span class="badge">${card.owner}</span>
+          <button aria-haspopup="menu" onclick="openMenu(${ci}, ${ki})">Card actions</button>
+        </div>
+      `).join('')}
+    </section>
+  `).join('');
+}
+
+function openMenu(ci, ki) {
+  const card = columns[ci].cards[ki];
+  const host = document.getElementById('menu-host');
+  host.innerHTML = `
+    <div role="menu" aria-label="Actions for ${card.title}">
+      <button role="menuitem" onclick="moveToDone(${ci}, ${ki})">Move to Done</button>
+      <button role="menuitem" onclick="document.getElementById('status').textContent='Assigning ${card.title}'">Assign…</button>
+    </div>
+  `;
+}
+
+function moveToDone(ci, ki) {
+  const [card] = columns[ci].cards.splice(ki, 1);
+  columns[3].cards.push(card);
+  document.getElementById('menu-host').innerHTML = '';
+  drawBoard();
+  document.getElementById('toast').innerHTML =
+    '<button id="undo" onclick="document.getElementById(\'status\').textContent=\'Undone\'">Undo move</button>';
+}
+
+drawBoard();
+</script>
