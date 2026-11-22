@@ -10,6 +10,9 @@ pub(crate) struct RowWindow {
 }
 
 pub(crate) const DEFAULT_ROWS: usize = 20;
+/// The most rows a `--rows` window may ask for and still print whole past
+/// a budget cut.
+const KEPT_ROWS: usize = 10;
 
 impl Default for RowWindow {
     fn default() -> Self {
@@ -48,6 +51,15 @@ impl RowWindow {
             last,
             chosen: true,
         })
+    }
+
+    /// Whether the window was asked for and is short enough that a budget
+    /// cut must still print its rows.
+    pub(crate) fn kept(&self) -> bool {
+        self.chosen
+            && self
+                .last
+                .is_some_and(|last| last >= self.first && last - self.first < KEPT_ROWS)
     }
 
     pub(crate) fn contains(&self, row: usize) -> bool {

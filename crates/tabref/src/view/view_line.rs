@@ -2,7 +2,8 @@
 /// block keeps its own line breaks), its level and plain text when it is a
 /// heading, the chrome landmark (navigation, header, footer, sidebar) it
 /// belongs to, numbered in page order, its number in the view, which
-/// `--from` takes, and what was cut off it (`+812 chars`, `+20 lines`).
+/// `--from` takes, what was cut off it (`+812 chars`, `+20 lines`), and
+/// whether a budget cut still prints it (a row `--rows` asked for).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ViewLine {
     pub(crate) depth: usize,
@@ -12,6 +13,7 @@ pub(crate) struct ViewLine {
     pub(crate) chrome: Option<usize>,
     pub(crate) number: usize,
     pub(crate) cut: Option<String>,
+    pub(crate) keep: bool,
 }
 
 impl ViewLine {
@@ -24,6 +26,7 @@ impl ViewLine {
             chrome: None,
             number: 0,
             cut: None,
+            keep: false,
         }
     }
 

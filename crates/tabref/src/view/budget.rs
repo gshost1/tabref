@@ -18,6 +18,10 @@ const MARKER_ROOM: usize = 100;
 /// The most of a cut view's budget the outline of its later headings may
 /// take from the content: one part in this many.
 const OUTLINE_SHARE: usize = 5;
+/// The most of a cut view's budget its kept lines (the rows a short
+/// `--rows` window asked for) may take after the cut: one part in this
+/// many.
+const KEEP_SHARE: usize = 2;
 
 /// Fits `lines` into the budget of `options`. Each chrome landmark keeps
 /// its first lines and a note of how many it drops, unless chrome prints
@@ -25,8 +29,10 @@ const OUTLINE_SHARE: usize = 5;
 /// until the content's part of the budget is spent; a marker line says
 /// where the cut starts and which command prints on from there, and a
 /// compact outline of the headings after it (see [`cut_outline`]) keeps the
-/// rest of the page countable and reachable. Content, marker, outline and
-/// room for the header and footer together stay within the budget.
+/// rest of the page countable and reachable. Kept lines the cut would drop
+/// print right after the marker, their room taken from the content.
+/// Content, marker, kept lines, outline and room for the header and footer
+/// together stay within the budget.
 pub(crate) fn fit(
     lines: Vec<ViewLine>,
     options: &ViewOptions,
@@ -55,21 +61,32 @@ pub(crate) fn fit(
     let share = room / OUTLINE_SHARE;
     let wanted = cut_outline(&lines, cut_index(&lines, room), share, route, full).stub_cost;
     let content_room = room.saturating_sub(wanted.min(share) + MARKER_ROOM.min(tenth));
-    let mut cut = cut_index(&lines, content_room);
+    let (mut cut, mut held) = cut_keeping(&lines, content_room, room / KEEP_SHARE);
+    let mut reserve: usize = held.iter().map(ViewLine::cost).sum();
     let mut kept: Vec<ViewLine> = lines[..cut].to_vec();
     let mut spent: usize = kept.iter().map(ViewLine::cost).sum();
     let last = lines.last().map_or(0, |line| line.number);
+    let mut held_count = 0;
     while let Some(first) = lines.get(cut) {
         let marker = cut_marker(&lines[cut..], last, route, full);
-        if spent + marker.cost() > room {
+        if spent + marker.cost() + reserve > room {
             if let Some(line) = kept.pop() {
                 spent -= line.cost();
                 cut -= 1;
+                if line.keep {
+                    reserve += line.cost();
+                    held.insert(0, line);
+                }
                 continue;
             }
         } else {
             spent += marker.cost();
             kept.push(marker);
+        }
+        if spent + reserve <= room {
+            spent += reserve;
+            held_count = held.len();
+            kept.append(&mut held);
         }
         report.budget_from = Some(first.number);
         let outline = cut_outline(&lines, cut, room - spent, route, full);
@@ -77,7 +94,7 @@ pub(crate) fn fit(
         kept.extend(outline.lines);
         break;
     }
-    report.lines_shown = cut;
+    report.lines_shown = cut + held_count;
     report.chars_shown = kept.iter().map(ViewLine::cost).sum();
     (kept, report)
 }
@@ -93,6 +110,31 @@ fn cut_index(lines: &[ViewLine], room: usize) -> usize {
         }
     }
     lines.len()
+}
+
+/// Where the cut falls when the kept lines after it take their room from
+/// the content's `room`, and those kept lines, as many in order as fit in
+/// `most` characters.
+fn cut_keeping(lines: &[ViewLine], room: usize, most: usize) -> (usize, Vec<ViewLine>) {
+    let mut reserve = 0usize;
+    loop {
+        let cut = cut_index(lines, room.saturating_sub(reserve));
+        let mut spent = 0usize;
+        let held: Vec<ViewLine> = lines[cut..]
+            .iter()
+            .filter(|line| line.keep)
+            .take_while(|line| {
+                spent += line.cost();
+                spent <= most
+            })
+            .cloned()
+            .collect();
+        let cost: usize = held.iter().map(ViewLine::cost).sum();
+        if cost <= reserve {
+            return (cut, held);
+        }
+        reserve = cost;
+    }
 }
 
 fn cap_chrome(
@@ -141,3 +183,7 @@ fn cap_chrome(
 #[cfg(test)]
 #[path = "budget_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "budget_keep_tests.rs"]
+mod keep_tests;

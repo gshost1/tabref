@@ -1,11 +1,13 @@
-use tabref_page::{Block, BlockKind};
+use tabref_page::{Block, BlockKind, cut_chars};
 
 use super::block_renderer::{BlockRenderer, LINE_MAX};
+use super::escape::escape_line_start;
 use super::node_line::quote_text;
 use super::row_window::DEFAULT_ROWS;
 
 const COUNTED_LIST: usize = 6;
 const CELL_MAX: usize = 300;
+const KEPT_ROW_MAX: usize = 300;
 
 impl BlockRenderer<'_> {
     /// A list on one line when it is short (a menu), else one line per item
@@ -95,6 +97,10 @@ impl BlockRenderer<'_> {
             String::new()
         };
         let noun = if body_rows == 1 { "row" } else { "rows" };
+        let windowed = body_rows > DEFAULT_ROWS;
+        let labelled = windowed && self.options.rows.chosen;
+        let kept = windowed && self.options.rows.kept();
+        let title = self.lines.len();
         self.push(
             depth,
             format!("table{caption} {body_rows} {noun}: {head}")
@@ -105,8 +111,6 @@ impl BlockRenderer<'_> {
         for row in cells.iter().take(header_rows).skip(1) {
             self.push_content(depth + 1, "", row.join(" | "));
         }
-        let windowed = body_rows > DEFAULT_ROWS;
-        let labelled = windowed && self.options.rows.chosen;
         for (position, row) in cells.iter().skip(header_rows).enumerate() {
             if windowed && !self.options.rows.contains(position + 1) {
                 continue;
@@ -116,10 +120,39 @@ impl BlockRenderer<'_> {
             } else {
                 String::new()
             };
-            self.push_content(depth + 1, &label, row.join(" | "));
+            let text = row.join(" | ");
+            let length = label.chars().count() + escape_line_start(text.clone()).chars().count();
+            let before = self.lines.len();
+            self.push_content(depth + 1, &label, text);
+            if kept && before < self.lines.len() {
+                self.keep_row(length);
+            }
         }
         if windowed {
+            let before = self.lines.len();
             self.note_window(body_rows, depth + 1, "rows");
+            if kept {
+                for line in self.lines.iter_mut().skip(before) {
+                    line.keep = true;
+                }
+            }
+        }
+        if kept && let Some(line) = self.lines.get_mut(title) {
+            line.keep = true;
+        }
+    }
+
+    /// Marks the row just pushed to print past a budget cut, cut to
+    /// [`KEPT_ROW_MAX`] characters of its `length` unless lines print whole.
+    fn keep_row(&mut self, length: usize) {
+        let whole = self.options.whole_lines();
+        let Some(line) = self.lines.last_mut() else {
+            return;
+        };
+        line.keep = true;
+        if !whole && length > KEPT_ROW_MAX {
+            line.text = cut_chars(&line.text, KEPT_ROW_MAX);
+            line.cut = Some(format!("+{} chars", length - KEPT_ROW_MAX));
         }
     }
 
