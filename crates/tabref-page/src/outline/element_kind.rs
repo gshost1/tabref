@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::block_kind::BlockKind;
+use super::control::Control;
 use super::dom_node::DomNode;
 use super::dom_tree::DomTree;
+use super::search_blocks::{find_folded, fold};
+use super::text_match::TextMatch;
 use super::text_runs::{squash, subtree_text};
 
 const SKIPPED_TAGS: &[&str] = &[
@@ -12,6 +15,110 @@ const SKIPPED_TAGS: &[&str] = &[
 ];
 
 const SECTIONING: &[&str] = &["ARTICLE", "ASIDE", "MAIN", "NAV", "SECTION"];
+
+pub(crate) fn pre_control_text(
+    tree: &DomTree,
+    index: usize,
+    control: &Control,
+    needle: &[char],
+    attributes: &[&str],
+) -> String {
+    [
+        control.name.clone(),
+        control.value.clone().unwrap_or_default(),
+        subtree_text(tree, index),
+    ]
+    .into_iter()
+    .chain(
+        attributes
+            .iter()
+            .filter_map(|attribute| tree.nodes[index].attr(attribute))
+            .map(squash),
+    )
+    .find(|text| find_folded(&fold(text), needle).is_some())
+    .unwrap_or_default()
+}
+
+pub(crate) fn heading_path(
+    tree: &DomTree,
+    index: usize,
+    headings: &[(u8, String)],
+    needle: &[char],
+) -> Vec<String> {
+    let in_heading = headings
+        .last()
+        .is_some_and(|(_, heading)| find_folded(&fold(heading), needle).is_some())
+        && is_heading_text(tree, index);
+    headings
+        .iter()
+        .take(headings.len().saturating_sub(usize::from(in_heading)))
+        .map(|(_, heading)| heading.clone())
+        .collect()
+}
+
+pub(crate) fn add_pre_pointers(
+    found: &mut [(String, i64, TextMatch)],
+    pointers: Vec<Option<String>>,
+    sources: HashMap<String, usize>,
+) {
+    if !pointers.iter().any(Option::is_some) {
+        return;
+    }
+    let sources: Vec<_> = sources
+        .into_iter()
+        .map(|(text, count)| (fold(&text).into_iter().collect::<String>(), count))
+        .collect();
+    for ((_, _, hit), pointer) in found.iter_mut().zip(pointers) {
+        let Some(query) = pointer else { continue };
+        let folded = fold(&query).into_iter().collect::<String>();
+        let mut occurrences = 0;
+        for (source, count) in &sources {
+            if source.contains(&folded) {
+                occurrences += count;
+                if occurrences > 1 {
+                    break;
+                }
+            }
+        }
+        if occurrences == 1 {
+            hit.line.push_str(&format!(
+                " (tabref find '{}')",
+                query.replace('\'', "'\\''")
+            ));
+        }
+    }
+}
+
+pub(crate) fn version_badge(tree: &DomTree, heading: usize) -> Option<String> {
+    if !tree.ancestors(heading).iter().any(|ancestor| {
+        tree.node(*ancestor)
+            .is_some_and(|node| node.tag() == "SUMMARY")
+    }) {
+        return None;
+    }
+    let parent = tree.node(tree.node(heading)?.parent?)?;
+    let mut pending: Vec<usize> = parent.children.iter().rev().copied().collect();
+    for _ in 0..400 {
+        let index = pending.pop()?;
+        let Some(node) = tree.node(index) else {
+            continue;
+        };
+        if node.tag() != "SPAN" || is_skipped(node) {
+            continue;
+        }
+        if node
+            .attr("class")
+            .is_some_and(|classes| classes.split_whitespace().any(|class| class == "since"))
+        {
+            let text = subtree_text(tree, index);
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+        pending.extend(node.children.iter().rev().copied());
+    }
+    None
+}
 
 /// Whether the element and everything inside it stay out of the outline:
 /// metadata, media, scripts, and what the page hides from assistive

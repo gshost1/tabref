@@ -175,10 +175,7 @@ fn merged_matches(
     let mut offset = 0;
     for tree in &trees {
         for (index, node) in tree.nodes.iter().enumerate() {
-            positions.insert(
-                (tree.target_id.clone(), node.backend_id),
-                (offset + index, *tree, index),
-            );
+            positions.insert((tree.target_id.clone(), node.backend_id), offset + index);
         }
         offset += tree.nodes.len();
     }
@@ -189,16 +186,16 @@ fn merged_matches(
             (
                 positions
                     .get(&(target, backend))
-                    .map_or(usize::MAX, |(position, _, _)| *position),
+                    .copied()
+                    .unwrap_or(usize::MAX),
                 hit,
             )
         })
         .collect();
-    if total > 0 {
-        ordered.sort_by_key(|(position, _)| *position);
-    }
+    ordered.sort_by_key(|(position, _)| *position);
     let mut ax_total = 0;
-    visit_matches(tree, needle, None, |reference, texts, render| {
+    let mut sections = None;
+    visit_matches(tree, needle, None, |reference, texts, _| {
         let key = reference.and_then(|reference| reverse.get(reference).copied());
         let in_dom = key.is_some_and(|(target, backend)| {
             covered
@@ -214,9 +211,9 @@ fn merged_matches(
         }
         ax_total += 1;
         let located = key.and_then(|key| positions.get(key));
-        let position = located.map_or(usize::MAX, |(position, _, _)| *position);
+        let position = located.copied().unwrap_or(usize::MAX);
         if ordered.len() == cap
-            && (cap == 0 || total == 0 || ordered.last().is_some_and(|(last, _)| position >= *last))
+            && (cap == 0 || ordered.last().is_some_and(|(last, _)| position >= *last))
         {
             return;
         }
@@ -230,54 +227,58 @@ fn merged_matches(
                 states: label.states.clone(),
                 ..Control::default()
             });
-        let mut section = Vec::new();
-        if total > 0 {
-            if let Some((_, tree, index)) = located {
-                for (index, node) in tree.nodes[..*index].iter().enumerate() {
-                    if let Some(level) = node
-                        .tag()
-                        .strip_prefix('H')
-                        .and_then(|level| level.parse::<u8>().ok())
-                        .filter(|level| (1..=6).contains(level))
-                    {
-                        let text = tabref_page::subtree_text(tree, index);
-                        section.push((level, text));
-                    }
-                }
-            }
-        }
-        let mut path: Vec<(u8, String)> = Vec::new();
-        for (level, text) in section {
-            path.retain(|(known, _)| *known < level);
-            path.push((level, text));
-        }
+        let section = located.map_or_else(Vec::new, |position| {
+            let paths = sections.get_or_insert_with(|| section_paths(&trees));
+            let past = paths.partition_point(|(start, _)| start <= position);
+            paths[..past]
+                .last()
+                .map_or_else(Vec::new, |(_, path)| path.clone())
+        });
         ordered.push((
             position,
             TextMatch {
-                section: path.into_iter().map(|(_, text)| text).collect(),
-                line: if total == 0 {
-                    render()
-                } else {
-                    texts.join(" ")
-                },
-                control: if total == 0 { None } else { control },
+                section,
+                line: texts.join(" "),
+                control,
                 hidden: false,
                 expander: None,
             },
         ));
-        if total > 0 {
-            ordered.sort_by_key(|(position, _)| *position);
-            ordered.truncate(cap);
-        }
-    });
-    if total > 0 {
         ordered.sort_by_key(|(position, _)| *position);
-    }
+        ordered.truncate(cap);
+    });
+    ordered.sort_by_key(|(position, _)| *position);
     (
         ordered.into_iter().take(cap).map(|(_, hit)| hit).collect(),
         total + ax_total,
-        total == 0,
+        false,
     )
+}
+
+fn section_paths(trees: &[&DomTree]) -> Vec<(usize, Vec<String>)> {
+    let mut sections = Vec::new();
+    let mut offset = 0;
+    for tree in trees {
+        let mut path: Vec<(u8, String)> = Vec::new();
+        sections.push((offset, Vec::new()));
+        for (index, node) in tree.nodes.iter().enumerate() {
+            if let Some(level) = node
+                .tag()
+                .strip_prefix('H')
+                .and_then(|level| level.parse::<u8>().ok())
+                .filter(|level| (1..=6).contains(level))
+            {
+                path.retain(|(known, _)| *known < level);
+                path.push((level, tabref_page::subtree_text(tree, index)));
+                sections.push((
+                    offset + index + 1,
+                    path.iter().map(|(_, text)| text.clone()).collect(),
+                ));
+            }
+        }
+        offset += tree.nodes.len();
+    }
+    sections
 }
 
 fn expand_coverage(trees: &[&DomTree], covered: &mut HashMap<&str, HashSet<i64>>) {
