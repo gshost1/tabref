@@ -159,6 +159,9 @@ fn a_safe_opaque_import_in_a_readable_sheet_is_watched() {
 #[test]
 fn unsafe_opaque_rules_are_blind() {
     for body in [
+        ".a{b:url(x\"y)}@container (min-width:1px){.x{color:red}}.c{d:\")}",
+        ".a{b:url(x/*)}@container (min-width:1px){.x{color:red}}.c{d:e*/)}",
+        ".a{--v:\"\u{000C}}@container (min-width:1px){.x{color:red}}.c{--w:\"}",
         "@container(width>1px){#go{color:red}}",
         "body:has(button){color:red}",
         "@unknown something {#go{color:red}}",

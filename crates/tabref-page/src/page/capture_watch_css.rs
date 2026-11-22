@@ -1,10 +1,17 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+#[path = "capture_watch_css_tokens.rs"]
+mod lexer;
+use lexer::tokens;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Token {
+    Cdo,
+    Cdc,
     Word(String),
     Quoted(String),
+    Url(String),
     Mark(char),
 }
 
@@ -71,62 +78,28 @@ pub(super) fn classify(url: &str, text: &str) -> Parsed {
     }
     let parsed = tokens(text).and_then(|tokens| rules(&tokens, 0, &mut 10_000));
     if let Ok(mut entries) = cache.lock() {
-        if entries.len() >= 64 {
-            entries.clear();
-        }
-        entries.insert(key, (text.to_owned(), parsed.clone()));
+        cache_insert(&mut entries, key, text.to_owned(), parsed.clone());
     }
     parsed
 }
 
-fn tokens(text: &str) -> Option<Vec<Token>> {
-    let mut chars = text.chars().peekable();
-    let mut result = Vec::new();
-    while let Some(c) = chars.next() {
-        if c.is_whitespace() {
-            continue;
-        }
-        if c == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            loop {
-                let c = chars.next()?;
-                if c == '*' && chars.peek() == Some(&'/') {
-                    chars.next();
-                    break;
-                }
-            }
-        } else if c == '\'' || c == '"' {
-            let mut value = String::new();
-            loop {
-                let next = chars.next()?;
-                if next == c {
-                    break;
-                }
-                if next == '\\' || next == '\n' || next == '\r' {
-                    return None;
-                }
-                value.push(next);
-            }
-            result.push(Token::Quoted(value));
-        } else if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-            let mut word = String::from(c);
-            while chars
-                .peek()
-                .is_some_and(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            {
-                word.push(chars.next()?);
-            }
-            result.push(Token::Word(word));
-        } else if c == '\\' || !c.is_ascii() || c == '\0' {
-            return None;
-        } else {
-            result.push(Token::Mark(c));
-        }
-        if result.len() > 100_000 {
-            return None;
-        }
+fn cache_insert(entries: &mut Cache, key: (String, usize), text: String, parsed: Parsed) {
+    let bytes = |key: &str, text: &str, parsed: &Parsed| {
+        key.len() + text.len() + parsed.iter().flatten().map(String::len).sum::<usize>()
+    };
+    let incoming = bytes(&key.0, &text, &parsed);
+    entries.remove(&key);
+    if incoming > 8 * 1024 * 1024 {
+        return;
     }
-    Some(result)
+    let retained: usize = entries
+        .iter()
+        .map(|((key, _), (text, parsed))| bytes(key, text, parsed))
+        .sum();
+    if entries.len() >= 64 || retained + incoming > 8 * 1024 * 1024 {
+        entries.clear();
+    }
+    entries.insert(key, (text, parsed));
 }
 
 fn word(token: &Token) -> Option<String> {
@@ -144,6 +117,10 @@ fn rules(tokens: &[Token], depth: usize, budget: &mut usize) -> Parsed {
     let mut i = 0;
     let mut imports = Vec::new();
     while i < tokens.len() {
+        if depth == 0 && matches!(tokens[i], Token::Cdo | Token::Cdc) {
+            i += 1;
+            continue;
+        }
         *budget = budget.checked_sub(1)?;
         let at = tokens.get(i) == Some(&Token::Mark('@'));
         let name = if at {
@@ -166,7 +143,7 @@ fn rules(tokens: &[Token], depth: usize, budget: &mut usize) -> Parsed {
                     }
                 }
                 Token::Mark(';' | '{') if stack.is_empty() => break,
-                Token::Mark('{' | '}' | ';' | '@') => return None,
+                Token::Mark('{' | '}' | ';' | '@') | Token::Cdo | Token::Cdc => return None,
                 _ => {}
             }
             i += 1;
@@ -220,7 +197,10 @@ fn declarations(tokens: &[Token]) -> Option<()> {
     let mut start = 0;
     let mut stack = Vec::new();
     for (i, token) in tokens.iter().enumerate() {
-        if matches!(token, Token::Mark('@' | '{' | '}')) {
+        if matches!(
+            token,
+            Token::Mark('@' | '{' | '}') | Token::Cdo | Token::Cdc
+        ) {
             return None;
         }
         match token {
@@ -279,7 +259,7 @@ fn declaration(tokens: &[Token]) -> Option<()> {
 
 fn import(tokens: &[Token]) -> Option<String> {
     let (url, rest) = match tokens.first()? {
-        Token::Quoted(url) => (url.clone(), &tokens[1..]),
+        Token::Quoted(url) | Token::Url(url) => (url.clone(), &tokens[1..]),
         Token::Word(name)
             if name.eq_ignore_ascii_case("url") && tokens.get(1) == Some(&Token::Mark('(')) =>
         {
@@ -362,11 +342,17 @@ fn media(tokens: &[Token]) -> bool {
 
 fn dimension(value: &str) -> bool {
     let split = value
-        .find(|c: char| !c.is_ascii_digit())
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
         .unwrap_or(value.len());
-    split > 0 && ["", "px", "em", "rem", "vw", "vh", "vmin", "vmax"].contains(&&value[split..])
+    split > 0
+        && value[..split].parse::<f64>().is_ok()
+        && ["", "px", "em", "rem", "vw", "vh", "vmin", "vmax"].contains(&&value[split..])
 }
 
 #[cfg(test)]
 #[path = "capture_watch_css_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "capture_watch_css_structure.rs"]
+pub(super) mod structure;

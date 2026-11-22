@@ -1,6 +1,139 @@
 use super::classify;
 
 #[test]
+fn cdo_and_cdc_are_top_level_tokens_not_identifier_fragments() {
+    let css = "<!--a{color:red}-->@media screen{a{color:blue}}";
+    assert_eq!(classify("cdo-cdc", css), Some(Vec::new()));
+    assert_eq!(
+        super::structure::structure(css),
+        Some(vec!["style".into(), "media".into()])
+    );
+    assert_eq!(
+        classify(
+            "cdo-container",
+            "<!--@container(width>1px){a{color:red}}-->"
+        ),
+        None
+    );
+}
+
+#[test]
+fn cache_retains_at_most_eight_megabytes() {
+    let mut cache = super::Cache::new();
+    for i in 0..12 {
+        let text = " ".repeat(900_000);
+        super::cache_insert(
+            &mut cache,
+            (format!("large-{i}"), text.len()),
+            text,
+            Some(Vec::new()),
+        );
+    }
+    let retained: usize = cache
+        .iter()
+        .map(|((key, _), (text, parsed))| {
+            key.len() + text.len() + parsed.iter().flatten().map(String::len).sum::<usize>()
+        })
+        .sum();
+    assert!(retained <= 8 * 1024 * 1024, "retained={retained}");
+}
+
+#[test]
+fn cache_bounds_include_keys_and_imports_and_handle_replacements() {
+    let mut cache = super::Cache::new();
+    super::cache_insert(
+        &mut cache,
+        ("empty".into(), 0),
+        String::new(),
+        Some(Vec::new()),
+    );
+    assert_eq!(cache.len(), 1);
+    super::cache_insert(&mut cache, ("empty".into(), 0), String::new(), None);
+    assert_eq!(cache.len(), 1);
+    assert!(cache.values().all(|(_, parsed)| parsed.is_none()));
+    super::cache_insert(
+        &mut cache,
+        ("key".repeat(3_000_000), 0),
+        String::new(),
+        None,
+    );
+    assert_eq!(cache.len(), 1);
+    super::cache_insert(
+        &mut cache,
+        ("imports".into(), 0),
+        String::new(),
+        Some(vec!["x".repeat(9_000_000)]),
+    );
+    assert_eq!(cache.len(), 1);
+    for i in 0..100 {
+        super::cache_insert(&mut cache, (format!("{i}"), 0), String::new(), None);
+    }
+    assert!(cache.len() <= 64);
+}
+
+#[test]
+fn syntax_preprocessing_and_escapes_preserve_rule_boundaries() {
+    for css in [
+        "a{content:'a\\\r\nb';color:#123}",
+        "a{content:'a\\\u{000c}b'}",
+        "a{content:'\\00007b @container \\7d'}",
+        "a{background:u\\72l(x/*);content:'done'}",
+        "a{background:url(  \"x)\");content:'done'}",
+        "a{background:url(x\\29 y)}",
+        "a{--v:[func(x)];color:red}",
+    ] {
+        assert!(classify("syntax-safe", css).is_some(), "{css:?}");
+        assert_eq!(super::structure::structure(css), Some(vec!["style".into()]));
+    }
+    for css in [
+        "a{b:url(x(y)}",
+        "a{b:url(x y)}",
+        "a{b:url(x\\\ny)}",
+        "a{b:url(x\u{000b}y)}",
+        "a{b:'x\r\ny'}",
+        "a{b:'x\u{000c}y'}",
+        "a:ha\\73(b){color:red}",
+        "@\\63 ontainer(width>1px){a{color:red}}",
+        "@/**/media screen{a{color:red}}",
+    ] {
+        assert_eq!(classify("syntax-blind", css), None, "{css:?}");
+    }
+}
+
+#[test]
+fn bad_url_cannot_hide_a_container_rule() {
+    assert_eq!(
+        classify(
+            "url-quote",
+            ".a{b:url(x\"y)}@container (min-width:1px){.x{color:red}}.c{d:\")}"
+        ),
+        None
+    );
+}
+
+#[test]
+fn unquoted_url_comments_cannot_hide_a_container_rule() {
+    assert_eq!(
+        classify(
+            "url-comment",
+            ".a{b:url(x/*)}@container (min-width:1px){.x{color:red}}.c{d:e*/)}"
+        ),
+        None
+    );
+}
+
+#[test]
+fn form_feed_cannot_hide_a_container_rule() {
+    assert_eq!(
+        classify(
+            "form-feed",
+            ".a{--v:\"\u{000C}}@container (min-width:1px){.x{color:red}}.c{--w:\"}"
+        ),
+        None
+    );
+}
+
+#[test]
 fn diagnostics_name_rejected_constructs() {
     for (css, reason) in [
         ("@container(width>1px){a{color:red}}", "at-rule:container"),
