@@ -6,6 +6,14 @@ use super::{ARM, CHECK, has_closed_shadow_root, script};
 mod protocol;
 
 #[test]
+fn opaque_media_types_are_only_sampled_for_approved_sheets() {
+    assert!(
+        script(ARM, "media")
+            .contains("if (approved.length) for (const query of ['screen', 'print', 'all'])")
+    );
+}
+
+#[test]
 fn a_closed_shadow_root_in_any_document_is_found() {
     let capture = json!({
         "strings": ["open", "closed", "user-agent"],

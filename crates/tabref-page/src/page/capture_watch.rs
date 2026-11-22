@@ -139,7 +139,8 @@ const SCAN: &str = r"const scan = (approved = []) => {
         '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)',
         '(prefers-contrast: more)', '(prefers-contrast: less)', '(prefers-contrast: custom)',
         '(prefers-contrast: no-preference)', '(forced-colors: active)', '(forced-colors: none)',
-        '(orientation: portrait)', '(orientation: landscape)', 'screen', 'print', 'all']) state += ':' + realm.matchMedia(query).matches;
+        '(orientation: portrait)', '(orientation: landscape)']) state += ':' + realm.matchMedia(query).matches;
+      if (approved.length) for (const query of ['screen', 'print', 'all']) state += ':' + realm.matchMedia(query).matches;
       styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
       if (blind) return;
       if (opaque.length) { for (const el of elements) if (el.shadowRoot) walk(el.shadowRoot); return; }
