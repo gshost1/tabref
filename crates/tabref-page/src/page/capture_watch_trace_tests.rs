@@ -5,6 +5,72 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+#[test]
+fn url_userinfo_is_not_logged() {
+    let dir = directory();
+    let path = dir.join("trace");
+    record_to(
+        &path,
+        "opaque.drain",
+        json!({"url":"https://alice:password@example.test/s.css?token=x#y", "why":"frame:iframe:http://user:pw@localhost/x", "other":"https://name%40mail:escaped%3Apw@example.test/x"}),
+    );
+    let text = std::fs::read_to_string(path).unwrap();
+    for private in [
+        "alice",
+        "password",
+        "user:pw",
+        "name%40mail",
+        "escaped%3Apw",
+    ] {
+        assert!(!text.contains(private), "{text}");
+    }
+    assert!(text.contains("https://example.test/s.css"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn trace_opens_use_nonblocking_and_nofollow_flags() {
+    use std::os::unix::io::AsRawFd;
+    let dir = directory();
+    let path = dir.join("trace");
+    let file = private_file(&path).unwrap();
+    let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", file.as_raw_fd())).unwrap();
+    let flags = i32::from_str_radix(
+        info.lines()
+            .find_map(|line| line.strip_prefix("flags:\t"))
+            .unwrap(),
+        8,
+    )
+    .unwrap();
+    let required = 0x20000 | 0x800;
+    assert_eq!(flags & required, required);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn fifo_trace_is_refused_without_blocking() {
+    let dir = directory();
+    let path = dir.join("fifo");
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        record_to(&path, "check", json!({}));
+        sender.send(()).unwrap();
+    });
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn directory() -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!(
         "tabref-trace-{}-{}",
