@@ -57,7 +57,7 @@ fn the_watch_is_armed_once_the_page_is_idle_or_the_wait_ran_out() {
 #[test]
 fn every_kept_page_scans_visibility_and_bounds_unobserved_state() {
     let filled = script(CHECK, "s1");
-    assert!(filled.contains("if (total > 30000) { blind = true; return; }"));
+    assert!(filled.contains("if (total > 30000) { fail('element-count'); return; }"));
     assert!(filled.contains("if (el.checkVisibility(visibilityOptions))"));
     assert!(filled.contains("styles([...(root.styleSheets"));
     assert!(filled.contains("forms > 1_000"));

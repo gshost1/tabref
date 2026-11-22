@@ -45,6 +45,8 @@ const MAX_ELEMENTS: usize = 30_000;
 mod css;
 #[path = "capture_watch_opaque.rs"]
 mod opaque;
+#[path = "capture_watch_trace.rs"]
+mod trace;
 
 const SCAN: &str = r"const scan = (approved = []) => {
     const opaque = [];
@@ -53,6 +55,8 @@ const SCAN: &str = r"const scan = (approved = []) => {
     const animations = [];
     const states = [];
     let blind = false;
+    let why = '';
+    const fail = reason => { blind = true; why = reason; };
     let state = '';
     let total = 0;
     let visible = 0;
@@ -85,11 +89,11 @@ const SCAN: &str = r"const scan = (approved = []) => {
         if (sheet.media.mediaText) state += realm.matchMedia(sheet.media.mediaText).matches;
         const rules = list => {
           for (const rule of list) {
-            if (++ruleCount > 10000) { blind = true; return; }
+            if (++ruleCount > 10000) { fail('rule-count'); return; }
             const text = rule.cssText;
-            if (text.startsWith('@container')) { blind = true; return; }
+            if (text.startsWith('@container')) { fail('container'); return; }
             styleSize += text.length;
-            if (styleSize > 100_000) { blind = true; return; }
+            if (styleSize > 100_000) { fail('style-size'); return; }
             state += '\u0009' + text;
             if (rule.media) state += realm.matchMedia(rule.media.mediaText).matches;
             if (rule.styleSheet) styles([rule.styleSheet], realm);
@@ -102,18 +106,18 @@ const SCAN: &str = r"const scan = (approved = []) => {
             state += ':opaque';
             if (!approved.some(entry => entry.sheet === sheet && entry.href === sheet.href)) opaque.push({sheet, href: sheet.href});
             if (opaque.length > 128) blind = true;
-          } else blind = true;
+          } else fail('stylesheet:' + error.name);
         }
         if (blind) return;
       }
     };
     const walk = root => {
       roots.push(root);
-      if (root.slotAssignment === 'manual') { blind = true; return; }
-      if (moving(root) || unreadable(root)) { blind = true; return; }
+      if (root.slotAssignment === 'manual') { fail('manual-slot'); return; }
+      if (moving(root) || unreadable(root)) { fail('animation-or-frame'); return; }
       const elements = root.querySelectorAll('*');
       total += elements.length;
-      if (total > MAX_ELEMENTS) { blind = true; return; }
+      if (total > MAX_ELEMENTS) { fail('element-count'); return; }
       state += '\u0006' + (root.styleSheets?.length ?? 0) + ':' + (root.adoptedStyleSheets?.length ?? 0);
       const doc = root.nodeType === 9 ? root : root.ownerDocument;
       const realm = doc.defaultView;
@@ -147,7 +151,7 @@ const SCAN: &str = r"const scan = (approved = []) => {
         }
         if (el.shadowRoot) walk(el.shadowRoot);
         const tag = el.localName;
-        if ((tag.includes('-') && el.matches(':defined')) || el.getAttribute('hidden') === 'until-found') { blind = true; return; }
+        if ((tag.includes('-') && el.matches(':defined')) || el.getAttribute('hidden') === 'until-found') { fail('custom-or-until-found'); return; }
         if (tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed') {
           let inner = null;
           try { inner = el.contentDocument; } catch (error) { inner = null; }
@@ -168,7 +172,7 @@ const SCAN: &str = r"const scan = (approved = []) => {
       }
     };
     walk(document);
-    if (blind) return { roots, blind, active: null, print: '' };
+    if (blind) return { roots, blind, why, active: null, print: '' };
     let active = document.activeElement;
     for (;;) {
       if (active && active.shadowRoot && active.shadowRoot.activeElement) { active = active.shadowRoot.activeElement; continue; }
@@ -196,7 +200,7 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   const opaque = pending?.token === TOKEN ? pending.approved ?? [] : [];
   delete window[Symbol.for('tabref.capture-opaque')];
   const now = scan(opaque);
-  if (now.blind) { delete window[key]; return { blind: true }; }
+  if (now.blind) { delete window[key]; return { blind: true, why: now.why }; }
   if (now.opaque.length) {
     window[Symbol.for('tabref.capture-opaque')] = {token: TOKEN, entries: now.opaque};
     delete window[key];
@@ -295,9 +299,17 @@ pub fn arm_capture_watch(
     deadline: Deadline,
 ) -> Result<CaptureWatch, AppError> {
     let mut reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
+    trace::record("arm.scan", || json!({"token":token,"reply":reply}));
     if let Some(urls) = reply.get("opaque").and_then(Value::as_array) {
-        if opaque::prepare(connection, session, token, urls, deadline).is_ok() {
-            reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
+        match opaque::prepare(connection, session, token, urls, deadline) {
+            Ok(()) => {
+                reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
+                trace::record("arm.approved", || json!({"token":token,"reply":reply}));
+            }
+            Err(error) => trace::record(
+                "opaque.error",
+                || json!({"token":token,"error":error.to_string()}),
+            ),
         }
     }
     Ok(CaptureWatch {
@@ -316,11 +328,14 @@ pub fn check_capture_watch(
     watch: &CaptureWatch,
     deadline: Deadline,
 ) -> String {
-    match evaluate_quietly(connection, session, &script(CHECK, &watch.token), deadline) {
-        Ok(Value::String(verdict)) => verdict,
-        Err(error) if is_timeout(&error) => "timed_out".to_owned(),
-        Ok(_) | Err(_) => "failed".to_owned(),
-    }
+    let verdict =
+        match evaluate_quietly(connection, session, &script(CHECK, &watch.token), deadline) {
+            Ok(Value::String(verdict)) => verdict,
+            Err(error) if is_timeout(&error) => "timed_out".to_owned(),
+            Ok(_) | Err(_) => "failed".to_owned(),
+        };
+    trace::record("check", || json!({"token":watch.token,"verdict":verdict}));
+    verdict
 }
 
 /// Whether a `DOMSnapshot.captureSnapshot` reply holds a node of a closed

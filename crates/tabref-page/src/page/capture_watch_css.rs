@@ -12,6 +12,50 @@ type Parsed = Option<Vec<String>>;
 type Cache = HashMap<(String, usize), (String, Parsed)>;
 static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
 
+pub(super) fn reject_reason(text: &str) -> String {
+    if text.len() > 1_000_000 {
+        return "size-limit".into();
+    }
+    let Some(tokens) = tokens(text) else {
+        return "tokenization-or-token-limit".into();
+    };
+    for (i, pair) in tokens.windows(2).enumerate() {
+        let name = word(&pair[1]).unwrap_or_default();
+        if pair[0] == Token::Mark('@') {
+            if ![
+                "charset",
+                "namespace",
+                "layer",
+                "import",
+                "media",
+                "supports",
+                "font-face",
+            ]
+            .contains(&name.as_str())
+            {
+                return format!("at-rule:{name}");
+            }
+            if name == "media" {
+                let prelude = &tokens[i + 2..];
+                let end = prelude
+                    .iter()
+                    .position(|t| *t == Token::Mark('{'))
+                    .unwrap_or(prelude.len());
+                if let Some(token) = prelude[..end]
+                    .iter()
+                    .find(|t| !media(std::slice::from_ref(t)))
+                {
+                    return format!("media:{token:?}");
+                }
+            }
+        }
+        if pair[0] == Token::Mark(':') && name == "has" {
+            return "selector:has".into();
+        }
+    }
+    "declaration-syntax-or-rule-limit".into()
+}
+
 pub(super) fn classify(url: &str, text: &str) -> Parsed {
     if text.len() > 1_000_000 {
         return None;

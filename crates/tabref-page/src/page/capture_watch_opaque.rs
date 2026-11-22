@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Value, json};
 use tabref_core::{AppError, Deadline};
 
+use super::trace::record;
 use super::{CdpConnection, PageSession, evaluate_quietly};
 
 type Graph = Vec<(String, Option<Vec<String>>)>;
@@ -15,21 +16,26 @@ pub(super) fn prepare(
     deadline: Deadline,
 ) -> Result<(), AppError> {
     let session = Some(page.session_id.as_str());
-    connection.call("DOM.enable", json!({}), session, deadline)?;
-    connection.discard_events(|event| {
+    cdp(connection, page, "DOM.enable", json!({}), deadline)?;
+    let stale = connection.drain_events(|event| {
         event.session_id.as_deref() == session && event.method.starts_with("CSS.")
     });
+    record("opaque.drain", || json!({"stale":stale.len(),"urls":urls}));
     let dropped = connection.dropped_event_count();
     let result = collect(connection, page, deadline);
     let cleanup = Deadline::after(100).unwrap_or(deadline);
-    let css_off = connection.call("CSS.disable", json!({}), session, cleanup);
-    let dom_off = connection.call("DOM.disable", json!({}), session, cleanup);
+    let css_off = cdp(connection, page, "CSS.disable", json!({}), cleanup);
+    let dom_off = cdp(connection, page, "DOM.disable", json!({}), cleanup);
     let late = connection.drain_events(|event| {
         event.session_id.as_deref() == session && event.method.starts_with("CSS.")
     });
     let graph = result?;
     css_off?;
     dom_off?;
+    record(
+        "opaque.events",
+        || json!({"late":late.iter().map(|event| json!({"method":event.method,"params":event.params})).collect::<Vec<_>>(),"dropped":connection.dropped_event_count() - dropped,"graph":graph.len()}),
+    );
     if connection.dropped_event_count() != dropped || !late.is_empty() {
         return Ok(());
     }
@@ -70,6 +76,10 @@ pub(super) fn prepare(
         .filter_map(Value::as_str)
         .filter(|url| safe_imports(url, &entries, &mut HashSet::new(), &mut 256))
         .collect();
+    record(
+        "opaque.approval",
+        || json!({"requested":urls.len(),"approved":safe.len()}),
+    );
     evaluate_quietly(
         connection,
         page,
@@ -93,10 +103,11 @@ fn collect(
     deadline: Deadline,
 ) -> Result<Graph, AppError> {
     let session = Some(page.session_id.as_str());
-    connection.call("CSS.enable", json!({}), session, deadline)?;
+    cdp(connection, page, "CSS.enable", json!({}), deadline)?;
     let events = connection.drain_events(|event| {
         event.session_id.as_deref() == session && event.method == "CSS.styleSheetAdded"
     });
+    record("opaque.added", || json!({"count":events.len()}));
     if events.len() > 128 {
         return Ok(Vec::new());
     }
@@ -116,15 +127,22 @@ fn collect(
             graph.push((url.to_owned(), None));
             continue;
         }
-        let reply = connection.call(
+        let reply = cdp(
+            connection,
+            page,
             "CSS.getStyleSheetText",
             json!({"styleSheetId":header["styleSheetId"]}),
-            session,
             deadline,
         )?;
         let parsed = reply["text"].as_str().and_then(|text| {
             super::css::classify(header["styleSheetId"].as_str().unwrap_or(""), text)
         });
+        if parsed.is_none() {
+            record(
+                "opaque.reject",
+                || json!({"url":url,"construct":reply["text"].as_str().map(super::css::reject_reason)}),
+            );
+        }
         graph.push((url.to_owned(), parsed));
     }
     let changed = connection.drain_events(|event| {
@@ -135,9 +153,27 @@ fn collect(
             )
     });
     if !changed.is_empty() {
+        record("opaque.changed", || json!({"count":changed.len()}));
         graph.clear();
     }
     Ok(graph)
+}
+
+fn cdp(
+    connection: &mut CdpConnection,
+    page: &PageSession,
+    method: &str,
+    params: Value,
+    deadline: Deadline,
+) -> Result<Value, AppError> {
+    connection
+        .call(method, params, Some(&page.session_id), deadline)
+        .inspect_err(|error| {
+            record(
+                "opaque.cdp_error",
+                || json!({"step":method,"error":error.to_string()}),
+            );
+        })
 }
 
 fn safe_imports(
@@ -147,9 +183,19 @@ fn safe_imports(
     budget: &mut usize,
 ) -> bool {
     if *budget == 0 || seen.len() >= 16 || !seen.insert(url.to_owned()) {
+        record(
+            "opaque.import",
+            || json!({"url":url,"reason":"cycle-or-budget"}),
+        );
         return false;
     }
     *budget -= 1;
+    if graph.get(url).is_none_or(Option::is_none) {
+        record(
+            "opaque.import",
+            || json!({"url":url,"reason":if graph.contains_key(url) {"unclassifiable"} else {"missing"}}),
+        );
+    }
     let safe = graph
         .get(url)
         .and_then(Option::as_ref)

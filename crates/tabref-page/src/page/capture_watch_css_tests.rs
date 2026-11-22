@@ -1,6 +1,18 @@
 use super::classify;
 
 #[test]
+fn diagnostics_name_rejected_constructs() {
+    for (css, reason) in [
+        ("@container(width>1px){a{color:red}}", "at-rule:container"),
+        ("a:has(b){color:red}", "selector:has"),
+        ("a{color red}", "declaration-syntax-or-rule-limit"),
+    ] {
+        assert_eq!(super::reject_reason(css), reason);
+    }
+    assert!(super::reject_reason("@media(hover:hover){a{color:red}}").starts_with("media:"));
+}
+
+#[test]
 fn safe_sheets_cover_static_rules_and_tracked_media() {
     for css in [
         "",
