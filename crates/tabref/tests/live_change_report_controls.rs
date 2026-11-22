@@ -324,9 +324,18 @@ fn unique_new_control_does_not_inherit_the_page_heading() {
     assert_eq!(new.len(), 3, "{batch}");
     assert!(
         new.iter()
-            .all(|entry| !entry.as_str().unwrap().contains(" in \"")),
+            .any(|entry| entry.as_str().unwrap() == format!("{undo} button \"Undo\"")),
         "{batch}"
     );
+    for heading in ["Card A", "Card B"] {
+        assert!(
+            new.iter().any(|entry| entry
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("in \"{heading}\""))),
+            "{batch}"
+        );
+    }
 }
 
 #[test]

@@ -144,10 +144,41 @@ fn preview_controls<'d>(
         ));
     }
     ControlPreview {
-        labels: found.into_iter().map(|control| control.context).collect(),
+        labels: distinct_labels(&found),
         shown: outside,
         summary,
     }
+}
+
+fn distinct_labels(controls: &[NewControl<'_>]) -> Vec<Option<String>> {
+    let labels: Vec<_> = controls
+        .iter()
+        .map(|control| {
+            control.context.as_ref().map(|label| {
+                let text = cut_chars(label, NEW_LINE_CHARS);
+                (quote_text(&text), text)
+            })
+        })
+        .collect();
+    let mut by_control = HashMap::<_, HashMap<&str, usize>>::new();
+    for (control, label) in controls.iter().zip(&labels) {
+        if let Some((quoted, _)) = label {
+            *by_control
+                .entry(control.key())
+                .or_default()
+                .entry(quoted)
+                .or_default() += 1;
+        }
+    }
+    controls
+        .iter()
+        .zip(&labels)
+        .map(|(control, label)| {
+            let (quoted, text) = label.as_ref()?;
+            let counts = by_control.get(&control.key())?;
+            (counts.len() > 1 && counts.get(quoted.as_str()) == Some(&1)).then(|| text.clone())
+        })
+        .collect()
 }
 
 /// Keep uncommon controls and changed containers ahead of repeated ones.
@@ -193,7 +224,7 @@ fn order_preview(
 fn control_line(node: &AccessibilityNode, label: Option<&str>) -> String {
     let mut line = styled(&node_line(node, NEW_LINE_CHARS));
     if let Some(label) = label {
-        let context = format!(" in {}", quote_text(&cut_chars(label, NEW_LINE_CHARS)));
+        let context = format!(" in {}", quote_text(label));
         if !node.presentation.states.is_empty()
             && let Some(at) = line.rfind(" [")
         {
@@ -254,10 +285,7 @@ fn context<'a>(
             && result.label.is_none()
             && matches!(node.tag(), "DIV" | "ARTICLE" | "SECTION")
         {
-            result.label = child_label(doc, node, name, |child| {
-                matches!(child.tag(), "H1" | "H2" | "H3" | "H4" | "H5" | "H6")
-                    || role(child) == Some("heading")
-            });
+            result.label = heading_label(doc, node, index, name);
         }
     }
     result
@@ -314,21 +342,34 @@ fn row_label(
     useful_label(&text, name).then_some(text)
 }
 
-fn child_label(
-    doc: &DomTree,
-    node: &DomNode,
-    name: &str,
-    kind: impl Fn(&DomNode) -> bool,
-) -> Option<String> {
-    node.children
-        .iter()
-        .copied()
-        .filter(|at| {
-            doc.node(*at)
-                .is_some_and(|child| child.is_shown() && kind(child))
-        })
-        .map(|at| subtree_text(doc, at))
-        .find(|text| useful_label(text, name))
+fn heading_label(doc: &DomTree, container: &DomNode, control: usize, name: &str) -> Option<String> {
+    let mut pending: Vec<_> = container.children.iter().rev().copied().collect();
+    let mut heading = None;
+    let mut past_control = false;
+    while let Some(at) = pending.pop() {
+        if at == control {
+            if heading.is_some() {
+                break;
+            }
+            past_control = true;
+            continue;
+        }
+        let Some(node) = doc.node(at) else {
+            continue;
+        };
+        if node.is_shown()
+            && (matches!(node.tag(), "H1" | "H2" | "H3" | "H4" | "H5" | "H6")
+                || role(node) == Some("heading"))
+        {
+            if past_control && heading.is_some() {
+                return None;
+            }
+            heading = Some(at);
+        }
+        pending.extend(node.children.iter().rev().copied());
+    }
+    let text = subtree_text(doc, heading?);
+    useful_label(&text, name).then_some(text)
 }
 
 fn useful_label(text: &str, name: &str) -> bool {

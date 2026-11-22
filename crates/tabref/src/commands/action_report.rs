@@ -8,7 +8,7 @@ use super::action_report_changes::{change_data, counted, reload_head, step_chang
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
 use super::page_view::current_page_view;
-use super::redrawn_rows::control_report;
+use super::redrawn_rows::{ControlReport, control_report};
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
@@ -20,6 +20,8 @@ use crate::view::rows_replaced;
 
 const NOTHING_SEEN: &str = " (no visible change)";
 const NOTHING_READ: &str = " (no visible change; a frame from another site was not checked)";
+const PREVIEW_UNAVAILABLE: &str = "note: new control refs unavailable";
+const PREVIEW_UNAVAILABLE_FIELD: &str = "control_preview_unavailable";
 
 /// An action as a single command prints it: `clicked "Save"`, then what it
 /// set off, capped near 150 tokens: dialogs, the new address, the page's
@@ -32,7 +34,7 @@ pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome
     }
     let mut outcome = Outcome::new(first, acted.data);
     if let Some(effects) = &acted.effects {
-        let (lines, data) = effect_block(session, effects, &acted.known)?;
+        let (lines, data) = effect_block(session, effects, acted.known)?;
         for line in lines {
             outcome.push_line(&line);
         }
@@ -64,7 +66,7 @@ pub(crate) fn step_report(
             .as_ref()
             .is_some_and(|page| !page.replaced_rows.is_empty())
     {
-        let (lines, more) = effect_block(session, effects, &acted.known)?;
+        let (lines, more) = effect_block(session, effects, acted.known)?;
         for extra in lines {
             line.push('\n');
             line.push_str(&extra);
@@ -84,10 +86,8 @@ pub(crate) fn step_report(
         if let Some(url) = effects.moved_to() {
             line.push_str(&format!(" -> {}", short_url(&effects.url_before, url)));
         }
-        let captured = capture_control_changes(session, effects, page)?;
-        let report = captured
-            .as_ref()
-            .map(|snapshot| control_report(snapshot, &acted.known, page));
+        let (captured, report) =
+            capture_control_changes(session, effects, page, acted.known, &mut data);
         if effects.settled.navigated {
             line.push_str(&format!(" {}", quote_text(&page.title)));
             if effects.url_before == page.url {
@@ -104,6 +104,10 @@ pub(crate) fn step_report(
             line.push_str(&format!("; {note}"));
         }
         merge(&mut data, text_check_data(page));
+        if data[PREVIEW_UNAVAILABLE_FIELD] == true {
+            line.push('\n');
+            line.push_str(PREVIEW_UNAVAILABLE);
+        }
         if let Some(report) = report
             && !report.lines.is_empty()
         {
@@ -127,7 +131,7 @@ pub(crate) fn step_report(
 fn effect_block(
     session: &mut Session,
     effects: &ActionEffects,
-    known: &HashSet<String>,
+    known: HashSet<String>,
 ) -> Result<(Vec<String>, Value), AppError> {
     let mut lines: Vec<String> = dialog_lines(effects.dialogs());
     lines.extend(effects.downloads.iter().map(download_line));
@@ -160,10 +164,7 @@ fn effect_block(
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
     }
-    let captured = capture_control_changes(session, effects, page)?;
-    let prepared = captured
-        .as_ref()
-        .map(|snapshot| control_report(snapshot, known, page));
+    let (captured, prepared) = capture_control_changes(session, effects, page, known, &mut data);
     let changes = counted(
         prepared
             .as_ref()
@@ -192,6 +193,9 @@ fn effect_block(
         lines.extend(prepared.lines);
         set(&mut data, "new", json!(prepared.new));
     }
+    if data[PREVIEW_UNAVAILABLE_FIELD] == true {
+        lines.push(PREVIEW_UNAVAILABLE.into());
+    }
     if let Some(check) = action_bot_check(session, &page.title, captured.as_ref()) {
         lines.insert(0, check.note());
         check.add_data(&mut data);
@@ -210,10 +214,32 @@ fn capture_control_changes(
     session: &mut Session,
     effects: &ActionEffects,
     page: &tabref_page::PageChanges,
-) -> Result<Option<CapturedSnapshot>, AppError> {
-    (!effects.settled.navigated && (page.changed_anything() || effects.settled.same_document))
-        .then(|| session.capture())
-        .transpose()
+    mut known: HashSet<String>,
+    data: &mut Value,
+) -> (Option<CapturedSnapshot>, Option<ControlReport>) {
+    if effects.settled.navigated || !(page.changed_anything() || effects.settled.same_document) {
+        return (None, None);
+    }
+    if let Ok(tab) = session.tab_id() {
+        known.extend(
+            session
+                .continued_refs(&tab, &page.url)
+                .refs
+                .into_iter()
+                .map(|entry| entry.token)
+                .filter(|token| !token.is_empty()),
+        );
+    }
+    match session.capture() {
+        Ok(snapshot) => {
+            let report = control_report(&snapshot, &known, page);
+            (Some(snapshot), Some(report))
+        }
+        Err(_) => {
+            set(data, PREVIEW_UNAVAILABLE_FIELD, json!(true));
+            (None, None)
+        }
+    }
 }
 
 fn text_check_note(page: &tabref_page::PageChanges) -> Option<String> {
