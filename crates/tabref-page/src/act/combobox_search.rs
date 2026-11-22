@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use serde_json::json;
+use serde::Deserialize;
+use serde_json::{Value, json};
 use tabref_cdp::{is_timeout, transport_failed};
 use tabref_core::{AccessibilityNode, AppError, Deadline, ErrorCode, NodeIdentity};
 
@@ -13,22 +14,28 @@ use crate::tree::ax_nodes::AxNodes;
 use crate::tree::web_roles::map_cdp_role;
 use crate::{
     CdpConnection, DomNode, DomTree, ElementToken, LocateIntent, Located, Locator, PageSession,
-    cut_chars, locate,
+    locate,
 };
 
+#[path = "combobox_scan.rs"]
+mod scan;
+use scan::{Observation, Scan, ScrollPosition};
+
 const POPUP_WAIT: Duration = Duration::from_millis(900);
-const POLL: Duration = Duration::from_millis(50);
+const POLL: Duration = Duration::from_millis(40);
 const POPUP_ROLES: &[&str] = &["listbox", "menu", "grid", "tree"];
 
-const SCROLL: &str = r"function(top) {
-  const scrollable = node => node.scrollHeight > node.clientHeight &&
+const SCROLL: &str = r"function(to) {
+  const scrollable = node => node.clientHeight > 0 && node.scrollHeight > node.clientHeight &&
     /^(auto|scroll|overlay)$/.test(getComputedStyle(node).overflowY);
-  const pane = scrollable(this) ? this : Array.from(this.children).find(scrollable);
+  const pane = scrollable(this) ? this : Array.from(this.querySelectorAll('*')).find(scrollable);
   if (!pane) return null;
-  const old = pane.scrollTop;
-  const step = Math.max(1, pane.clientHeight * 0.8);
-  pane.scrollTo({ top: top ?? old + step, behavior: 'instant' });
-  return { old, now: pane.scrollTop };
+  if (to !== null) {
+    const step = Math.max(1, pane.clientHeight * 0.8);
+    pane.scrollTo({ top: to === 'next' ? pane.scrollTop + step : to, behavior: 'instant' });
+  }
+  return { top: pane.scrollTop, end: pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 1,
+    height: pane.clientHeight, scale: this.ownerDocument.defaultView.devicePixelRatio };
 }";
 
 pub(super) struct PopupSearch<'a> {
@@ -42,134 +49,158 @@ impl PopupSearch<'_> {
     pub fn find(
         &self,
         connection: &mut CdpConnection,
-        seen: &mut BTreeSet<String>,
         deadline: Deadline,
+        reserve_filter: bool,
     ) -> Result<(Located, i64), AppError> {
-        let wait = deadline.capped(POPUP_WAIT.min(deadline.remaining() / 2));
+        let remaining = deadline.remaining();
+        let reserve = if reserve_filter {
+            remaining / 2
+        } else {
+            (remaining / 3).min(Duration::from_millis(350))
+        };
+        let wait = deadline.capped(remaining.saturating_sub(reserve));
         let query = normalize(self.locator.name.as_deref().unwrap_or_default());
-        let mut options = AccessibilityNode::default();
-        let mut popup = None;
-        let mut fallback = None;
-        let mut started_at_top = None;
-        loop {
-            let current = self.poll(connection, wait);
-            let (current_popup, current_options) = match current {
-                Ok(snapshot) => snapshot,
-                Err(error) if is_timeout(&error) && wait.is_expired() => break,
-                Err(error) => return Err(error),
+        let mut scan = Scan::default();
+        match self.browse(connection, &query, &mut scan, wait) {
+            Ok(Some(pick)) => return Ok(pick),
+            Err(error) if !is_timeout(&error) || !wait.is_expired() => return Err(error),
+            _ => {}
+        }
+
+        let result = if scan.incomplete() {
+            Err(scan.incomplete_error())
+        } else {
+            self.finish_scan(connection, &scan, &query, deadline)
+                .map_err(|error| scan.describe_missing(error))
+        };
+        if result.is_err()
+            && let Some((backend, top)) = scan.original_scroll()
+        {
+            let _ = self.scroll(connection, backend, json!(top), deadline);
+        }
+        result
+    }
+
+    fn browse(
+        &self,
+        connection: &mut CdpConnection,
+        query: &str,
+        scan: &mut Scan,
+        wait: Deadline,
+    ) -> Result<Option<(Located, i64)>, AppError> {
+        let discovery = wait.capped(POPUP_WAIT);
+        while wait.remaining() > POLL {
+            let dom = frame_dom(connection, self.session, self.combo, wait)?;
+            let Some(popup) = self.popup(&dom, None).map(|node| node.backend_id) else {
+                if discovery.is_expired() {
+                    break;
+                }
+                std::thread::sleep(POLL);
+                continue;
             };
-            seen.extend(
-                current_options
-                    .children
-                    .iter()
-                    .filter_map(|option| option.display_name().map(|name| cut_chars(name, 60))),
-            );
-            let stable = popup == current_popup && options == current_options;
-            popup = current_popup;
-            options = current_options;
+            let options = self.options(connection, popup, wait)?;
             if options
                 .children
                 .iter()
-                .any(|option| rank(option, &query) == Some(EXACT_NAME))
+                .any(|option| rank(option, query) == Some(EXACT_NAME))
             {
-                return self.pick(&options, popup);
+                return self.pick(&options, popup).map(Some);
             }
-            if wait.remaining() <= POLL {
-                break;
-            }
-            if let Some(backend) = popup
-                && stable
-                && !options.children.is_empty()
-            {
-                let to = (started_at_top != Some(backend)).then_some(0.0);
-                let scroll = match self.scroll(connection, backend, to, wait) {
-                    Ok(scroll) => scroll,
-                    Err(error) if is_timeout(&error) && wait.is_expired() => break,
-                    Err(error) => return Err(error),
-                };
-                started_at_top = Some(backend);
-                if let Some(top) = scroll
-                    && options
-                        .children
-                        .iter()
-                        .any(|option| rank(option, &query).is_some())
-                {
-                    fallback.get_or_insert((backend, top));
+            let position = self.scroll(connection, popup, Value::Null, wait)?;
+            match scan.observe(popup, options, &dom, position) {
+                Observation::Reset => {
+                    self.scroll(connection, popup, json!(0), wait)?;
+                }
+                Observation::Advance => {
+                    self.scroll(connection, popup, json!("next"), wait)?;
+                }
+                Observation::Complete => break,
+                Observation::Wait => {
+                    if !scan.has_options() && discovery.is_expired() && position.is_none() {
+                        break;
+                    }
                 }
             }
             std::thread::sleep(POLL);
         }
-        if options
-            .children
-            .iter()
-            .all(|option| rank(option, &query).is_none())
-            && let Some((backend, top)) = fallback
-            && popup == Some(backend)
-        {
-            self.scroll(connection, backend, Some(top), deadline)?;
-            let restore = deadline.capped(POLL * 3);
-            while restore.remaining() > POLL {
-                std::thread::sleep(POLL);
-                (popup, options) = self.poll(connection, restore)?;
-                if options
-                    .children
-                    .iter()
-                    .any(|option| rank(option, &query).is_some())
-                {
-                    break;
-                }
-            }
-        }
-        self.pick(&options, popup)
+        Ok(None)
     }
 
-    fn pick(
-        &self,
-        options: &AccessibilityNode,
-        popup: Option<i64>,
-    ) -> Result<(Located, i64), AppError> {
-        let option = locate(options, &self.locator, LocateIntent::Click).map_err(|error| {
-            if error.code == ErrorCode::AmbiguousTarget {
-                self.ambiguous(options, error)
-            } else {
-                error
-            }
-        })?;
-        let backend = popup.ok_or_else(|| AppError::internal("an option has no popup"))?;
-        Ok((option, backend))
-    }
-
-    fn ambiguous(&self, options: &AccessibilityNode, mut error: AppError) -> AppError {
-        let query = self.locator.name.as_deref().unwrap_or_default();
-        let normalized = normalize(query);
-        let matches = options
-            .children
-            .iter()
-            .filter_map(|option| Some((rank(option, &normalized)?, option.display_name()?)));
-        let best = matches.clone().map(|(rank, _)| rank).min();
-        let names: Vec<_> = matches
-            .filter(|(rank, _)| Some(*rank) == best)
-            .take(30)
-            .map(|(_, name)| format!("\"{}\"", crate::escape_line(name, true)))
-            .collect();
-        error.message = format!(
-            "multiple options match {query:?}: {}; use a full option name with select. For duplicate names, open the combobox and use tabref snap to get refs for tabref click",
-            names.join(" | ")
-        );
-        error
-    }
-
-    fn poll(
+    fn finish_scan(
         &self,
         connection: &mut CdpConnection,
+        scan: &Scan,
+        query: &str,
         deadline: Deadline,
-    ) -> Result<(Option<i64>, AccessibilityNode), AppError> {
-        let dom = frame_dom(connection, self.session, self.combo, deadline)?;
-        let Some(popup) = self.popup(&dom, None) else {
-            return Ok((None, AccessibilityNode::default()));
+    ) -> Result<(Located, i64), AppError> {
+        let candidates = scan.matches(query);
+        let candidate = match candidates.as_slice() {
+            [] => {
+                return Err(locate(&scan.options, &self.locator, LocateIntent::Click)
+                    .err()
+                    .unwrap_or_else(missing_candidate));
+            }
+            [candidate] => candidate,
+            _ => {
+                return Err(self.ambiguous(
+                    candidates
+                        .iter()
+                        .filter_map(|entry| entry.option.display_name()),
+                ));
+            }
         };
-        let options = self.options(connection, popup.backend_id, deadline)?;
-        Ok((Some(popup.backend_id), options))
+        let popup = scan
+            .popup
+            .ok_or_else(|| AppError::internal("an option has no popup"))?;
+        if let Some(top) = candidate.top {
+            self.scroll(connection, popup, json!(top), deadline)?;
+            let restore = deadline.capped(POLL * 4);
+            while restore.remaining() > POLL {
+                std::thread::sleep(POLL);
+                let dom = frame_dom(connection, self.session, self.combo, restore)?;
+                let options = self.options(connection, popup, restore)?;
+                let position = self.scroll(connection, popup, Value::Null, restore)?;
+                if let Some(node) = candidate.find(options, &dom, position) {
+                    return self.pick(&node, popup);
+                }
+            }
+            return Err(missing_candidate());
+        }
+        self.pick(&scan.options, popup)
+    }
+
+    fn pick(&self, options: &AccessibilityNode, popup: i64) -> Result<(Located, i64), AppError> {
+        locate(options, &self.locator, LocateIntent::Click)
+            .map(|option| (option, popup))
+            .map_err(|error| {
+                if error.code == ErrorCode::AmbiguousTarget {
+                    let query = normalize(self.locator.name.as_deref().unwrap_or_default());
+                    self.ambiguous(
+                        options
+                            .children
+                            .iter()
+                            .filter(|option| rank(option, &query) == Some(EXACT_NAME))
+                            .filter_map(AccessibilityNode::display_name),
+                    )
+                } else {
+                    error
+                }
+            })
+    }
+
+    fn ambiguous<'a>(&self, names: impl Iterator<Item = &'a str>) -> AppError {
+        let query = self.locator.name.as_deref().unwrap_or_default();
+        let listed = names
+            .take(30)
+            .map(|name| format!("\"{}\"", crate::escape_line(name, true)))
+            .collect::<Vec<_>>();
+        AppError::new(
+            ErrorCode::AmbiguousTarget,
+            format!(
+                "multiple options match {query:?}: {}; use a full option name with select. For duplicate names, open the combobox and use tabref snap to get refs for tabref click",
+                listed.join(" | ")
+            ),
+        ).with_details(json!({ "kind": "locate_ambiguous", "candidates": listed }))
     }
 
     pub fn token(&self, backend: i64) -> ElementToken {
@@ -183,22 +214,21 @@ impl PopupSearch<'_> {
         &self,
         connection: &mut CdpConnection,
         backend: i64,
-        to: Option<f64>,
+        to: Value,
         deadline: Deadline,
-    ) -> Result<Option<f64>, AppError> {
+    ) -> Result<Option<ScrollPosition>, AppError> {
         let reply = call_on_element(
             connection,
             self.session,
             &self.token(backend),
             ElementCall {
                 function: SCROLL,
-                arguments: vec![json!(to)],
+                arguments: vec![to],
             },
             deadline,
         )?;
-        Ok(reply["old"]
-            .as_f64()
-            .filter(|_| reply["old"] != reply["now"]))
+        Option::<ScrollPosition>::deserialize(reply)
+            .map_err(|error| transport_failed("read combobox scroll position", error.to_string()))
     }
 
     pub fn options(
@@ -256,23 +286,64 @@ impl PopupSearch<'_> {
             .filter(|node| is_popup(node) && !self.baseline.contains(&node.backend_id)))
     }
 
-    pub fn open(&self, dom: &DomTree, known: Option<i64>) -> bool {
-        let index = dom.find_backend(self.combo.backend_node_id);
-        let expanded = index
-            .and_then(|at| dom.node(at))
-            .and_then(|node| node.attr("aria-expanded"));
-        expanded == Some("true")
-            || self.popup(dom, known).is_some()
-            || (known.is_none()
-                && !linked_popup(dom, self.combo).0
-                && dom
-                    .nodes
-                    .iter()
-                    .any(|node| is_popup(node) && !self.baseline.contains(&node.backend_id)))
+    pub fn open(
+        &self,
+        connection: &mut CdpConnection,
+        dom: &DomTree,
+        known: Option<i64>,
+        deadline: Deadline,
+    ) -> Result<bool, AppError> {
+        if is_collapsed(dom, self.combo) {
+            return Ok(false);
+        }
+        if let Some(popup) = self.popup(dom, known) {
+            return self.has_options(connection, popup.backend_id, deadline);
+        }
+        if known.is_none() && !linked_popup(dom, self.combo).0 {
+            for popup in dom
+                .nodes
+                .iter()
+                .filter(|node| is_popup(node) && !self.baseline.contains(&node.backend_id))
+            {
+                if self.has_options(connection, popup.backend_id, deadline)? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn has_options(
+        &self,
+        connection: &mut CdpConnection,
+        popup: i64,
+        deadline: Deadline,
+    ) -> Result<bool, AppError> {
+        Ok(!self
+            .options(connection, popup, deadline)?
+            .children
+            .is_empty())
     }
 }
 
+fn missing_candidate() -> AppError {
+    AppError::new(
+        ErrorCode::ElementNotFound,
+        "the matched combobox option disappeared",
+    )
+}
+
+fn is_collapsed(dom: &DomTree, combo: &ElementToken) -> bool {
+    dom.find_backend(combo.backend_node_id)
+        .and_then(|index| dom.node(index))
+        .and_then(|node| node.attr("aria-expanded"))
+        .is_some_and(|expanded| expanded != "true")
+}
+
 pub(super) fn initially_open<'d>(dom: &'d DomTree, combo: &ElementToken) -> Option<&'d DomNode> {
+    if is_collapsed(dom, combo) {
+        return None;
+    }
     let (declared, popup) = linked_popup(dom, combo);
     if declared {
         return popup;

@@ -46,6 +46,18 @@ fn an_unrelated_new_value_is_reported_as_a_note() {
     tabref.ok(&["js", "person.textContent = 'Nobody'; 1"]);
     let picked = tabref.ok(&["--json", "select", "Person", "Bob"]).json();
     assert_eq!(picked["data"]["verified"], false, "{picked}");
+    tabref.ok(&[
+        "js",
+        "person.textContent = 'Nobody'; person.dataset.mode = 'value-text'; 1",
+    ]);
+    let picked = tabref.ok(&["select", "Person", "Bob"]);
+    assert!(
+        picked
+            .stdout
+            .contains("note: \"Person\" now reads \"Assigned\""),
+        "{}",
+        picked.stdout
+    );
 }
 
 #[test]
@@ -112,10 +124,32 @@ fn an_exact_match_beyond_the_first_virtual_windows_is_selected() {
         return;
     }
     let tabref = open("combo-virtual-late");
+    tabref.ok(&["js", "place.dataset.indexed = 'yes'; 1"]);
     let picked = tabref
         .ok(&["--json", "select", "Place", "Place 050"])
         .json();
     assert_eq!(picked["data"]["value"], "Place 050", "{picked}");
+}
+
+#[test]
+fn a_complete_virtual_scan_reports_the_total_and_can_return_to_a_unique_partial() {
+    if !live() {
+        return;
+    }
+    let tabref = open("combo-virtual-complete");
+    let missing = tabref
+        .run(&["--json", "select", "Place", "Atlantis"])
+        .json();
+    let error = &missing["error"];
+    assert_eq!(error["code"], "ELEMENT_NOT_FOUND", "{missing}");
+    assert_eq!(error["details"]["options_total"], 100, "{missing}");
+    assert_eq!(error["disposition"]["retry"], "safe", "{missing}");
+    assert_eq!(tabref.ok(&["js", "places.scrollTop"]).stdout.trim(), "0");
+    let picked = tabref.ok(&["--json", "select", "Place", "British"]).json();
+    assert_eq!(
+        picked["data"]["value"], "British Virgin Islands",
+        "{picked}"
+    );
 }
 
 #[test]
@@ -142,6 +176,7 @@ fn an_incomplete_scan_cannot_pick_a_partial_match_or_claim_the_total() {
         "{reply}"
     );
     assert!(error["details"].get("options_total").is_none(), "{reply}");
+    assert_eq!(error["disposition"]["retry"], "safe", "{reply}");
     assert_eq!(tabref.ok(&["js", "place.value"]).stdout.trim(), "None");
 }
 

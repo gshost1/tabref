@@ -15,6 +15,8 @@ pub(super) mod combobox;
 pub(super) mod combobox_popup_report;
 #[path = "combobox_search.rs"]
 mod combobox_search;
+#[path = "combobox_state.rs"]
+pub(super) mod combobox_state;
 
 const DETAILED: usize = 30;
 

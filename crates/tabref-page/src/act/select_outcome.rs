@@ -1,9 +1,9 @@
 use serde_json::json;
 use tabref_core::{AppError, Deadline};
 
-use super::select_option::combobox;
 use super::select_option::combobox_popup_report::PopupText;
 use super::select_option::combobox_popup_report::omit_display_change;
+use super::select_option::combobox_state;
 use crate::tree::ax_nodes::AxNodes;
 use crate::{CdpConnection, ElementToken, PageChanges, PageMark, PageSession};
 
@@ -16,10 +16,17 @@ pub struct SelectOutcome {
     pub previous: Option<String>,
     pub combobox: bool,
     pub(crate) option_texts: Vec<String>,
-    pub(crate) uncommitted: bool,
+    pub(in crate::act) readback: Option<combobox_state::ComboboxEvidence>,
     pub(in crate::act) popup_text: Option<PopupText>,
     pub popup_error: Option<String>,
     pub(crate) previous_text: String,
+}
+
+pub struct ComboboxReadback {
+    pub value: String,
+    pub text: String,
+    pub kept: bool,
+    pub changed_to: Option<String>,
 }
 
 impl SelectOutcome {
@@ -30,10 +37,44 @@ impl SelectOutcome {
         session: &PageSession,
         token: &ElementToken,
         deadline: Deadline,
-    ) -> Result<(String, String, bool), AppError> {
-        let state = combobox::read(connection, session, token, deadline)?;
-        let kept = !self.uncommitted && state.matches(&self.option_texts);
-        Ok((state.value, state.text, kept))
+    ) -> Result<ComboboxReadback, AppError> {
+        let state = combobox_state::read(connection, session, token, deadline)?;
+        let evidence = self
+            .readback
+            .as_ref()
+            .ok_or_else(|| AppError::internal("combobox selection has no read-back baseline"))?;
+        let kept = evidence.selected
+            || (!evidence.uncommitted
+                && (state.matches(&evidence.before_pick, &self.option_texts)
+                    || evidence
+                        .before_query
+                        .as_ref()
+                        .is_some_and(|before| state.matches(before, &self.option_texts))))
+            || combobox_state::option_selected(
+                connection,
+                session,
+                &evidence.option_token,
+                deadline,
+            );
+        let changed_to = if evidence.uncommitted {
+            None
+        } else {
+            state
+                .change_from(&evidence.before_pick)
+                .or_else(|| {
+                    evidence
+                        .before_query
+                        .as_ref()
+                        .and_then(|before| state.change_from(before))
+                })
+                .map(str::to_owned)
+        };
+        Ok(ComboboxReadback {
+            value: state.value,
+            text: state.text,
+            kept,
+            changed_to,
+        })
     }
 
     /// Excludes the chosen popup's former text from the page change baseline.

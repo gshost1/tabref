@@ -154,7 +154,11 @@ fn combobox_report(
     } else {
         format!("{label} combobox")
     };
-    if let Ok((value, _, false)) = &reading {
+    if let Ok(current) = &reading
+        && !current.kept
+        && current.changed_to.is_none()
+    {
+        let value = &current.value;
         return Err(AppError::new(
             ErrorCode::ActionFailed,
             format!(
@@ -169,8 +173,9 @@ fn combobox_report(
         .with_disposition(DeliverySemantics::delivered_unverified()));
     }
     if let Some(page) = page
-        && let Ok((value, text, true)) = &reading
+        && let Ok(current) = &reading
     {
+        let (value, text) = (&current.value, &current.text);
         chosen.omit_combobox_display_change(text, page);
         if text.is_empty() && !value.is_empty() && chosen.previous.as_ref() != Some(value) {
             target
@@ -184,8 +189,9 @@ fn combobox_report(
                 ));
         }
     }
-    let value = reading.as_ref().ok().map(|(value, _, _)| value.as_str());
-    let verified = reading.as_ref().is_ok_and(|(_, _, kept)| *kept) && chosen.popup_error.is_none();
+    let value = reading.as_ref().ok().map(|current| current.value.as_str());
+    let verified =
+        reading.as_ref().is_ok_and(|current| current.kept) && chosen.popup_error.is_none();
     let mut acted = Acted {
         verb: "select",
         summary: format!(
@@ -205,11 +211,21 @@ fn combobox_report(
         effects: None,
         known: target.known,
     };
-    if let Err(error) = reading {
-        add_unread(&mut acted, "the combobox's value", &error);
-    } else if let Some(message) = chosen.popup_error {
-        let error = AppError::new(ErrorCode::ActionFailed, message);
-        add_unread(&mut acted, "whether the combobox popup closed", &error);
+    match reading {
+        Err(error) => add_unread(&mut acted, "the combobox's value", &error),
+        Ok(current) => {
+            if !current.kept
+                && let Some(display) = &current.changed_to
+            {
+                let note = format!("{label} now reads {}", quote_text(display));
+                acted.summary.push_str(&format!("\nnote: {note}"));
+                acted.data["note"] = json!(note);
+            }
+            if let Some(message) = chosen.popup_error {
+                let error = AppError::new(ErrorCode::ActionFailed, message);
+                add_unread(&mut acted, "whether the combobox popup closed", &error);
+            }
+        }
     }
     Ok(acted)
 }
