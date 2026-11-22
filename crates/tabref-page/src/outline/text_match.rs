@@ -107,7 +107,7 @@ pub(super) fn line_control(
         let Some(control) = control_at(index) else {
             continue;
         };
-        if index == pre || (control.multiline && tree.nodes[index].tag() == "CODE") {
+        if index == pre || control.multiline {
             wrapper.get_or_insert((index, control));
         } else if control.text_matches {
             return Some((index, control));

@@ -70,6 +70,7 @@ fn a_pre_line_keeps_inline_link_text_and_its_ref() {
     for query in ["see docs", "needle", "docs"] {
         let (hits, total) = search_text(&input, query, 20);
         assert_eq!(total, 1, "{query}");
+        assert_eq!(hits.len(), 1, "{query}");
         assert!(hits[0].line.starts_with("see docs for needle more"));
         assert_eq!(
             hits[0].control.as_ref().unwrap().ref_text.as_deref(),

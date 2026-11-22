@@ -112,3 +112,68 @@ pub(super) fn assert_capped_long_pre(input: &OutlineInput) {
     assert_eq!(lines[0], "101 matches for \"let\"");
     assert!(lines[4].starts_with("… 98 more;"), "{lines:?}");
 }
+
+fn assert_multiline_control_attribute_match(tag: &str, attribute: &str) {
+    let mut dom = TestDom::new();
+    let pre = if tag == "pre" {
+        dom.element(2, "pre", &[(attribute, "Copy snippet")], Some("block"))
+    } else {
+        dom.element(2, "pre", &[], Some("block"))
+    };
+    let control = if tag == "pre" {
+        pre
+    } else {
+        dom.element(pre, tag, &[(attribute, "Copy snippet")], Some("inline"))
+    };
+    dom.text(control, "alpha\nbeta", true);
+    let prose = dom.element(2, "p", &[], Some("block"));
+    dom.text(prose, "Copy snippet here", true);
+    let mut input = input(dom);
+    reference(&mut input, control, 1, "button", "Copy");
+
+    let lines = printed(&input, "Copy snippet", 20);
+    assert_eq!(lines[0], "2 matches for \"Copy snippet\"");
+    assert_eq!(lines.len(), 3);
+    assert!(lines[1].starts_with("- Copy snippet [e1 "), "{lines:?}");
+    assert_eq!(lines[2], "- Copy snippet here");
+}
+
+#[test]
+fn multiline_code_title_is_a_standalone_hit() {
+    assert_multiline_control_attribute_match("code", "title");
+}
+
+#[test]
+fn multiline_pre_aria_label_is_a_standalone_hit() {
+    assert_multiline_control_attribute_match("pre", "aria-label");
+}
+
+#[test]
+fn matching_inline_links_take_priority_over_a_multiline_span() {
+    let mut dom = TestDom::new();
+    let pre = dom.element(2, "pre", &[], Some("block"));
+    let span = dom.element(pre, "span", &[], Some("inline"));
+    let mut links = Vec::new();
+    for number in 1..=2 {
+        dom.text(span, &format!("{number}. See "), true);
+        let link = dom.element(span, "a", &[("href", "/open.2")], Some("inline"));
+        dom.text(link, "open(2)", true);
+        dom.text(span, " for details.\n", true);
+        links.push(link);
+    }
+    let mut input = input(dom);
+    reference(&mut input, span, 3, "button", "Copy");
+    for (number, link) in links.into_iter().enumerate() {
+        reference(&mut input, link, number + 1, "link", "open(2)");
+    }
+
+    let lines = printed(&input, "open(2)", 20);
+    assert_eq!(lines[0], "2 matches for \"open(2)\"");
+    assert_eq!(lines.len(), 3);
+    for (i, line) in lines[1..].iter().enumerate() {
+        let number = i + 1;
+        assert!(line.starts_with(&format!("- {number}. See open(2) for details.")));
+        assert!(line.contains(&format!("[e{number} ")), "{line}");
+        assert!(!line.contains("[e3 "), "{line}");
+    }
+}

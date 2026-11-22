@@ -209,12 +209,15 @@ fn search_tree<'a>(
         if find_folded(&fold(&text), needle).is_none() {
             continue;
         }
-        if represented.contains(&index) || control.as_ref().is_some_and(|control| control.multiline)
+        if represented.contains(&index)
+            || control
+                .as_ref()
+                .is_some_and(|control| control.multiline && control.text_matches)
         {
             observe(tree, index, &text, Source::Pointer);
             continue;
         }
-        let block = if svg_label || pre_control.is_some() {
+        let block = if svg_label || control.is_some() {
             index
         } else {
             block
