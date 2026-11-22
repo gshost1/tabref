@@ -10,9 +10,20 @@ const HEADING_LIMIT: usize = 60;
 /// The lines of a find result: a count line, then one line per match with
 /// the headings it sits under, its text, the control in or near it, and,
 /// when the page hides it, the control that shows it.
+#[cfg(test)]
 pub(crate) fn find_lines(
     needle: &str,
     matches: &[TextMatch],
+    total: usize,
+    options: &ViewOptions,
+) -> Vec<String> {
+    find_lines_with_ax(needle, matches, &[], total, options)
+}
+
+pub(crate) fn find_lines_with_ax(
+    needle: &str,
+    matches: &[TextMatch],
+    ax: &[String],
     total: usize,
     options: &ViewOptions,
 ) -> Vec<String> {
@@ -26,10 +37,12 @@ pub(crate) fn find_lines(
     for found in matches {
         lines.push(match_line(found, options));
     }
-    if total > matches.len() {
+    lines.extend(ax.iter().cloned());
+    let listed = matches.iter().map(|row| row.hits).sum::<usize>() + ax.len();
+    if total > listed {
         lines.push(format!(
             "… {} more; search a longer text, or read --section \"<heading>\"",
-            total - matches.len()
+            total - listed
         ));
     }
     lines

@@ -80,3 +80,28 @@ fn hidden_inputs_scripts_and_aria_hidden_are_skipped_and_dialogs_are_known() {
     assert!(is_skipped(&nodes[hidden]) && is_skipped(&nodes[script]) && is_skipped(&nodes[decor]));
     assert!(is_dialog_markup(&nodes[modal]));
 }
+
+#[test]
+fn an_svg_image_name_keeps_it_in_the_outline_walk() {
+    let mut dom = TestDom::new();
+    let decorative = dom.element(2, "svg", &[], Some("inline"));
+    let labelled = dom.element(
+        2,
+        "svg",
+        &[("role", "img"), ("aria-label", "Electricity usage")],
+        Some("inline"),
+    );
+    let hidden = dom.element(
+        2,
+        "svg",
+        &[
+            ("role", "img"),
+            ("title", "Hidden chart"),
+            ("aria-hidden", "true"),
+        ],
+        Some("inline"),
+    );
+    assert!(!is_skipped(&dom.tree.nodes[labelled]));
+    assert!(is_skipped(&dom.tree.nodes[decorative]));
+    assert!(is_skipped(&dom.tree.nodes[hidden]));
+}
