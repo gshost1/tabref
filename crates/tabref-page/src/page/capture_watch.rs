@@ -27,32 +27,47 @@
 //! without observable mutations, including scoped registries. Manual slots,
 //! until-found content and container queries are blind. Opaque stylesheet
 //! identity, href, disabled and media state are recorded, but unreadable
-//! rules may contain container queries, so these sheets are blind too,
+//! rules require fail-closed CDP text classification before approval,
 //! including imports inside readable sheets. Other stylesheet errors and oversized
 //! form or stylesheet state are blind rather than sampled.
 //! Supported state pseudo-classes are fingerprinted by matched node identity.
 
 use serde_json::{Value, json};
 use tabref_cdp::is_timeout;
-use tabref_core::{AppError, Deadline};
+use tabref_core::Deadline;
 
 use super::evaluate::evaluate_quietly;
 use crate::{CdpConnection, PageSession};
 
 const MAX_ELEMENTS: usize = 30_000;
 
-const SCAN: &str = r"const scan = () => {
+#[path = "capture_watch_arm.rs"]
+mod arm;
+pub use arm::arm_capture_watch;
+
+#[path = "capture_watch_css.rs"]
+mod css;
+#[path = "capture_watch_opaque.rs"]
+mod opaque;
+#[path = "capture_watch_trace.rs"]
+mod trace;
+
+const SCAN: &str = r"const scan = (approved = []) => {
+    const opaque = [];
     const roots = [];
     const sheetObjects = [];
     const animations = [];
     const states = [];
     let blind = false;
+    let why = '';
+    const fail = reason => { blind = true; why = reason; };
     let state = '';
     let total = 0;
     let visible = 0;
     let visibility = 0;
     let forms = 0;
     let styleSize = 0;
+    let ruleCount = 0;
     const visibilityOptions = { opacityProperty: true, visibilityProperty: true };
     const frames = 'iframe, frame, object, embed';
     const moving = root => {
@@ -60,14 +75,16 @@ const SCAN: &str = r"const scan = () => {
         const entries = root.getAnimations().map(animation => ({ animation,
           playState: animation.playState, currentTime: animation.currentTime }));
         animations.push(...entries);
-        return entries.some(entry => entry.animation.pending || entry.playState === 'running');
-      } catch (error) { return true; }
+        const active = entries.find(entry => entry.animation.pending || entry.playState === 'running');
+        if (active) fail('animation:' + (active.animation.animationName ?? active.animation.constructor.name));
+        return !!active;
+      } catch (error) { fail('animation:' + error.name); return true; }
     };
     const unreadable = root => {
       for (const el of root.querySelectorAll(frames)) {
         let inner = null;
         try { inner = el.contentDocument; } catch (error) { inner = null; }
-        if (!inner) return true;
+        if (!inner) { fail('frame:' + el.localName + ':' + (el.getAttribute('src') ?? el.getAttribute('data') ?? '')); return true; }
       }
       return false;
     };
@@ -78,10 +95,11 @@ const SCAN: &str = r"const scan = () => {
         if (sheet.media.mediaText) state += realm.matchMedia(sheet.media.mediaText).matches;
         const rules = list => {
           for (const rule of list) {
+            if (++ruleCount > 10000) { fail('rule-count'); return; }
             const text = rule.cssText;
-            if (text.startsWith('@container')) { blind = true; return; }
+            if (text.startsWith('@container')) { fail('container'); return; }
             styleSize += text.length;
-            if (styleSize > 100_000) { blind = true; return; }
+            if (styleSize > 100_000) { fail('style-size'); return; }
             state += '\u0009' + text;
             if (rule.media) state += realm.matchMedia(rule.media.mediaText).matches;
             if (rule.styleSheet) styles([rule.styleSheet], realm);
@@ -90,19 +108,22 @@ const SCAN: &str = r"const scan = () => {
           }
         };
         try { rules(sheet.cssRules); } catch (error) {
-          if (error.name === 'SecurityError') state += ':opaque';
-          blind = true;
+          if (error.name === 'SecurityError' && realm === window) {
+            state += ':opaque';
+            if (!approved.some(entry => entry.sheet === sheet && entry.href === sheet.href)) opaque.push({sheet, href: sheet.href});
+            if (opaque.length > 128) blind = true;
+          } else fail('stylesheet:' + error.name);
         }
         if (blind) return;
       }
     };
     const walk = root => {
       roots.push(root);
-      if (root.slotAssignment === 'manual') { blind = true; return; }
-      if (moving(root) || unreadable(root)) { blind = true; return; }
+      if (root.slotAssignment === 'manual') { fail('manual-slot'); return; }
+      if (moving(root) || unreadable(root)) return;
       const elements = root.querySelectorAll('*');
       total += elements.length;
-      if (total > MAX_ELEMENTS) { blind = true; return; }
+      if (total > MAX_ELEMENTS) { fail('element-count'); return; }
       state += '\u0006' + (root.styleSheets?.length ?? 0) + ':' + (root.adoptedStyleSheets?.length ?? 0);
       const doc = root.nodeType === 9 ? root : root.ownerDocument;
       const realm = doc.defaultView;
@@ -123,8 +144,10 @@ const SCAN: &str = r"const scan = () => {
         '(prefers-contrast: more)', '(prefers-contrast: less)', '(prefers-contrast: custom)',
         '(prefers-contrast: no-preference)', '(forced-colors: active)', '(forced-colors: none)',
         '(orientation: portrait)', '(orientation: landscape)']) state += ':' + realm.matchMedia(query).matches;
+      if (approved.length) for (const query of ['screen', 'print', 'all']) state += ':' + realm.matchMedia(query).matches;
       styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
       if (blind) return;
+      if (opaque.length) { for (const el of elements) if (el.shadowRoot) walk(el.shadowRoot); return; }
       state += ':' + doc.defaultView.scrollX + ':' + doc.defaultView.scrollY
         + ':' + doc.defaultView.innerWidth + ':' + doc.defaultView.innerHeight;
       for (let index = 0; index < elements.length; index++) {
@@ -136,7 +159,7 @@ const SCAN: &str = r"const scan = () => {
         }
         if (el.shadowRoot) walk(el.shadowRoot);
         const tag = el.localName;
-        if ((tag.includes('-') && el.matches(':defined')) || el.getAttribute('hidden') === 'until-found') { blind = true; return; }
+        if ((tag.includes('-') && el.matches(':defined')) || el.getAttribute('hidden') === 'until-found') { fail('custom-or-until-found'); return; }
         if (tag === 'iframe' || tag === 'frame' || tag === 'object' || tag === 'embed') {
           let inner = null;
           try { inner = el.contentDocument; } catch (error) { inner = null; }
@@ -157,7 +180,7 @@ const SCAN: &str = r"const scan = () => {
       }
     };
     walk(document);
-    if (blind) return { roots, blind, active: null, print: '' };
+    if (blind) return { roots, blind, why, active: null, print: '' };
     let active = document.activeElement;
     for (;;) {
       if (active && active.shadowRoot && active.shadowRoot.activeElement) { active = active.shadowRoot.activeElement; continue; }
@@ -169,7 +192,7 @@ const SCAN: &str = r"const scan = () => {
     const box = document.documentElement;
     const place = [location.href, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio,
       box ? box.scrollWidth : 0, box ? box.scrollHeight : 0].join('\u0004');
-    return { roots, sheets: sheetObjects, animations, states, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
+    return { roots, sheets: sheetObjects, animations, states, opaque, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
   };";
 
 /// How long the arm script waits for an idle main thread before it arms
@@ -181,10 +204,34 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   KEY_AND_SCAN
   const old = window[key];
   if (old) old.stop();
-  const now = scan();
-  if (now.blind) { delete window[key]; return { blind: true }; }
+  const pending = window[Symbol.for('tabref.capture-opaque')];
+  const opaque = pending?.token === TOKEN ? pending.approved ?? [] : [];
+  delete window[Symbol.for('tabref.capture-opaque')];
+  const now = scan(opaque);
+  if (now.blind) { delete window[key]; return { blind: true, why: now.why }; }
+  if (now.opaque.length) {
+    const opaqueBytes = (() => {
+      try {
+        const timings = performance.getEntriesByType('resource');
+        let total = 0;
+        for (const sheet of now.opaque) {
+          let largest = 0;
+          for (const entry of timings) if (entry.name === sheet.href) {
+            const size = entry.decodedBodySize;
+            if (!Number.isSafeInteger(size) || size <= 0) return null;
+            largest = Math.max(largest, size);
+          }
+          if (largest === 0 || !Number.isSafeInteger(total += largest)) return null;
+        }
+        return total;
+      } catch { return null; }
+    })();
+    window[Symbol.for('tabref.capture-opaque')] = {token: TOKEN, entries: now.opaque};
+    delete window[key];
+    return {blind: true, opaque: now.opaque.map(entry => entry.href), opaqueBytes};
+  }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
-    sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind };
+    scan, sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind, opaque };
   const restore = [];
   watch.stop = () => {
     if (watch.dirty) return;
@@ -246,8 +293,8 @@ const CHECK: &str = r"(() => {
   if (watch.observers.some(observer => observer.takeRecords().length > 0)) watch.stop();
   if (watch.dirty) return 'mutated';
   if (watch.blind) return 'blind';
-  const now = scan();
-  if (now.blind) return 'blind';
+  const now = watch.scan(watch.opaque);
+  if (now.blind || now.opaque.length) return 'blind';
   if (now.roots.length !== watch.roots.length || now.roots.some((root, i) => root !== watch.roots[i])) return 'roots';
   if (now.sheets.length !== watch.sheets.length || now.sheets.some((sheet, i) => sheet !== watch.sheets[i])) return 'state';
   if (now.states.length !== watch.states.length || now.states.some((node, i) => node !== watch.states[i])) return 'state';
@@ -268,20 +315,6 @@ pub struct CaptureWatch {
     pub blind: bool,
 }
 
-/// Arms a watch named `token` in the page, replacing any earlier one.
-pub fn arm_capture_watch(
-    connection: &mut CdpConnection,
-    session: &PageSession,
-    token: &str,
-    deadline: Deadline,
-) -> Result<CaptureWatch, AppError> {
-    let reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
-    Ok(CaptureWatch {
-        token: token.to_owned(),
-        blind: reply.get("blind").and_then(Value::as_bool).unwrap_or(true),
-    })
-}
-
 /// What the page says about `watch` now: `same` when nothing it watches
 /// changed, else why not (`gone`, `mutated`, `blind`, `roots`, `focus`,
 /// `state`), `timed_out` when the check exceeded its deadline, or
@@ -292,11 +325,14 @@ pub fn check_capture_watch(
     watch: &CaptureWatch,
     deadline: Deadline,
 ) -> String {
-    match evaluate_quietly(connection, session, &script(CHECK, &watch.token), deadline) {
-        Ok(Value::String(verdict)) => verdict,
-        Err(error) if is_timeout(&error) => "timed_out".to_owned(),
-        Ok(_) | Err(_) => "failed".to_owned(),
-    }
+    let verdict =
+        match evaluate_quietly(connection, session, &script(CHECK, &watch.token), deadline) {
+            Ok(Value::String(verdict)) => verdict,
+            Err(error) if is_timeout(&error) => "timed_out".to_owned(),
+            Ok(_) | Err(_) => "failed".to_owned(),
+        };
+    trace::record("check", || json!({"token":watch.token,"verdict":verdict}));
+    verdict
 }
 
 /// Whether a `DOMSnapshot.captureSnapshot` reply holds a node of a closed
@@ -324,7 +360,11 @@ pub fn has_closed_shadow_root(capture: &Value) -> bool {
 }
 
 fn script(template: &str, token: &str) -> String {
-    let head = format!("const key = Symbol.for('tabref.capture-watch');\n  {SCAN}");
+    let head = if template == CHECK {
+        "const key = Symbol.for('tabref.capture-watch');".to_owned()
+    } else {
+        format!("const key = Symbol.for('tabref.capture-watch');\n  {SCAN}")
+    };
     template
         .replace("KEY_AND_SCAN", &head)
         .replace("MAX_ELEMENTS", &MAX_ELEMENTS.to_string())

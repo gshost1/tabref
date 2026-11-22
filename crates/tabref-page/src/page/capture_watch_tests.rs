@@ -2,6 +2,25 @@ use serde_json::json;
 
 use super::{ARM, CHECK, has_closed_shadow_root, script};
 
+#[path = "capture_watch_protocol_tests.rs"]
+mod protocol;
+
+#[test]
+fn checks_use_the_scan_installed_by_arm() {
+    let check = script(CHECK, "test");
+    assert!(!check.contains("const scan ="));
+    assert!(check.contains("watch.scan(watch.opaque)"));
+    assert!(ARM.contains("scan, sheets:"));
+}
+
+#[test]
+fn opaque_media_types_are_only_sampled_for_approved_sheets() {
+    assert!(
+        script(ARM, "media")
+            .contains("if (approved.length) for (const query of ['screen', 'print', 'all'])")
+    );
+}
+
 #[test]
 fn a_closed_shadow_root_in_any_document_is_found() {
     let capture = json!({
@@ -53,8 +72,8 @@ fn the_watch_is_armed_once_the_page_is_idle_or_the_wait_ran_out() {
 
 #[test]
 fn every_kept_page_scans_visibility_and_bounds_unobserved_state() {
-    let filled = script(CHECK, "s1");
-    assert!(filled.contains("if (total > 30000) { blind = true; return; }"));
+    let filled = script(ARM, "s1");
+    assert!(filled.contains("if (total > 30000) { fail('element-count'); return; }"));
     assert!(filled.contains("if (el.checkVisibility(visibilityOptions))"));
     assert!(filled.contains("styles([...(root.styleSheets"));
     assert!(filled.contains("forms > 1_000"));
@@ -66,13 +85,13 @@ fn every_kept_page_scans_visibility_and_bounds_unobserved_state() {
 #[test]
 fn unobserved_form_animation_and_internals_changes_are_guarded() {
     let check = script(CHECK, "s1");
-    assert!(check.contains("el.validity.valid, el.validationMessage"));
+    let arm = script(ARM, "s1");
+    assert!(arm.contains("el.validity.valid, el.validationMessage"));
     assert!(check.contains("entry.animation !== old.animation"));
     assert!(check.contains("entry.playState !== old.playState"));
     assert!(check.contains("entry.currentTime !== old.currentTime"));
     assert!(check.contains("now.animations.length !== watch.animations.length"));
-    assert!(check.contains("tag.includes('-') && el.matches(':defined')"));
-    let arm = script(ARM, "s1");
+    assert!(arm.contains("tag.includes('-') && el.matches(':defined')"));
     for method in ["'attachInternals'", "'define'", "'upgrade'"] {
         assert!(arm.contains(method));
     }
@@ -80,7 +99,7 @@ fn unobserved_form_animation_and_internals_changes_are_guarded() {
 
 #[test]
 fn read_holes_are_guarded_by_fingerprints_hooks_or_blindness() {
-    let check = script(CHECK, "s1");
+    let arm = script(ARM, "s1");
     for condition in [
         "text.startsWith('@container')",
         "root.slotAssignment === 'manual'",
@@ -93,9 +112,8 @@ fn read_holes_are_guarded_by_fingerprints_hooks_or_blindness() {
         "orientation: portrait",
         "doc.defaultView.innerWidth + ':' + doc.defaultView.innerHeight",
     ] {
-        assert!(check.contains(condition), "{condition}");
+        assert!(arm.contains(condition), "{condition}");
     }
-    let arm = script(ARM, "s1");
     for hook in [
         "'registerProperty'",
         "'assign'",
@@ -109,6 +127,7 @@ fn read_holes_are_guarded_by_fingerprints_hooks_or_blindness() {
 #[test]
 fn supported_pseudo_states_are_matched_by_node_and_selector() {
     let check = script(CHECK, "s1");
+    let arm = script(ARM, "s1");
     for selector in [
         ":focus-visible",
         ":focus-within",
@@ -133,9 +152,9 @@ fn supported_pseudo_states_are_matched_by_node_and_selector() {
         ":volume-locked",
         ":picture-in-picture",
     ] {
-        assert!(check.contains(selector), "{selector}");
+        assert!(arm.contains(selector), "{selector}");
     }
-    assert!(check.contains("realm.CSS.supports('selector(' + selector + ')')"));
-    assert!(check.contains("states.push(el)"));
+    assert!(arm.contains("realm.CSS.supports('selector(' + selector + ')')"));
+    assert!(arm.contains("states.push(el)"));
     assert!(check.contains("node !== watch.states[i]"));
 }

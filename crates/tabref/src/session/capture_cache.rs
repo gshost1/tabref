@@ -22,9 +22,7 @@ use std::time::{Duration, Instant};
 
 use tabref_cdp::PageSession;
 use tabref_core::{RefStore, new_snapshot_id};
-use tabref_page::{
-    CaptureWatch, IDLE_WAIT_MS, arm_capture_watch, check_capture_watch, has_closed_shadow_root,
-};
+use tabref_page::{CaptureWatch, IDLE_WAIT_MS, check_capture_watch, has_closed_shadow_root};
 
 use super::Session;
 use super::captured_snapshot::CapturedSnapshot;
@@ -142,9 +140,11 @@ impl Session {
     /// captures.
     pub(super) fn arm_watch(&mut self, page: &PageSession) -> Option<CaptureWatch> {
         self.captures.as_ref()?;
-        let deadline = self.deadline().capped(ARM_WAIT);
+        let deadline = self
+            .deadline()
+            .capped(ARM_WAIT + Duration::from_millis(500));
         let token = new_snapshot_id();
-        arm_capture_watch(self.connection(), page, &token, deadline)
+        CaptureWatch::arm_with_budget(self.connection(), page, &token, deadline, ARM_WAIT)
             .ok()
             .filter(|watch| !watch.blind)
     }
