@@ -31,6 +31,15 @@ fn a_click_without_a_pick_fails_and_closes_the_popup() {
     assert!(message.contains("did not keep it"), "{reply}");
     assert_eq!(error["disposition"]["delivery"], "delivered_unverified");
     assert_eq!(tabref.ok(&["js", "deadlist.hidden"]).stdout.trim(), "true");
+    tabref.ok(&["js", "dead.dataset.stuck = 'true'"]);
+    let result = tabref.run(&["--json", "select", "Dead", "South"]);
+    assert!(!result.ok);
+    let error = &result.json()["error"];
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.contains("did not keep it") && message.contains("Escape"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -42,7 +51,7 @@ fn a_pick_reports_dependent_controls_and_suppresses_only_its_popup() {
     let result = tabref.ok(&["select", "Country", "Canada"]);
     let lines = &result.stdout;
     assert!(lines.contains("Confirm province"), "{lines}");
-    assert!(lines.contains("Province"), "{lines}");
+    assert!(lines.contains(r#"textfield "Province""#), "{lines}");
 }
 
 #[test]
@@ -58,8 +67,19 @@ fn a_pick_only_hides_its_own_popup_from_the_changes() {
     assert!(!lines.contains("listbox \"Countries\" closed"), "{lines}");
     assert!(!lines.contains("- Spain"), "{lines}");
     assert!(lines.contains("+ Spain"), "{lines}");
-    let confirm = result.ref_for("button Confirm province");
+    let confirm = result.ref_for(r#"button "Confirm province""#);
     assert!(lines.contains("Province"), "{lines}");
+    tabref.ok(&["click", &confirm]);
+}
+
+#[test]
+fn a_do_step_reports_controls_revealed_by_the_pick() {
+    if !live() {
+        return;
+    }
+    let tabref = open("combo-do-dependent");
+    let result = tabref.ok(&["do", "select Country Canada"]);
+    let confirm = result.ref_for(r#"button "Confirm province""#);
     tabref.ok(&["click", &confirm]);
 }
 
@@ -120,6 +140,15 @@ fn only_a_confirmed_closed_popup_with_the_original_value_is_retry_safe() {
     let disposition = &stuck["error"]["disposition"];
     assert_eq!(disposition["delivery"], "delivery_uncertain", "{stuck}");
     assert_eq!(disposition["retry"], "unsafe", "{stuck}");
+    tabref.ok(&[
+        "js",
+        "dead.onkeydown = () => { dead.textContent = 'Changed'; deadlist.hidden = true; dead.setAttribute('aria-expanded', 'false'); }; 1",
+    ]);
+    let changed = missing();
+    let disposition = &changed["error"]["disposition"];
+    assert_eq!(disposition["delivery"], "delivery_uncertain", "{changed}");
+    assert_eq!(disposition["retry"], "unsafe", "{changed}");
+    assert_eq!(tabref.ok(&["js", "deadlist.hidden"]).stdout.trim(), "true");
 }
 
 #[test]
@@ -142,6 +171,8 @@ fn ambiguous_options_offer_a_name_the_select_command_can_use() {
     );
     assert!(message.contains("full option name"), "{message}");
     assert!(!message.contains("add nth"), "{message}");
+    let picked = tabref.ok(&["select", "Category", "Product Ideas"]);
+    assert!(picked.stdout.contains(r#"-> "Product Ideas""#));
 }
 
 #[test]

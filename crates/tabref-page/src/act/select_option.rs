@@ -11,6 +11,10 @@ use crate::{CdpConnection, ElementToken, PageSession, cut_chars};
 
 #[path = "combobox.rs"]
 pub(super) mod combobox;
+#[path = "combobox_popup_report.rs"]
+pub(super) mod combobox_popup_report;
+#[path = "combobox_search.rs"]
+mod combobox_search;
 
 const DETAILED: usize = 30;
 
@@ -95,7 +99,7 @@ pub fn select_option(
         value: text("value").unwrap_or_default(),
         label: text("label").unwrap_or_default(),
         previous: text("previous"),
-        combobox: false,
+        ..SelectOutcome::default()
     })
 }
 

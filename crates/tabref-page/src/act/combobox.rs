@@ -1,35 +1,61 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use serde_json::json;
-use tabref_cdp::{is_timeout, transport_failed};
-use tabref_core::{AccessibilityNode, AppError, Deadline, ErrorCode, NodeIdentity};
+use serde_json::{Value, json};
+use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
+use super::combobox_popup_report::{PopupText, WATCHED_TEXT};
+use super::combobox_search::{PopupSearch, initially_open, is_popup};
 use crate::act::element_call::ElementCall;
 use crate::act::element_errors::stale;
 use crate::act::remote_element::{call_on_element, prove_document};
-use crate::tree::ax_nodes::AxNodes;
-use crate::tree::web_roles::map_cdp_role;
+use crate::locate::name_match::normalize;
 use crate::{
-    ActionNeed, CdpConnection, DomNode, DomTree, ElementToken, LocateIntent, Located, Locator,
-    PageSession, SelectOutcome, capture_dom, click, cut_chars, fill, locate, press_key,
-    wait_actionable,
+    ActionNeed, CdpConnection, DomTree, ElementToken, Locator, PageSession, SelectOutcome,
+    capture_dom, click, fill, press_key, wait_actionable,
 };
 
-const POPUP_WAIT: Duration = Duration::from_millis(900);
+const CLOSE_WAIT: Duration = Duration::from_millis(250);
 const POLL: Duration = Duration::from_millis(50);
-const POPUP_ROLES: &[&str] = &["listbox", "menu", "grid", "tree"];
 
 const READ_COMBOBOX: &str = r"function() {
   if (!this.isConnected) return null;
   const field = this.matches('input,textarea') ? this :
     this.querySelector('input:not([type=hidden]),textarea');
-  const text = this.innerText ?? this.textContent ?? '';
+  const text = (this.innerText ?? this.textContent ?? '').trim();
   const autocomplete = this.getAttribute('aria-autocomplete');
   const editable = (field === this && !field.readOnly) || this.isContentEditable;
-  return { value: field ? field.value : text.trim(),
+  return { value: field ? field.value : text, text, valueText: this.getAttribute('aria-valuetext'),
     autocomplete: editable && (autocomplete === 'list' || autocomplete === 'both') };
 }";
+
+const READ_OPTION: &str = r"function() {
+  return [this.innerText ?? this.textContent, this.getAttribute('value')];
+}";
+
+const FOCUS_FOR_ESCAPE: &str = r"function() {
+  const active = this.getRootNode().activeElement;
+  if (!active || active === this.ownerDocument.body) this.focus({preventScroll: true});
+}";
+
+#[derive(PartialEq, Eq)]
+pub(in crate::act) struct ComboboxState {
+    pub value: String,
+    pub text: String,
+    pub value_text: String,
+    autocomplete: bool,
+}
+
+impl ComboboxState {
+    pub(in crate::act) fn matches(&self, option_texts: &[String]) -> bool {
+        [&self.value, &self.text, &self.value_text]
+            .into_iter()
+            .any(|text| {
+                let actual = normalize(text);
+                !actual.is_empty() && option_texts.contains(&actual)
+            })
+    }
+}
 
 pub(super) fn choose(
     connection: &mut CdpConnection,
@@ -38,58 +64,135 @@ pub(super) fn choose(
     choice: &str,
     deadline: Deadline,
 ) -> Result<SelectOutcome, AppError> {
-    let (previous, autocomplete) = read(connection, session, combo, deadline)?;
+    let previous = read(connection, session, combo, deadline)?;
     let before = frame_dom(connection, session, combo, deadline)?;
-    let baseline = before
-        .nodes
-        .iter()
-        .filter(|node| is_popup(node))
-        .map(|node| node.backend_id)
-        .collect();
-    let locator = Locator {
-        role: Some("option".to_owned()),
-        name: Some(choice.to_owned()),
-        ..Locator::default()
-    };
-    checked_click(connection, session, combo, "the combobox", deadline)?;
+    let already_open = initially_open(&before, combo).map(|node| node.backend_id);
     let search = PopupSearch {
         session,
         combo,
-        baseline,
-        locator,
+        baseline: before
+            .nodes
+            .iter()
+            .filter(|node| is_popup(node) && Some(node.backend_id) != already_open)
+            .map(|node| node.backend_id)
+            .collect(),
+        locator: Locator {
+            role: Some("option".to_owned()),
+            name: Some(choice.to_owned()),
+            ..Locator::default()
+        },
     };
+    let popup_text = if let Some(backend) = already_open
+        && !search
+            .options(connection, backend, deadline)?
+            .children
+            .is_empty()
+    {
+        call(
+            connection,
+            session,
+            &search.token(backend),
+            WATCHED_TEXT,
+            deadline,
+        )
+        .ok()
+        .as_ref()
+        .and_then(PopupText::from_reply)
+    } else {
+        ensure_clickable(connection, session, combo, "the combobox", deadline)?;
+        if let Err(error) = click(connection, session, combo, deadline) {
+            return Err(failed(connection, &search, &previous, error, deadline));
+        }
+        None
+    };
+
     let mut seen = BTreeSet::new();
-    let mut tried_query = false;
+    let mut queried = false;
     let picked = (|| {
-        let found = match search.find(connection, &mut seen, deadline) {
-            Err(error) if autocomplete && error.code == ErrorCode::ElementNotFound => {
-                tried_query = true;
+        let (found, backend) = match search.find(connection, &mut seen, deadline) {
+            Err(error) if previous.autocomplete && error.code == ErrorCode::ElementNotFound => {
+                queried = true;
                 fill(connection, session, combo, choice, deadline)?;
                 search.find(connection, &mut seen, deadline)?
             }
             other => other?,
         };
-        let subject = format!("option {:?}", found.name.as_deref().unwrap_or(choice));
-        checked_click(connection, session, &found.token, &subject, deadline)?;
-        Ok(SelectOutcome {
-            label: found.name.unwrap_or_else(|| choice.to_owned()),
-            previous: Some(previous.clone()),
-            combobox: true,
-            ..SelectOutcome::default()
-        })
+        let label = found.name.unwrap_or_else(|| choice.to_owned());
+        ensure_clickable(
+            connection,
+            session,
+            &found.token,
+            &format!("option {label:?}"),
+            deadline,
+        )?;
+        let text = call(connection, session, &found.token, READ_OPTION, deadline)?;
+        let option_texts = std::iter::once(label.as_str())
+            .chain(
+                text.as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str),
+            )
+            .map(normalize)
+            .collect::<Vec<_>>();
+        let before_pick = read(connection, session, combo, deadline)?;
+        click(connection, session, &found.token, deadline)
+            .map_err(|error| error.with_disposition(DeliverySemantics::uncertain()))?;
+        Ok((backend, label, option_texts, before_pick))
     })();
-    if let Err(error) = picked {
-        if tried_query
-            && read(connection, session, combo, deadline).is_ok_and(|(value, _)| value != previous)
-        {
-            let _ = fill(connection, session, combo, &previous, deadline);
+    let (backend, label, option_texts, before_pick) = match picked {
+        Ok(picked) => picked,
+        Err(error) => {
+            if queried
+                && read(connection, session, combo, deadline)
+                    .is_ok_and(|state| state.value != previous.value)
+            {
+                let _ = fill(connection, session, combo, &previous.value, deadline);
+            }
+            return Err(failed(
+                connection,
+                &search,
+                &previous,
+                with_seen_options(error, seen),
+                deadline,
+            ));
         }
-        if prove_document(connection, session, combo, deadline).is_ok() {
-            let _ = press_key(connection, session, "Escape", deadline);
+    };
+    let popup = Some(backend);
+    let mut uncommitted = false;
+    let popup_error = match popup_open(connection, &search, popup, deadline) {
+        Ok(true) => {
+            let after_pick = read(connection, session, combo, deadline);
+            uncommitted = after_pick.as_ref().is_ok_and(|after| after == &before_pick);
+            match close(connection, &search, popup, deadline) {
+                Ok(true) => None,
+                Ok(false) => {
+                    let kept =
+                        !uncommitted && after_pick.is_ok_and(|after| after.matches(&option_texts));
+                    let mut message = "the combobox popup stayed open after Escape".to_owned();
+                    if !kept {
+                        message.push_str(" (the select did not keep it)");
+                    }
+                    return Err(AppError::new(ErrorCode::ActionFailed, message)
+                        .with_disposition(DeliverySemantics::delivered_unverified()));
+                }
+                Err(error) => Some(error.message),
+            }
         }
-        return Err(with_seen_options(error, seen));
-    }
-    picked
+        Ok(false) => None,
+        Err(error) => Some(error.message),
+    };
+    Ok(SelectOutcome {
+        label,
+        previous: Some(previous.value),
+        combobox: true,
+        option_texts,
+        uncommitted,
+        popup_text,
+        popup_error,
+        previous_text: previous.text,
+        ..SelectOutcome::default()
+    })
 }
 
 pub(in crate::act) fn read(
@@ -97,24 +200,39 @@ pub(in crate::act) fn read(
     session: &PageSession,
     combo: &ElementToken,
     deadline: Deadline,
-) -> Result<(String, bool), AppError> {
-    let result = call_on_element(
-        connection,
-        session,
-        combo,
-        ElementCall {
-            function: READ_COMBOBOX,
-            arguments: Vec::new(),
-        },
-        deadline,
-    )?;
+) -> Result<ComboboxState, AppError> {
+    let result = call(connection, session, combo, READ_COMBOBOX, deadline)?;
     let value = result["value"]
         .as_str()
         .ok_or_else(|| stale(combo, "the combobox is no longer in its document"))?;
-    Ok((value.to_owned(), result["autocomplete"] == true))
+    Ok(ComboboxState {
+        value: value.to_owned(),
+        text: result["text"].as_str().unwrap_or_default().to_owned(),
+        value_text: result["valueText"].as_str().unwrap_or_default().to_owned(),
+        autocomplete: result["autocomplete"] == true,
+    })
 }
 
-fn checked_click(
+fn call(
+    connection: &mut CdpConnection,
+    session: &PageSession,
+    token: &ElementToken,
+    function: &'static str,
+    deadline: Deadline,
+) -> Result<Value, AppError> {
+    call_on_element(
+        connection,
+        session,
+        token,
+        ElementCall {
+            function,
+            arguments: Vec::new(),
+        },
+        deadline,
+    )
+}
+
+fn ensure_clickable(
     connection: &mut CdpConnection,
     session: &PageSession,
     token: &ElementToken,
@@ -125,104 +243,16 @@ fn checked_click(
     {
         return Err(blocked.error(subject));
     }
-    click(connection, session, token, deadline)?;
     Ok(())
 }
 
-struct PopupSearch<'a> {
-    session: &'a PageSession,
-    combo: &'a ElementToken,
-    baseline: BTreeSet<i64>,
-    locator: Locator,
-}
-
-impl PopupSearch<'_> {
-    fn find(
-        &self,
-        connection: &mut CdpConnection,
-        seen: &mut BTreeSet<String>,
-        deadline: Deadline,
-    ) -> Result<Located, AppError> {
-        let wait = deadline.capped(POPUP_WAIT.min(deadline.remaining() / 2));
-        let mut missing = locate(
-            &AccessibilityNode::default(),
-            &self.locator,
-            LocateIntent::Click,
-        );
-        loop {
-            match self.options(connection, wait) {
-                Ok(options) => {
-                    seen.extend(options.children.iter().filter_map(|option| {
-                        option.display_name().map(|name| cut_chars(name, 60))
-                    }));
-                    if !options.children.is_empty() {
-                        missing = locate(&options, &self.locator, LocateIntent::Click);
-                    }
-                    if !matches!(&missing, Err(error) if error.code == ErrorCode::ElementNotFound) {
-                        return missing;
-                    }
-                }
-                Err(error) if is_timeout(&error) && wait.is_expired() => return missing,
-                Err(error) => return Err(error),
-            }
-            if wait.remaining() <= POLL {
-                return missing;
-            }
-            std::thread::sleep(POLL);
-        }
-    }
-
-    fn options(
-        &self,
-        connection: &mut CdpConnection,
-        deadline: Deadline,
-    ) -> Result<AccessibilityNode, AppError> {
-        let dom = frame_dom(connection, self.session, self.combo, deadline)?;
-        let Some(popup) = popup(&dom, self.combo, &self.baseline) else {
-            return Ok(AccessibilityNode::default());
-        };
-        let reply = connection.call(
-            "Accessibility.queryAXTree",
-            json!({ "backendNodeId": popup.backend_id }),
-            Some(&self.session.session_id),
-            deadline,
-        )?;
-        let nodes: AxNodes = serde_json::from_value(reply)
-            .map_err(|error| transport_failed("Accessibility.queryAXTree", error.to_string()))?;
-        let children = nodes
-            .nodes
-            .into_iter()
-            .filter(|node| !node.ignored && map_cdp_role(&node.raw_role()) == "option")
-            .filter_map(|node| {
-                let token = ElementToken {
-                    backend_node_id: node.backend_dom_node_id?,
-                    ..self.combo.clone()
-                };
-                Some(AccessibilityNode {
-                    role: "option".to_owned(),
-                    identity: NodeIdentity {
-                        retained_object: Some(token.to_string()),
-                        name: node.text.name.and_then(|value| value.as_text()),
-                        description: node.text.description.and_then(|value| value.as_text()),
-                        ..NodeIdentity::default()
-                    },
-                    ..AccessibilityNode::default()
-                })
-            })
-            .collect();
-        Ok(AccessibilityNode {
-            children,
-            ..AccessibilityNode::default()
-        })
-    }
-}
-
-fn frame_dom(
+pub(super) fn frame_dom(
     connection: &mut CdpConnection,
     session: &PageSession,
     combo: &ElementToken,
     deadline: Deadline,
 ) -> Result<DomTree, AppError> {
+    prove_document(connection, session, combo, deadline)?;
     capture_dom(connection, session, deadline)?
         .into_iter()
         .find(|tree| {
@@ -231,42 +261,59 @@ fn frame_dom(
         .ok_or_else(|| stale(combo, "the combobox is no longer in its document"))
 }
 
-fn popup<'a>(
-    dom: &'a DomTree,
-    combo: &ElementToken,
-    before: &BTreeSet<i64>,
-) -> Option<&'a DomNode> {
-    let node = dom.node(dom.find_backend(combo.backend_node_id)?)?;
-    let mut declared = false;
-    for id in ["aria-controls", "aria-owns"]
-        .into_iter()
-        .filter_map(|attr| node.attr(attr))
-        .flat_map(str::split_whitespace)
-    {
-        if let Some(target) = dom.nodes.iter().find(|node| node.attr("id") == Some(id)) {
-            declared = true;
-            if target.is_shown() {
-                return Some(target);
-            }
-        }
-    }
-    if declared {
-        return None;
-    }
-    let mut appeared = dom
-        .nodes
-        .iter()
-        .filter(|node| is_popup(node) && !before.contains(&node.backend_id));
-    let first = appeared.next()?;
-    appeared.next().is_none().then_some(first)
+fn popup_open(
+    connection: &mut CdpConnection,
+    search: &PopupSearch<'_>,
+    popup: Option<i64>,
+    deadline: Deadline,
+) -> Result<bool, AppError> {
+    let dom = frame_dom(connection, search.session, search.combo, deadline)?;
+    Ok(search.open(&dom, popup))
 }
 
-fn is_popup(node: &DomNode) -> bool {
-    node.is_shown()
-        && node
-            .attr("role")
-            .and_then(|roles| roles.split_whitespace().next())
-            .is_some_and(|role| POPUP_ROLES.contains(&role))
+fn close(
+    connection: &mut CdpConnection,
+    search: &PopupSearch<'_>,
+    popup: Option<i64>,
+    deadline: Deadline,
+) -> Result<bool, AppError> {
+    prove_document(connection, search.session, search.combo, deadline)?;
+    let _ = call(
+        connection,
+        search.session,
+        search.combo,
+        FOCUS_FOR_ESCAPE,
+        deadline,
+    );
+    press_key(connection, search.session, "Escape", deadline)?;
+    let wait = deadline.capped(CLOSE_WAIT);
+    loop {
+        if !popup_open(connection, search, popup, wait)? {
+            return Ok(true);
+        }
+        if wait.remaining() <= POLL {
+            return Ok(false);
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+fn failed(
+    connection: &mut CdpConnection,
+    search: &PopupSearch<'_>,
+    previous: &ComboboxState,
+    error: AppError,
+    deadline: Deadline,
+) -> AppError {
+    let restored = close(connection, search, None, deadline) == Ok(true)
+        && read(connection, search.session, search.combo, deadline)
+            .is_ok_and(|state| &state == previous);
+    let disposition = if restored && error.disposition != DeliverySemantics::uncertain() {
+        DeliverySemantics::not_delivered()
+    } else {
+        DeliverySemantics::uncertain()
+    };
+    error.with_disposition(disposition)
 }
 
 fn with_seen_options(mut error: AppError, seen: BTreeSet<String>) -> AppError {

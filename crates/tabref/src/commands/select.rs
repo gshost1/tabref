@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
-use tabref_core::{AppError, Deadline};
-use tabref_page::{ActionNeed, LocateIntent, SelectOutcome, read_element, select_option};
+use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
+use tabref_page::{
+    ActionNeed, LocateIntent, PageChanges, SelectOutcome, read_element, select_option,
+};
 
 use super::act_target::{ActTarget, resolve_target};
 use super::acted::Acted;
@@ -51,7 +53,7 @@ pub(crate) fn act(
     deadline: Deadline,
 ) -> Result<Acted, AppError> {
     target.ensure_ready(session, ActionNeed::Select, deadline)?;
-    let watched = session.watch_action(&target.tab_id, deadline)?;
+    let mut watched = session.watch_action(&target.tab_id, deadline)?;
     let chosen = select_option(
         session.connection(),
         &target.session,
@@ -59,22 +61,20 @@ pub(crate) fn act(
         option,
         deadline,
     )?;
-    let effects = session.finish_action(&watched, deadline);
+    chosen.omit_popup_from(&mut watched.mark);
+    let mut effects = session.finish_action(&watched, deadline);
     let mut acted = if chosen.combobox {
-        combobox_report(session, target, chosen, deadline)
+        let page = effects
+            .as_mut()
+            .ok()
+            .filter(|effect| !effect.settled.navigated && effect.new_tab.is_none())
+            .and_then(|effect| effect.page.as_mut());
+        combobox_report(session, target, chosen, page, deadline)?
     } else {
         native_report(session, target, chosen, deadline)
     };
     match effects {
-        Ok(mut effects) => {
-            if acted.data["combobox"] == true
-                && !effects.settled.navigated
-                && !effects.settled.same_document
-            {
-                effects.page = None;
-            }
-            acted.effects = Some(effects);
-        }
+        Ok(effects) => acted.effects = Some(effects),
         Err(error) => add_unread(&mut acted, "the page after selection", &error),
     }
     Ok(acted)
@@ -132,11 +132,12 @@ fn native_report(
 
 fn combobox_report(
     session: &mut Session,
-    target: ActTarget,
+    mut target: ActTarget,
     chosen: SelectOutcome,
+    page: Option<&mut PageChanges>,
     deadline: Deadline,
-) -> Acted {
-    let reading = SelectOutcome::read_combobox_value(
+) -> Result<Acted, AppError> {
+    let reading = chosen.read_combobox_value(
         session.connection(),
         &target.session,
         &target.token,
@@ -153,29 +154,64 @@ fn combobox_report(
     } else {
         format!("{label} combobox")
     };
+    if let Ok((value, _, false)) = &reading {
+        return Err(AppError::new(
+            ErrorCode::ActionFailed,
+            format!(
+                "{subject} still reads {} after picking {} (the select did not keep it)",
+                quote_text(value),
+                quote_text(&chosen.label),
+            ),
+        )
+        .with_details(
+            json!({ "kind": "combobox_option_not_kept", "value": value, "label": chosen.label }),
+        )
+        .with_disposition(DeliverySemantics::delivered_unverified()));
+    }
+    if let Some(page) = page
+        && let Ok((value, text, true)) = &reading
+    {
+        chosen.omit_combobox_display_change(text, page);
+        if text.is_empty() && !value.is_empty() && chosen.previous.as_ref() != Some(value) {
+            target
+                .known
+                .extend(SelectOutcome::combobox_value_text_tokens(
+                    session.connection(),
+                    &target.session,
+                    &target.token,
+                    value,
+                    deadline,
+                ));
+        }
+    }
+    let value = reading.as_ref().ok().map(|(value, _, _)| value.as_str());
+    let verified = reading.as_ref().is_ok_and(|(_, _, kept)| *kept) && chosen.popup_error.is_none();
     let mut acted = Acted {
         verb: "select",
         summary: format!(
             "{subject} {} -> {}",
             quote_text(chosen.previous.as_deref().unwrap_or_default()),
-            quote_text(reading.as_deref().unwrap_or(&chosen.label)),
+            quote_text(value.unwrap_or(&chosen.label)),
         ),
         data: json!({
             "action": "select",
             "target": target.label,
             "combobox": true,
-            "value": reading.as_ref().ok(),
+            "value": value,
             "label": chosen.label,
             "previous": chosen.previous,
-            "verified": reading.is_ok(),
+            "verified": verified,
         }),
         effects: None,
         known: target.known,
     };
     if let Err(error) = reading {
         add_unread(&mut acted, "the combobox's value", &error);
+    } else if let Some(message) = chosen.popup_error {
+        let error = AppError::new(ErrorCode::ActionFailed, message);
+        add_unread(&mut acted, "whether the combobox popup closed", &error);
     }
-    acted
+    Ok(acted)
 }
 
 fn add_unread(acted: &mut Acted, what: &str, error: &AppError) {
