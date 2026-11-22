@@ -1,0 +1,70 @@
+<!doctype html>
+<title>Releases and plan</title>
+<h1>Changelog</h1>
+<ul id="releases">
+  <li><button onclick="expand(this, 'Fixed cache invalidation')">Version 4.0.0</button><div class="notes"></div></li>
+  <li><button onclick="expand(this, 'Added streaming logs')">Version 3.9.0</button><div class="notes"></div></li>
+  <li><button onclick="expand(this, 'Reduced memory use')">Version 3.8.0</button><div class="notes"></div></li>
+  <li><button onclick="expand(this, 'Improved retries')">Version 3.7.0</button><div class="notes"></div></li>
+</ul>
+<button id="older" onclick="loadOlder()">Show older releases</button>
+
+<h2>Items</h2>
+<table id="items"><tbody></tbody></table>
+<button id="more-rows" onclick="loadMoreRows()">Load more rows</button>
+
+<h2>Plan</h2>
+<fieldset>
+  <legend>Choose plan</legend>
+  <label><input type="radio" name="plan" value="starter" onchange="toggleSeats(false)"> Starter</label>
+  <label><input type="radio" name="plan" value="team" onchange="toggleSeats(true)"> Team</label>
+</fieldset>
+<div id="seats-wrap"></div>
+<fieldset>
+  <legend>Billing</legend>
+  <label><input type="radio" name="billing" value="monthly"> Monthly</label>
+  <label><input type="radio" name="billing" value="annual"> Annual</label>
+</fieldset>
+<p id="picked"></p>
+
+<script>
+function expand(btn, note) {
+  btn.nextElementSibling.textContent = note;
+}
+function loadOlder() {
+  const list = document.getElementById('releases');
+  for (const [ver, note] of [
+    ['Version 3.1.0', 'Added maxSockets option'],
+    ['Version 3.0.1', 'Fixed header parsing'],
+    ['Version 2.9.0', 'Added timeout flag'],
+    ['Version 2.8.0', 'Improved error codes'],
+    ['Version 2.7.0', 'Added TLS option'],
+    ['Version 2.6.0', 'Initial HTTP/2 support'],
+  ]) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.textContent = ver;
+    btn.onclick = () => expand(btn, note);
+    const notes = document.createElement('div');
+    notes.className = 'notes';
+    li.append(btn, notes);
+    list.append(li);
+  }
+}
+let rowCount = 8;
+function drawRows() {
+  const tbody = document.querySelector('#items tbody');
+  tbody.innerHTML = Array.from({ length: rowCount }, (_, i) =>
+    `<tr><td>Row ${i + 1}</td><td><button onclick="document.getElementById('picked').textContent='Opened Row ${i + 1}'">Open</button></td></tr>`
+  ).join('');
+}
+function loadMoreRows() {
+  rowCount += 4;
+  drawRows();
+}
+function toggleSeats(show) {
+  const wrap = document.getElementById('seats-wrap');
+  wrap.innerHTML = show ? '<label>Number of seats <input type="number" value="5"></label>' : '';
+}
+drawRows();
+</script>
