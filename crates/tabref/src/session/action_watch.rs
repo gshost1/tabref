@@ -2,12 +2,13 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tabref_cdp::{CdpEvent, is_protocol_error, is_target_gone, wait_for_load};
-use tabref_core::{AppError, Deadline};
+use tabref_core::{AppError, Deadline, DeliverySemantics};
 use tabref_page::{PageInfo, WatchedAction, follow_late_navigation};
 
 use super::Session;
 use super::action_effects::ActionEffects;
 use crate::commands::downloads;
+use crate::commands::page_view::{record_unread, unread_note};
 
 const NEW_TAB_LOAD: Duration = Duration::from_millis(3_000);
 const LATE_WINDOW: Duration = Duration::from_millis(60);
@@ -38,8 +39,17 @@ impl Session {
     /// Waits for the watched action to settle and reports its effects. A
     /// tab the action opened becomes the current tab once it has loaded, or
     /// three seconds have passed; one already gone again, as a popup that
-    /// only downloads, is no new tab.
+    /// only downloads, is no new tab. The action was sent before this runs,
+    /// so a failure here says it was delivered.
     pub(crate) fn finish_action(
+        &mut self,
+        watched: &WatchedAction,
+        deadline: Deadline,
+    ) -> Result<ActionEffects, AppError> {
+        self.effects_of(watched, deadline).map_err(after_delivery)
+    }
+
+    fn effects_of(
         &mut self,
         watched: &WatchedAction,
         deadline: Deadline,
@@ -111,6 +121,26 @@ impl Session {
         }
         PageInfo::read(self.connection(), &page.target_id, deadline).map(Some)
     }
+}
+
+/// A failure in reading what a sent action set off: the action was
+/// delivered, so the error never says it is safe to send again, and it
+/// names what could not be read and how to read it.
+pub(crate) fn after_delivery(mut error: AppError) -> AppError {
+    if matches!(
+        error.disposition,
+        DeliverySemantics::NotDelivered | DeliverySemantics::Unknown
+    ) {
+        error.disposition = DeliverySemantics::delivered_unverified();
+    }
+    let note = unread_note("what the action set off", &error);
+    let mut details = error.details.take().unwrap_or_else(|| json!({}));
+    record_unread(&mut details, &note);
+    error.details = Some(details);
+    error.message = format!("the action was delivered, but {}", error.message);
+    error.suggestion =
+        Some("Do not repeat it; run tabref snap or tabref tabs to see where it led".into());
+    error
 }
 
 fn is_target_event(event: &CdpEvent) -> bool {
