@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
 use super::block_kind::BlockKind;
 use super::dom_node::DomNode;
 use super::dom_tree::DomTree;
-use super::text_runs::subtree_text;
+use super::text_runs::{squash, subtree_text};
 
 const SKIPPED_TAGS: &[&str] = &[
     "HEAD", "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "META", "LINK", "TITLE", "CANVAS", "VIDEO",
@@ -172,3 +174,69 @@ pub(crate) fn is_dialog_markup(node: &DomNode) -> bool {
 #[cfg(test)]
 #[path = "element_kind_tests.rs"]
 mod tests;
+
+pub(crate) fn svg_search_text(
+    tree: &DomTree,
+    node: &DomNode,
+    observe: &mut dyn FnMut(Option<&str>, &str),
+) -> String {
+    let mut parts = Vec::new();
+    for part in ["aria-label", "title"]
+        .into_iter()
+        .filter_map(|name| node.attr(name))
+        .map(squash)
+        .chain(svg_metadata(tree, node).map(|child| subtree_text(tree, child)))
+    {
+        if !part.is_empty() && !parts.contains(&part) {
+            observe(None, &part);
+            parts.push(part);
+        }
+    }
+    parts.join(" ")
+}
+
+pub(crate) fn skipped_nodes(tree: &DomTree, svg: &[bool]) -> HashSet<usize> {
+    let mut skipped = HashSet::new();
+    for (index, node) in tree.nodes.iter().enumerate() {
+        let parent_skipped = node.parent.is_some_and(|parent| skipped.contains(&parent));
+        let own = match node.tag() {
+            "IMG" | "INPUT" => false,
+            "SVG" => skip_svg(tree, node),
+            "DESC" if svg[index] => true,
+            _ => is_skipped(node),
+        };
+        if parent_skipped || own {
+            skipped.insert(index);
+        }
+    }
+    skipped
+}
+
+pub(crate) fn node_outside_svg(tree: &DomTree, mut index: usize) -> bool {
+    loop {
+        let node = &tree.nodes[index];
+        if node.tag() == "SVG" {
+            return false;
+        }
+        let Some(parent) = node.parent else {
+            return true;
+        };
+        index = parent;
+    }
+}
+
+pub(crate) fn is_heading_text(tree: &DomTree, index: usize) -> bool {
+    tree.ancestors(index)
+        .iter()
+        .filter_map(|ancestor| tree.node(*ancestor))
+        .any(|node| matches!(semantic_kind(node, false), Some(BlockKind::Heading(_))))
+}
+
+pub(crate) fn search_coverage(tree: &DomTree, index: usize, block: usize) -> usize {
+    if matches!(tree.nodes[block].tag(), "" | "HTML" | "BODY") {
+        let parent = tree.nodes[index].parent.unwrap_or(index);
+        if parent == block { index } else { parent }
+    } else {
+        block
+    }
+}

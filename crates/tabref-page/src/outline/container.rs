@@ -31,6 +31,8 @@ pub(crate) fn is_container(
     let summary = node.tag() == "SUMMARY";
     let mut pending: Vec<usize> = node.children.clone();
     let mut seen = 0usize;
+    let mut heading = false;
+    let mut other = false;
     while let Some(current) = pending.pop() {
         seen += 1;
         if seen > 4_000 {
@@ -42,7 +44,16 @@ pub(crate) fn is_container(
         let nested_ref = refs.contains_key(&(tree.target_id.clone(), inner.backend_id));
         let nested_link = inner.tag() == "A" && inner.attr("href").is_some();
         let structural = if summary {
-            matches!(semantic_kind(inner, false), Some(BlockKind::Heading(_)))
+            if inner.is_shown() {
+                if matches!(semantic_kind(inner, false), Some(BlockKind::Heading(_))) {
+                    heading = true;
+                    continue;
+                }
+                other |= matches!(&inner.kind, super::node_kind::NodeKind::Text(text) if !text.trim().is_empty())
+                    || nested_ref
+                    || nested_link;
+            }
+            heading && other
         } else {
             CONTAINER_TAGS.contains(&inner.tag()) || nested_ref || nested_link
         };
@@ -51,5 +62,8 @@ pub(crate) fn is_container(
         }
         pending.extend(inner.children.iter().copied());
     }
-    !summary && subtree_text(tree, index).chars().count() > LONG_NAME
+    if summary {
+        return heading && other;
+    }
+    subtree_text(tree, index).chars().count() > LONG_NAME
 }

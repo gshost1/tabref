@@ -47,11 +47,10 @@ fn ax_only_image_is_returned_alongside_a_deduplicated_dom_caption() {
         children: vec![ax(text, None), ax("January 2024: 42,507 kWh", None)],
         ..AccessibilityNode::default()
     };
-    let (hits, total, extra, extra_total) = merged_matches(&input, &tree, "kWh", 20);
-    assert_eq!(total, 1);
+    let (hits, total, _) = merged_matches(&input, &tree, "kWh", 20);
+    assert_eq!(total, 2);
     assert_eq!(hits[0].line, text);
-    assert_eq!(extra_total, 1);
-    assert_eq!(extra, vec!["image \"January 2024: 42,507 kWh\""]);
+    assert_eq!(hits[1].line, "January 2024: 42,507 kWh");
 }
 
 #[test]
@@ -103,17 +102,19 @@ fn dom_and_ax_matches_are_merged_without_repeating_dom_hits() {
             ],
             ..AccessibilityNode::default()
         };
-        let (hits, total, extra, extra_total) = merged_matches(&input, &tree, "kWh", 20);
-        assert_eq!(total, 2, "{owner}");
+        let (hits, total, _) = merged_matches(&input, &tree, "kWh", 20);
+        assert_eq!(total, 3, "{owner}");
         assert_eq!(hits[0].line, text);
-        assert_eq!(extra_total, 1, "{owner}: {extra:?}");
-        assert_eq!(extra.len(), 1);
-        assert!(extra[0].contains("January 2024: 42,507 kWh"));
-        let (_, total, extra, extra_total) = merged_matches(&input, &tree, "kWh", 1);
-        assert_eq!((total, extra_total), (2, 1));
-        assert!(extra.is_empty());
-        let (hits, total, extra, extra_total) = merged_matches(&input, &tree, "absent", 20);
-        assert!(hits.is_empty() && extra.is_empty());
-        assert_eq!((total, extra_total), (0, 0));
+        assert_eq!(hits.len(), 3);
+        assert!(hits[2].line.contains("January 2024: 42,507 kWh"));
+        let (hits, total, _) = merged_matches(&input, &tree, "kWh", 1);
+        assert_eq!(total, 3);
+        assert_eq!(hits.len(), 1);
+        let (hits, total, _) = merged_matches(&input, &tree, "absent", 20);
+        assert!(hits.is_empty());
+        assert_eq!(total, 0);
     }
 }
+
+#[path = "find_review_tests.rs"]
+mod review;

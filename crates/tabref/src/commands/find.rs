@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 use tabref_core::{AccessibilityNode, AppError};
-use tabref_page::{OutlineInput, TextMatch, squash};
+use tabref_page::{Control, DomTree, OutlineInput, TextMatch, squash};
 
 use super::find_room::{room_note, scroll_room};
 use crate::output::outcome::Outcome;
@@ -68,17 +68,19 @@ pub(crate) fn search(
         snapshot_find(&captured.tree, &url, text, role, cap)
     } else {
         let input = outline_input(session, Some(&captured))?;
-        let (matches, dom_total, ax, ax_total) = merged_matches(&input, &captured.tree, text, cap);
-        if dom_total == 0 {
-            snapshot_result(&url, text, ax_total, ax)
+        let (matches, total, ax_only) = merged_matches(&input, &captured.tree, text, cap);
+        if ax_only {
+            snapshot_result(
+                &url,
+                text,
+                total,
+                matches.into_iter().map(|hit| hit.line).collect(),
+            )
         } else {
             let options = ViewOptions::snap(&url, false, RowWindow::default());
-            let total = dom_total + ax_total;
-            let mut lines = find_lines_with_ax(text, &matches, &ax, total, &options);
+            let mut lines = find_lines_with_ax(text, &matches, &[], total, &options);
             let head = lines.remove(0);
-            let more = (total > matches.len() + ax.len())
-                .then(|| lines.pop())
-                .flatten();
+            let more = (total > matches.len()).then(|| lines.pop()).flatten();
             let mut listed = lines.clone();
             listed.extend(more.clone());
             Found {
@@ -111,28 +113,207 @@ fn merged_matches(
     tree: &AccessibilityNode,
     needle: &str,
     cap: usize,
-) -> (Vec<TextMatch>, usize, Vec<String>, usize) {
-    let mut covered = HashSet::new();
-    let (dom, dom_total) = TextMatch::search_with(input, needle, cap, |reference, source| {
-        covered.insert((reference.map(str::to_owned), squash(source).to_lowercase()));
+) -> (Vec<TextMatch>, usize, bool) {
+    let trees: Vec<&DomTree> = input
+        .trees
+        .iter()
+        .chain(input.frames.values().flatten())
+        .collect();
+    let mut covered: HashMap<&str, HashSet<i64>> = HashMap::new();
+    let mut sources = HashSet::new();
+    let mut nearest = HashMap::new();
+    let folded = squash(needle).to_lowercase();
+    let (dom, total) = TextMatch::search_located(input, needle, cap, |tree, index, source| {
+        let source = source.to_lowercase();
+        if folded.is_empty() || !source.contains(&folded) {
+            return;
+        }
+        covered
+            .entry(tree.target_id.as_str())
+            .or_default()
+            .insert(tree.nodes[index].backend_id);
+        let reference = nearest
+            .entry((tree.target_id.as_str(), index))
+            .or_insert_with(|| {
+                let mut at = Some(index);
+                while let Some(index) = at {
+                    let node = &tree.nodes[index];
+                    if let Some(label) = input.refs.get(&(tree.target_id.clone(), node.backend_id))
+                    {
+                        return Some(label.ref_text.clone());
+                    }
+                    at = node.parent;
+                }
+                None
+            });
+        sources.insert((reference.clone(), source));
     });
-    let mut ax = Vec::new();
+    if total == 0 {
+        let ax = find_matches(tree, needle, None);
+        let total = ax.len();
+        return (
+            ax.into_iter()
+                .take(cap)
+                .map(|line| TextMatch {
+                    section: Vec::new(),
+                    line,
+                    control: None,
+                    hidden: false,
+                    expander: None,
+                })
+                .collect(),
+            total,
+            true,
+        );
+    }
+    let reverse: HashMap<&str, &(String, i64)> = input
+        .refs
+        .iter()
+        .map(|(key, label)| (label.ref_text.as_str(), key))
+        .collect();
+    let mut positions = HashMap::new();
+    let mut offset = 0;
+    for tree in &trees {
+        for (index, node) in tree.nodes.iter().enumerate() {
+            positions.insert(
+                (tree.target_id.clone(), node.backend_id),
+                (offset + index, *tree, index),
+            );
+        }
+        offset += tree.nodes.len();
+    }
+    expand_coverage(&trees, &mut covered);
+    let mut ordered: Vec<(usize, TextMatch)> = dom
+        .into_iter()
+        .map(|(target, backend, hit)| {
+            (
+                positions
+                    .get(&(target, backend))
+                    .map_or(usize::MAX, |(position, _, _)| *position),
+                hit,
+            )
+        })
+        .collect();
+    if total > 0 {
+        ordered.sort_by_key(|(position, _)| *position);
+    }
     let mut ax_total = 0;
-    let room = cap.saturating_sub(dom.len());
-    visit_matches(tree, needle, None, |reference, sources, render| {
-        let reference = reference.map(str::to_owned);
-        if sources
-            .iter()
-            .all(|source| covered.contains(&(reference.clone(), squash(source).to_lowercase())))
+    visit_matches(tree, needle, None, |reference, texts, render| {
+        let key = reference.and_then(|reference| reverse.get(reference).copied());
+        let in_dom = key.is_some_and(|(target, backend)| {
+            covered
+                .get(target.as_str())
+                .is_some_and(|nodes| nodes.contains(backend))
+        });
+        if in_dom
+            || texts.iter().all(|source| {
+                sources.contains(&(reference.map(str::to_owned), squash(source).to_lowercase()))
+            })
         {
             return;
         }
         ax_total += 1;
-        if ax.len() < room {
-            ax.push(render());
+        let located = key.and_then(|key| positions.get(key));
+        let position = located.map_or(usize::MAX, |(position, _, _)| *position);
+        if ordered.len() == cap
+            && (cap == 0 || total == 0 || ordered.last().is_some_and(|(last, _)| position >= *last))
+        {
+            return;
+        }
+        let control = key
+            .and_then(|key| input.refs.get(key))
+            .map(|label| Control {
+                ref_text: Some(label.ref_text.clone()),
+                role: label.role.clone(),
+                name: label.name.clone().unwrap_or_default(),
+                value: label.value.clone(),
+                states: label.states.clone(),
+                ..Control::default()
+            });
+        let mut section = Vec::new();
+        if total > 0 {
+            if let Some((_, tree, index)) = located {
+                for (index, node) in tree.nodes[..*index].iter().enumerate() {
+                    if let Some(level) = node
+                        .tag()
+                        .strip_prefix('H')
+                        .and_then(|level| level.parse::<u8>().ok())
+                        .filter(|level| (1..=6).contains(level))
+                    {
+                        let text = tabref_page::subtree_text(tree, index);
+                        section.push((level, text));
+                    }
+                }
+            }
+        }
+        let mut path: Vec<(u8, String)> = Vec::new();
+        for (level, text) in section {
+            path.retain(|(known, _)| *known < level);
+            path.push((level, text));
+        }
+        ordered.push((
+            position,
+            TextMatch {
+                section: path.into_iter().map(|(_, text)| text).collect(),
+                line: if total == 0 {
+                    render()
+                } else {
+                    texts.join(" ")
+                },
+                control: if total == 0 { None } else { control },
+                hidden: false,
+                expander: None,
+            },
+        ));
+        if total > 0 {
+            ordered.sort_by_key(|(position, _)| *position);
+            ordered.truncate(cap);
         }
     });
-    (dom, dom_total, ax, ax_total)
+    if total > 0 {
+        ordered.sort_by_key(|(position, _)| *position);
+    }
+    (
+        ordered.into_iter().take(cap).map(|(_, hit)| hit).collect(),
+        total + ax_total,
+        total == 0,
+    )
+}
+
+fn expand_coverage(trees: &[&DomTree], covered: &mut HashMap<&str, HashSet<i64>>) {
+    if covered.is_empty() {
+        return;
+    }
+    for tree in trees {
+        let Some(covered) = covered.get_mut(tree.target_id.as_str()) else {
+            continue;
+        };
+        let mut inside = vec![false; tree.nodes.len()];
+        let mut labels = HashSet::new();
+        let mut ids = HashSet::new();
+        for (index, node) in tree.nodes.iter().enumerate() {
+            inside[index] = covered.contains(&node.backend_id)
+                || node.parent.is_some_and(|parent| inside[parent]);
+            if inside[index] {
+                if let Some(id) = node.attr("for") {
+                    labels.insert(id);
+                }
+                if let Some(id) = node.attr("id") {
+                    ids.insert(id);
+                }
+            }
+        }
+        for (index, node) in tree.nodes.iter().enumerate() {
+            if inside[index]
+                || node.attr("id").is_some_and(|id| labels.contains(id))
+                || node
+                    .attr("aria-labelledby")
+                    .is_some_and(|names| names.split_whitespace().any(|id| ids.contains(id)))
+            {
+                covered.insert(node.backend_id);
+            }
+        }
+    }
 }
 
 fn snapshot_find(

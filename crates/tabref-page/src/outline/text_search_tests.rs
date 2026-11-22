@@ -128,9 +128,9 @@ fn man_page_pre_has_one_match_per_line_with_a_cap() {
     assert_eq!(total, 2);
     assert_eq!(
         found[0].line,
-        "pre line 2: SIGWINCH P2024 Ign Window resize signal"
+        "SIGWINCH P2024 Ign Window resize signal (tabref snap --full)"
     );
-    assert_eq!(found[1].line, "pre line 121: SIGWINCH 28 28 20 23");
+    assert_eq!(found[1].line, "SIGWINCH 28 28 20 23 (tabref snap --full)");
 
     let (found, total) = search_text(&search, "MIPS", 1);
     assert_eq!(total, 2);

@@ -42,7 +42,8 @@ fn long_pre_find_stays_within_the_match_and_snapshot_budgets() {
     let opened = tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
     assert!(opened.stdout.chars().count() <= 12_000);
     let found = tabref.ok(&["find", "SIGWINCH"]).stdout;
-    assert!(found.starts_with("500 matches for "), "{found}");
-    assert_eq!(found.lines().count(), 22);
+    assert!(found.starts_with("4 matches for "), "{found}");
+    assert_eq!(found.lines().count(), 5);
+    assert!(found.contains("… 497 more in this block"), "{found}");
     assert!(found.chars().count() < 4_000);
 }
