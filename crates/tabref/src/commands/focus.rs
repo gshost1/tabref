@@ -14,6 +14,7 @@ use super::target_spec::TargetSpec;
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::session::action_effects::ActionEffects;
+use crate::session::action_watch::after_delivery;
 
 const MOVE_WINDOW: Duration = Duration::from_millis(300);
 const MOVED_AWAY: &str = " (the page moved the focus away)";
@@ -132,6 +133,7 @@ fn focus_and_settle(
         token,
         watch,
         deadline,
-    )?;
+    )
+    .map_err(after_delivery)?;
     Ok((effects, held))
 }

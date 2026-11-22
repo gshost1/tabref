@@ -99,6 +99,7 @@ fn delivered(envelope: &Value) {
         "{envelope}"
     );
     assert_ne!(error["disposition"]["retry"], "safe", "{envelope}");
+    assert!(error.get("recovery").is_none(), "{envelope}");
     let message = error["message"].as_str().unwrap();
     assert!(message.contains("was delivered"), "{envelope}");
     let said = error["details"]["report_error"].as_str().unwrap();

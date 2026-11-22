@@ -15,6 +15,7 @@ use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open_request::OpenRequest;
 use super::open_settle::{STILL_RENDERING, settle_after};
 use super::page_url::resolve_url;
+use super::page_view::{record_unread, unread_note};
 use crate::output::outcome::Outcome;
 use crate::session::Session;
 use crate::view::snapshot_view::snapshot_view;
@@ -120,9 +121,7 @@ fn load(
             Err(error) => return Err(error),
         };
         let rendering = settled.is_some_and(|settled| settled.still_rendering());
-        let captured = session.shared_capture()?;
-        let options = ViewRequest::default().snap_options(&captured.info.url)?;
-        let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
+        let mut report = page_report(session, url);
         if unfinished {
             report.push_line(
                 "note: the page had not finished loading; snap again if parts are missing",
@@ -142,6 +141,25 @@ fn load(
     let outcome = after().map_err(|error| error_with_dialogs(error, &dialogs));
     settle_after(session, watch, false, deadline);
     outcome
+}
+
+/// The loaded page's view or, when it cannot be read, the address opened
+/// and a note: the page loaded all the same.
+fn page_report(session: &mut Session, url: &str) -> Outcome {
+    let view = session.shared_capture().and_then(|captured| {
+        let options = ViewRequest::default().snap_options(&captured.info.url)?;
+        snapshot_view(session, &captured, &options, &ViewScope::Page)
+    });
+    view.unwrap_or_else(|error| {
+        let note = unread_note("the page", &error);
+        let mut report = Outcome::new(
+            format!("opened {url}"),
+            serde_json::json!({ "opened": url }),
+        );
+        report.push_line(&note);
+        record_unread(&mut report.data, &note);
+        report
+    })
 }
 
 /// An `open` whose address downloaded: one line per download, the page

@@ -20,7 +20,7 @@ use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open::normalize_url;
 use super::open_settle::settle_after;
 use super::page_url::{resolve_url, short_url};
-use super::page_view::current_page_view;
+use super::page_view::{current_page_view, record_unread, unread_note};
 use super::step_done::StepDone;
 use super::target_spec::TargetSpec;
 use super::wait::wait_for;
@@ -57,10 +57,18 @@ pub(crate) fn open_step(
         opened_line(session, &page, (&url, &current), deadline)?
     };
     if last {
-        let report = current_page_view(session)?;
         text.push('\n');
-        text.push_str(&report.text);
-        data["page"] = report.data;
+        match current_page_view(session) {
+            Ok(report) => {
+                text.push_str(&report.text);
+                data["page"] = report.data;
+            }
+            Err(error) => {
+                let note = unread_note("the page", &error);
+                text.push_str(&note);
+                record_unread(&mut data, &note);
+            }
+        }
     }
     Ok(StepDone { text, data })
 }
