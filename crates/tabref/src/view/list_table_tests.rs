@@ -112,3 +112,64 @@ fn the_default_window_keeps_rows_unlabelled_and_the_second_header_row_unnumbered
         "  … 5 more rows (25 in all): tabref snap --rows 21-"
     );
 }
+
+fn header_only(count: usize) -> Block {
+    let rows = (1..=count)
+        .map(|n| row(BlockKind::HeaderCell, &[&format!("Name {n}"), "value"]))
+        .collect();
+    Block {
+        kind: BlockKind::Generic,
+        items: vec![Item::Block(Block {
+            kind: BlockKind::Table,
+            items: rows,
+            key: None,
+            label: None,
+        })],
+        key: None,
+        label: None,
+    }
+}
+
+#[test]
+fn a_table_of_header_cells_only_counts_its_first_row_as_header_and_keeps_its_window() {
+    let lines = render(&header_only(40), RowWindow::default());
+    assert_eq!(lines[0], "table 39 rows: Name 1 | value", "{lines:#?}");
+    assert_eq!(lines.len(), 22, "{lines:#?}");
+    assert!(lines[21].contains("19 more rows (39 in all)"), "{lines:#?}");
+    let lines = render(&header_only(40), RowWindow::parse("5-7").unwrap());
+    assert_eq!(lines.len(), 5, "{lines:#?}");
+    assert_eq!(lines[1], "  #5 Name 6 | value", "{lines:#?}");
+}
+
+#[test]
+fn a_list_window_note_says_nothing_about_row_labels() {
+    let items = (1..=80)
+        .map(|n| cell(BlockKind::ListItem, &format!("item {n}")))
+        .collect();
+    let root = Block {
+        kind: BlockKind::Generic,
+        items: vec![Item::Block(Block {
+            kind: BlockKind::List,
+            items,
+            key: None,
+            label: None,
+        })],
+        key: None,
+        label: None,
+    };
+    let lines = render(&root, RowWindow::parse("21-40").unwrap());
+    let note = lines.last().unwrap();
+    assert!(
+        note.contains("(80 in all)") && !note.contains("#N"),
+        "{lines:#?}"
+    );
+}
+
+#[test]
+fn an_explicit_window_leaves_out_the_extra_header_rows() {
+    let ranks = ranked(70);
+    let ranks: Vec<&str> = ranks.iter().map(String::as_str).collect();
+    let lines = render(&peaks(&ranks), RowWindow::parse("62-64").unwrap());
+    assert_eq!(lines.len(), 5, "{lines:#?}");
+    assert!(lines[1].starts_with("  #62 "), "{lines:#?}");
+}

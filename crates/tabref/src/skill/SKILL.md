@@ -11,7 +11,7 @@ Commands wait for the page. Don't add sleeps.
 Count `N items:`, `table N rows:`, repeats `(1/3)` across the whole page, not the first block.
 A cut view ends with an outline of the rest; if what you need is not shown, use its `--from N`,
 `tabref read --section "<heading>"` or `tabref find TEXT` (hidden text too). A `dialog` line on top: click a button.
-`tabref js "EXPR"` returns a page value as JSON (tables: querySelectorAll).
+`tabref js "EXPR"` returns a page value as JSON.
 
 ## Act
 `click T`, `fill T VALUE` (replaces), `type T TEXT` (appends), `select T LABEL`, `check T`, `uncheck T`,

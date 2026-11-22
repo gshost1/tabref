@@ -48,7 +48,7 @@ impl BlockRenderer<'_> {
             }
         }
         if windowed {
-            self.note_window(items.len(), depth, "items");
+            self.note_window(items.len(), depth, "items", false);
         }
     }
 
@@ -81,6 +81,11 @@ impl BlockRenderer<'_> {
             .iter()
             .take_while(|row| row.blocks().all(|cell| cell.kind == BlockKind::HeaderCell))
             .count();
+        let header_rows = if header_rows == rows.len() {
+            1
+        } else {
+            header_rows
+        };
         let header = header_rows > 0;
         let body_rows = rows.len() - header_rows;
         let caption = block
@@ -99,7 +104,9 @@ impl BlockRenderer<'_> {
         let noun = if body_rows == 1 { "row" } else { "rows" };
         let windowed = body_rows > DEFAULT_ROWS;
         let labelled = windowed && self.options.rows.chosen;
-        let kept = windowed && self.options.rows.kept();
+        let kept = windowed
+            && self.options.rows.kept()
+            && (1..=body_rows).any(|row| self.options.rows.contains(row));
         let title = self.lines.len();
         self.push(
             depth,
@@ -108,8 +115,10 @@ impl BlockRenderer<'_> {
                 .to_owned(),
             None,
         );
-        for row in cells.iter().take(header_rows).skip(1) {
-            self.push_content(depth + 1, "", row.join(" | "));
+        if !labelled {
+            for row in cells.iter().take(header_rows).skip(1) {
+                self.push_content(depth + 1, "", row.join(" | "));
+            }
         }
         for (position, row) in cells.iter().skip(header_rows).enumerate() {
             if windowed && !self.options.rows.contains(position + 1) {
@@ -130,7 +139,7 @@ impl BlockRenderer<'_> {
         }
         if windowed {
             let before = self.lines.len();
-            self.note_window(body_rows, depth + 1, "rows");
+            self.note_window(body_rows, depth + 1, "rows", labelled);
             if kept {
                 for line in self.lines.iter_mut().skip(before) {
                     line.keep = true;
@@ -142,7 +151,7 @@ impl BlockRenderer<'_> {
         }
     }
 
-    /// Marks the row just pushed to print past a budget cut, cut to
+    /// Marks the row just pushed to print past a budget cut, there cut to
     /// [`KEPT_ROW_MAX`] characters of its `length` unless lines print whole.
     fn keep_row(&mut self, length: usize) {
         let whole = self.options.whole_lines();
@@ -151,12 +160,14 @@ impl BlockRenderer<'_> {
         };
         line.keep = true;
         if !whole && length > KEPT_ROW_MAX {
-            line.text = cut_chars(&line.text, KEPT_ROW_MAX);
-            line.cut = Some(format!("+{} chars", length - KEPT_ROW_MAX));
+            line.short = Some((
+                cut_chars(&line.text, KEPT_ROW_MAX),
+                format!("+{} chars", length - KEPT_ROW_MAX),
+            ));
         }
     }
 
-    fn note_window(&mut self, total: usize, depth: usize, noun: &str) {
+    fn note_window(&mut self, total: usize, depth: usize, noun: &str, labelled: bool) {
         let window = self.options.rows;
         let shown = (1..=total).filter(|row| window.contains(*row)).count();
         let cut = total - shown;
@@ -170,7 +181,7 @@ impl BlockRenderer<'_> {
             _ => 1,
         };
         self.stats.next_row.get_or_insert(next);
-        let counted = if window.chosen {
+        let counted = if labelled {
             format!("{total} in all; #N is the Nth data row")
         } else {
             format!("{total} in all")
