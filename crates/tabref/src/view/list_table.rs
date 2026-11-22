@@ -75,10 +75,12 @@ impl BlockRenderer<'_> {
             self.render_children(block, depth);
             return;
         }
-        let header = rows
-            .first()
-            .is_some_and(|row| row.blocks().all(|cell| cell.kind == BlockKind::HeaderCell));
-        let body_rows = rows.len() - usize::from(header);
+        let header_rows = rows
+            .iter()
+            .take_while(|row| row.blocks().all(|cell| cell.kind == BlockKind::HeaderCell))
+            .count();
+        let header = header_rows > 0;
+        let body_rows = rows.len() - header_rows;
         let caption = block
             .blocks()
             .find(|inner| inner.kind == BlockKind::Paragraph)
@@ -100,13 +102,21 @@ impl BlockRenderer<'_> {
                 .to_owned(),
             None,
         );
+        for row in cells.iter().take(header_rows).skip(1) {
+            self.push_content(depth + 1, "", row.join(" | "));
+        }
         let windowed = body_rows > DEFAULT_ROWS;
-        for (position, row) in cells.iter().skip(usize::from(header)).enumerate() {
+        let labelled = windowed && self.options.rows.chosen;
+        for (position, row) in cells.iter().skip(header_rows).enumerate() {
             if windowed && !self.options.rows.contains(position + 1) {
                 continue;
             }
-            let text = row.join(" | ");
-            self.push_content(depth + 1, "", text);
+            let label = if labelled {
+                format!("row {}: ", position + 1)
+            } else {
+                String::new()
+            };
+            self.push_content(depth + 1, &label, row.join(" | "));
         }
         if windowed {
             self.note_window(body_rows, depth + 1, "rows");
@@ -127,14 +137,19 @@ impl BlockRenderer<'_> {
             _ => 1,
         };
         self.stats.next_row.get_or_insert(next);
+        let counted = if window.chosen {
+            format!("{total} in all; row N is the Nth data row")
+        } else {
+            format!("{total} in all")
+        };
         let text = if next > 1 {
             format!(
-                "… {cut} more {noun} ({total} in all): {}",
+                "… {cut} more {noun} ({counted}): {}",
                 self.options.route.rows_from(next, self.options.asks_full())
             )
         } else {
             format!(
-                "… {cut} {noun} before these ({total} in all): {}",
+                "… {cut} {noun} before these ({counted}): {}",
                 self.options.route.rows_from(1, self.options.asks_full())
             )
         };
@@ -151,3 +166,7 @@ fn collect_rows<'a>(block: &'a Block, rows: &mut Vec<&'a Block>) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "list_table_tests.rs"]
+mod tests;
