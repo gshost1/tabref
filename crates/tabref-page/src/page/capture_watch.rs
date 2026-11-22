@@ -142,6 +142,7 @@ const SCAN: &str = r"const scan = (approved = []) => {
         '(orientation: portrait)', '(orientation: landscape)', 'screen', 'print', 'all']) state += ':' + realm.matchMedia(query).matches;
       styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
       if (blind) return;
+      if (opaque.length) { for (const el of elements) if (el.shadowRoot) walk(el.shadowRoot); return; }
       state += ':' + doc.defaultView.scrollX + ':' + doc.defaultView.scrollY
         + ':' + doc.defaultView.innerWidth + ':' + doc.defaultView.innerHeight;
       for (let index = 0; index < elements.length; index++) {

@@ -102,15 +102,27 @@ fn check_changes(imported: bool, body: &str, blind: bool, changes: &[&str]) {
             "window.sheet={sheet}; let denied=false; try {{ sheet.cssRules; }} catch(e) {{ denied=e.name==='SecurityError'; }} if (!denied) throw Error('sheet rules were readable')"
         ),
     );
+    evaluate(
+        &mut connection,
+        &page,
+        "window.visibilityChecks=0; const original=Element.prototype.checkVisibility; Element.prototype.checkVisibility=function(...args){window.visibilityChecks++;return Reflect.apply(original,this,args)}",
+    );
     for change in changes {
         evaluate(
             &mut connection,
             &page,
-            "sheet.disabled=false; sheet.media.mediaText='all'",
+            "sheet.disabled=false; sheet.media.mediaText='all'; window.visibilityChecks=0",
         );
         let deadline = Deadline::after(30_000).unwrap();
         let watch = arm_capture_watch(&mut connection, &page, "opaque", deadline).unwrap();
         assert_eq!(watch.blind, blind, "{body}");
+        if !blind {
+            evaluate(
+                &mut connection,
+                &page,
+                "if (visibilityChecks !== document.querySelectorAll('*').length) throw Error('visibility scanned more than once: '+visibilityChecks)",
+            );
+        }
         assert_eq!(
             check_capture_watch(&mut connection, &page, &watch, deadline) == "same",
             !blind
