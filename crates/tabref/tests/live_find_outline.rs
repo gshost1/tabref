@@ -3,6 +3,32 @@
 mod common;
 
 #[test]
+fn inline_pre_links_count_as_lines_without_an_extra_overflow_footer() {
+    if !common::live() {
+        return;
+    }
+    let tabref = common::harness("find-pre-links");
+    let rows: String = (1..=6)
+        .map(|line| format!("{line}. See <a href='/open.2'>open(2)</a> for details.\n"))
+        .collect();
+    let html = format!("<!doctype html><title>Manual</title><pre>{rows}</pre>");
+    let port = common::serve(&[("/", &html)]);
+    tabref.ok(&["open", &format!("http://127.0.0.1:{port}/")]);
+    let stdout = tabref.ok(&["find", "open(2)"]).stdout;
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(lines.len(), 5, "{stdout}");
+    assert_eq!(lines[0], "6 matches for \"open(2)\"");
+    for (line, result) in lines[1..4].iter().enumerate() {
+        assert!(
+            result.contains(&format!("{}. See open(2) for details.", line + 1)),
+            "{stdout}"
+        );
+        assert!(result.contains("@s"), "{stdout}");
+    }
+    assert!(lines[4].contains("… 3 more in this block"), "{stdout}");
+}
+
+#[test]
 #[cfg(unix)]
 fn pre_printed_pointers_reach_late_examples_and_huge_man_pages() {
     if !common::live() {

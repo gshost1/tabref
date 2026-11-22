@@ -65,10 +65,14 @@ pub(crate) fn search(
     let url = captured.info.url.clone();
     let cap = if all_matches { usize::MAX } else { keep };
     let mut found = if role.is_some() {
-        snapshot_find(&captured.tree, &url, text, role, cap)
+        let mut matches = find_matches(&captured.tree, text, role);
+        let count = matches.len();
+        matches.truncate(cap);
+        snapshot_result(&url, text, count, matches)
     } else {
         let input = outline_input(session, Some(&captured))?;
-        let (matches, total, ax_only) = merged_matches(&input, &captured.tree, text, cap);
+        let (matches, total, ax_only, overflow) =
+            merged_matches_counted(&input, &captured.tree, text, cap);
         if ax_only {
             snapshot_result(
                 &url,
@@ -79,17 +83,20 @@ pub(crate) fn search(
         } else {
             let options = ViewOptions::snap(&url, false, RowWindow::default());
             let mut lines = find_lines_with_ax(text, &matches, &[], total, &options);
-            let head = lines.remove(0);
+            let mut head = lines.remove(0);
+            if overflow > 0 {
+                head.replace_range(..total.to_string().len(), &(total + overflow).to_string());
+            }
             let more = (total > matches.len()).then(|| lines.pop()).flatten();
             let mut listed = lines.clone();
             listed.extend(more.clone());
             Found {
-                count: total,
+                count: total + overflow,
                 head,
                 data: json!({
                     "snapshot_id": captured.snapshot_id,
                     "url": url,
-                    "count": total,
+                    "count": total + overflow,
                     "matches": listed,
                 }),
                 lines,
@@ -128,12 +135,23 @@ fn ax_search_text(root: &AccessibilityNode) -> Vec<(Option<&str>, String)> {
     texts
 }
 
-fn merged_matches<'a>(
-    input: &'a OutlineInput,
+#[cfg(test)]
+fn merged_matches(
+    input: &OutlineInput,
     tree: &AccessibilityNode,
     needle: &str,
     cap: usize,
 ) -> (Vec<TextMatch>, usize, bool) {
+    let (hits, total, ax_only, overflow) = merged_matches_counted(input, tree, needle, cap);
+    (hits, total + overflow, ax_only)
+}
+
+fn merged_matches_counted<'a>(
+    input: &'a OutlineInput,
+    tree: &AccessibilityNode,
+    needle: &str,
+    cap: usize,
+) -> (Vec<TextMatch>, usize, bool, usize) {
     let trees: Vec<&DomTree> = input
         .trees
         .iter()
@@ -183,7 +201,7 @@ fn merged_matches<'a>(
             });
         sources.insert((reference.clone(), source));
     };
-    let (dom, total) = TextMatch::search_located(input, needle, cap, observe, unique);
+    let (dom, total, overflow) = TextMatch::search_located(input, needle, cap, observe, unique);
     if total == 0 {
         let ax = find_matches(tree, needle, None);
         let total = ax.len();
@@ -200,6 +218,7 @@ fn merged_matches<'a>(
                 .collect(),
             total,
             true,
+            0,
         );
     }
     let reverse: HashMap<&str, &(String, i64)> = input
@@ -288,6 +307,7 @@ fn merged_matches<'a>(
         ordered.into_iter().take(cap).map(|(_, hit)| hit).collect(),
         total + ax_total,
         false,
+        overflow,
     )
 }
 
@@ -351,18 +371,6 @@ fn expand_coverage(trees: &[&DomTree], covered: &mut HashMap<&str, HashSet<i64>>
             }
         }
     }
-}
-
-fn snapshot_find(
-    tree: &AccessibilityNode,
-    url: &str,
-    text: &str,
-    role: Option<&str>,
-    keep: usize,
-) -> Found {
-    let matches = find_matches(tree, text, role);
-    let count = matches.len();
-    snapshot_result(url, text, count, matches.into_iter().take(keep).collect())
 }
 
 fn snapshot_result(url: &str, text: &str, count: usize, shown: Vec<String>) -> Found {
