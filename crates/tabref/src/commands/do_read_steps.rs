@@ -241,7 +241,7 @@ pub(crate) fn find_step(session: &mut Session, args: &[Word]) -> Result<StepDone
     if needle.is_empty() {
         return Err(AppError::invalid_args("find needs the text to look for"));
     }
-    let found = find::search(session, &needle, None, FOUND_SHOWN, true)?;
+    let found = find::search(session, &needle, None, FOUND_SHOWN, false)?;
     let note = found
         .note
         .as_ref()
