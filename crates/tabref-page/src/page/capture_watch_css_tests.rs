@@ -1,6 +1,18 @@
 use super::classify;
 
 #[test]
+fn identical_text_can_share_a_parse_but_same_length_changes_cannot() {
+    let parsed = Some(vec![]);
+    let entries = super::Cache::from([(("first".into(), 3), ("a{}".into(), parsed.clone()))]);
+    assert_eq!(
+        super::cached(&entries, &("second".into(), 3), "a{}"),
+        Some(&parsed)
+    );
+    assert_eq!(super::cached(&entries, &("first".into(), 3), "b{}"), None);
+    assert_eq!(super::cached(&entries, &("second".into(), 3), "b{}"), None);
+}
+
+#[test]
 fn differential_tree_preserves_nested_rule_paths() {
     assert_eq!(super::structure::tree(""), Some(Vec::new()));
     assert_eq!(super::structure::tree("@container(width>1px){}"), None);

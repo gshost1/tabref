@@ -14,7 +14,7 @@ pub(super) fn prepare(
     token: &str,
     urls: &[Value],
     deadline: Deadline,
-) -> Result<(), AppError> {
+) -> Result<bool, AppError> {
     let session = Some(page.session_id.as_str());
     cdp(connection, page, "DOM.enable", json!({}), deadline)?;
     let stale = connection.drain_events(|event| {
@@ -36,10 +36,11 @@ pub(super) fn prepare(
         "opaque.events",
         || json!({"late":late.iter().map(|event| &event.method).collect::<Vec<_>>(),"dropped":connection.dropped_event_count() - dropped,"graph":graph.len()}),
     );
-    if connection.dropped_event_count() != dropped
+    if graph.is_empty()
+        || connection.dropped_event_count() != dropped
         || late.iter().any(|event| event.method != "CSS.fontsUpdated")
     {
-        return Ok(());
+        return Ok(false);
     }
     let graph = json!(graph);
     let graph = evaluate_quietly(
@@ -82,6 +83,9 @@ pub(super) fn prepare(
         "opaque.approval",
         || json!({"requested":urls.len(),"approved":safe.len()}),
     );
+    if safe.is_empty() || safe.len() != urls.len() {
+        return Ok(false);
+    }
     evaluate_quietly(
         connection,
         page,
@@ -96,7 +100,7 @@ pub(super) fn prepare(
         ),
         deadline,
     )?;
-    Ok(())
+    Ok(true)
 }
 
 fn collect(
@@ -131,24 +135,18 @@ fn collect(
                 "opaque.reject",
                 || json!({"url":url,"construct":"header-size-or-missing-length"}),
             );
-            graph.push((url.to_owned(), None));
-            continue;
+            return Ok(Vec::new());
         }
         sheets.push((url.to_owned(), header["styleSheetId"].clone()));
     }
-    let calls: Vec<_> = sheets
-        .iter()
-        .map(|(_, id)| ("CSS.getStyleSheetText", json!({"styleSheetId":id})))
-        .collect();
-    let replies = connection
-        .call_all(&calls, session, deadline)
-        .inspect_err(|error| {
-            record(
-                "opaque.cdp_error",
-                || json!({"step":"CSS.getStyleSheetText","error":error.to_string()}),
-            );
-        })?;
-    for ((url, id), reply) in sheets.into_iter().zip(replies) {
+    for (url, id) in sheets {
+        let reply = cdp(
+            connection,
+            page,
+            "CSS.getStyleSheetText",
+            json!({"styleSheetId":id}),
+            deadline,
+        )?;
         let parsed = reply["text"]
             .as_str()
             .and_then(|text| super::css::classify(id.as_str().unwrap_or(""), text));
@@ -157,6 +155,7 @@ fn collect(
                 "opaque.reject",
                 || json!({"url":url,"construct":reply["text"].as_str().map(super::css::reject_reason)}),
             );
+            return Ok(Vec::new());
         }
         graph.push((url, parsed));
     }

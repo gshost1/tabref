@@ -19,6 +19,14 @@ type Parsed = Option<Vec<String>>;
 type Cache = HashMap<(String, usize), (String, Parsed)>;
 static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
 
+fn cached<'a>(entries: &'a Cache, key: &(String, usize), text: &str) -> Option<&'a Parsed> {
+    entries
+        .get(key)
+        .filter(|(old, _)| old == text)
+        .or_else(|| entries.values().find(|(old, _)| old == text))
+        .map(|(_, parsed)| parsed)
+}
+
 pub(super) fn reject_reason(text: &str) -> String {
     if text.len() > 1_000_000 {
         return "size-limit".into();
@@ -70,10 +78,8 @@ pub(super) fn classify(url: &str, text: &str) -> Parsed {
     let key = (url.to_owned(), text.len());
     let cache = CACHE.get_or_init(Mutex::default);
     if let Ok(entries) = cache.lock() {
-        if let Some((old, parsed)) = entries.get(&key) {
-            if old == text {
-                return parsed.clone();
-            }
+        if let Some(parsed) = cached(&entries, &key, text) {
+            return parsed.clone();
         }
     }
     let parsed = tokens(text).and_then(|tokens| rules(&tokens, 0, &mut 10_000));

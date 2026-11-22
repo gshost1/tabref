@@ -49,10 +49,21 @@ fn arm(
             );
         })?;
     trace::record("arm.scan", || json!({"token":token,"reply":reply}));
-    if let Some(urls) = reply.get("opaque").and_then(Value::as_array) {
+    let other_blind_reason = reply
+        .get("why")
+        .and_then(Value::as_str)
+        .is_some_and(|why| !why.is_empty());
+    if other_blind_reason {
+        reply["blind"] = Value::Bool(true);
+    }
+    if let Some(urls) = reply
+        .get("opaque")
+        .and_then(Value::as_array)
+        .filter(|_| !other_blind_reason)
+    {
         let deadline = deadline.capped(Duration::from_millis(500));
         match opaque::prepare(connection, session, token, urls, deadline) {
-            Ok(()) => {
+            Ok(true) => {
                 let rearm = ARM.replace("if (document.visibilityState === 'hidden')", "if (true)");
                 reply = evaluate_quietly(connection, session, &script(&rearm, token), deadline)
                     .inspect_err(|error| {
@@ -63,6 +74,7 @@ fn arm(
                     })?;
                 trace::record("arm.approved", || json!({"token":token,"reply":reply}));
             }
+            Ok(false) => {}
             Err(error) => trace::record(
                 "opaque.error",
                 || json!({"token":token,"error":error.to_string()}),
