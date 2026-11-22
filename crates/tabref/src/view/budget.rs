@@ -5,7 +5,6 @@ use super::cut_outline::cut_outline;
 use super::cut_report::CutReport;
 use super::view_line::ViewLine;
 use super::view_options::ViewOptions;
-use super::view_route::ViewRoute;
 
 /// Lines of one navigation, header, footer or sidebar a view keeps when
 /// the page has a main landmark.
@@ -62,7 +61,7 @@ pub(crate) fn fit(
     let share = room / OUTLINE_SHARE;
     let wanted = cut_outline(&lines, cut_index(&lines, room), share, route, full).stub_cost;
     let content_room = room.saturating_sub(wanted.min(share) + MARKER_ROOM.min(tenth));
-    let (mut cut, mut held) = cut_keeping(&lines, content_room, room / KEEP_SHARE, route);
+    let (mut cut, mut held) = cut_keeping(&lines, content_room, room / KEEP_SHARE, options);
     let mut reserve: usize = held.iter().map(ViewLine::cost).sum();
     let mut kept: Vec<ViewLine> = lines[..cut].to_vec();
     let mut spent: usize = kept.iter().map(ViewLine::cost).sum();
@@ -75,7 +74,7 @@ pub(crate) fn fit(
                 spent -= line.cost();
                 cut -= 1;
                 if line.keep {
-                    let line = held_form(&line, route);
+                    let line = held_form(&line, options);
                     reserve += line.cost();
                     held.insert(0, line);
                 }
@@ -121,7 +120,7 @@ fn cut_keeping(
     lines: &[ViewLine],
     room: usize,
     most: usize,
-    route: &ViewRoute,
+    options: &ViewOptions,
 ) -> (usize, Vec<ViewLine>) {
     let mut reserve = 0usize;
     loop {
@@ -130,7 +129,7 @@ fn cut_keeping(
         let held: Vec<ViewLine> = lines[cut..]
             .iter()
             .filter(|line| line.keep)
-            .map(|line| held_form(line, route))
+            .map(|line| held_form(line, options))
             .take_while(|line| {
                 spent += line.cost();
                 spent <= most
@@ -146,10 +145,10 @@ fn cut_keeping(
 
 /// A kept line as it prints past the cut: its shorter text, if it has
 /// one, with the command that prints it whole.
-fn held_form(line: &ViewLine, route: &ViewRoute) -> ViewLine {
+fn held_form(line: &ViewLine, options: &ViewOptions) -> ViewLine {
     let mut held = line.clone();
     if let Some((text, cut)) = &line.short {
-        let command = route.starting_at(line.number, true);
+        let command = options.rows.whole_from(&options.route, line.number);
         held.text = format!("{text} …({cut}: {command})");
         held.cut = Some(cut.clone());
     }

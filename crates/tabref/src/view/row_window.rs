@@ -1,5 +1,7 @@
 use tabref_core::AppError;
 
+use super::view_route::ViewRoute;
+
 /// Which rows of a long table or list a view prints, 1-based and inclusive:
 /// by default the first 20, or what `--rows 21-40` or `--rows 21-` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,20 @@ impl RowWindow {
             && self
                 .last
                 .is_some_and(|last| last >= self.first && last - self.first < KEPT_ROWS)
+    }
+
+    /// The command that prints the view whole from line `line` on, with
+    /// this window when it was asked for, so the line numbers stay the same.
+    pub(crate) fn whole_from(&self, route: &ViewRoute, line: usize) -> String {
+        if !self.chosen {
+            return route.starting_at(line, true);
+        }
+        let rows = match self.last {
+            None => format!("{}-", self.first),
+            Some(last) if last == self.first => last.to_string(),
+            Some(last) => format!("{}-{last}", self.first),
+        };
+        format!("{} --full --rows {rows} --from {line}", route.command)
     }
 
     pub(crate) fn contains(&self, row: usize) -> bool {

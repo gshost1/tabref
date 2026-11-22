@@ -151,7 +151,10 @@ fn kept_rows_past_a_cut_are_cut_to_a_short_line_that_says_how_to_see_the_rest() 
             short.starts_with('#') && short.chars().count() <= 300,
             "{line:#?}"
         );
-        let from = format!(" chars: tabref snap --full --from {})", line.number);
+        let from = format!(
+            " chars: tabref snap --full --rows 62-64 --from {})",
+            line.number
+        );
         assert!(
             pointer.starts_with('+') && pointer.ends_with(&from),
             "{line:#?}"
