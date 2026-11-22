@@ -7,7 +7,7 @@ use super::acted::Acted;
 use super::action_report_changes::{change_data, counted, reload_head, step_change, within_budget};
 use super::download_lines::{download_json, download_line};
 use super::page_url::short_url;
-use super::page_view::current_page_view;
+use super::page_view::{current_page_view, record_unread, unread_note};
 use super::redrawn_rows::{ControlReport, control_report};
 use crate::output::outcome::Outcome;
 use crate::session::Session;
@@ -34,7 +34,7 @@ pub(crate) fn full_report(session: &mut Session, acted: Acted) -> Result<Outcome
     }
     let mut outcome = Outcome::new(first, acted.data);
     if let Some(effects) = &acted.effects {
-        let (lines, data) = effect_block(session, effects, acted.known)?;
+        let (lines, data) = effect_block(session, effects, acted.known);
         for line in lines {
             outcome.push_line(&line);
         }
@@ -66,7 +66,7 @@ pub(crate) fn step_report(
             .as_ref()
             .is_some_and(|page| !page.replaced_rows.is_empty())
     {
-        let (lines, more) = effect_block(session, effects, acted.known)?;
+        let (lines, more) = effect_block(session, effects, acted.known);
         for extra in lines {
             line.push('\n');
             line.push_str(&extra);
@@ -127,12 +127,13 @@ pub(crate) fn step_report(
     Ok((line, data))
 }
 
-/// The lines after an action's first line, and their `--json` data.
+/// The lines after an action's first line, and their `--json` data. A
+/// page view that cannot be read becomes a note: the action was delivered.
 fn effect_block(
     session: &mut Session,
     effects: &ActionEffects,
     known: HashSet<String>,
-) -> Result<(Vec<String>, Value), AppError> {
+) -> (Vec<String>, Value) {
     let mut lines: Vec<String> = dialog_lines(effects.dialogs());
     lines.extend(effects.downloads.iter().map(download_line));
     let mut data = json!({
@@ -145,21 +146,18 @@ fn effect_block(
     }
     if let Some(tab) = &effects.new_tab {
         lines.push("opened a new tab, now the current tab".to_owned());
-        let report = current_page_view(session)?;
-        lines.push(report.text);
-        merge(&mut data, json!({ "new_tab": tab, "page": report.data }));
-        return Ok((lines, data));
+        merge(&mut data, json!({ "new_tab": tab }));
+        page_view(session, "the new tab", &mut lines, &mut data);
+        return (lines, data);
     }
     let Some(page) = &effects.page else {
-        return Ok((lines, data));
+        return (lines, data);
     };
     merge(&mut data, json!({ "url": page.url, "title": page.title }));
     merge(&mut data, text_check_data(page));
     if effects.settled.navigated && effects.url_before != page.url {
-        let report = current_page_view(session)?;
-        lines.push(report.text);
-        merge(&mut data, json!({ "page": report.data }));
-        return Ok((lines, data));
+        page_view(session, "the page", &mut lines, &mut data);
+        return (lines, data);
     }
     if let Some(url) = effects.moved_to() {
         lines.push(format!("-> {}", short_url(&effects.url_before, url)));
@@ -184,10 +182,8 @@ fn effect_block(
     merge(&mut data, changes_data);
     lines.extend(text_check_note(page));
     if effects.settled.navigated {
-        let report = current_page_view(session)?;
-        lines.push(report.text);
-        merge(&mut data, json!({ "page": report.data }));
-        return Ok((lines, data));
+        page_view(session, "the page", &mut lines, &mut data);
+        return (lines, data);
     }
     if let Some(prepared) = prepared {
         lines.extend(prepared.lines);
@@ -200,7 +196,21 @@ fn effect_block(
         lines.insert(0, check.note());
         check.add_data(&mut data);
     }
-    Ok((lines, data))
+    (lines, data)
+}
+
+fn page_view(session: &mut Session, what: &str, lines: &mut Vec<String>, data: &mut Value) {
+    match current_page_view(session) {
+        Ok(report) => {
+            lines.push(report.text);
+            merge(data, json!({ "page": report.data }));
+        }
+        Err(error) => {
+            let note = unread_note(what, &error);
+            record_unread(data, &note);
+            lines.push(note);
+        }
+    }
 }
 
 fn text_check_data(page: &tabref_page::PageChanges) -> Value {

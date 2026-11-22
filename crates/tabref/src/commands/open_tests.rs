@@ -1,6 +1,7 @@
 use tabref_core::AppError;
+use tabref_page::PageInfo;
 
-use super::{normalize_url, open_again};
+use super::{normalize_url, open_again, unread_page};
 
 #[test]
 fn a_pending_navigation_in_open_may_be_opened_again() {
@@ -67,4 +68,35 @@ fn a_path_of_the_current_page_stays_relative() {
     }
     assert!(!super::is_relative("example.com/a"));
     assert!(!super::is_relative("http://127.0.0.1:8000/"));
+}
+
+#[test]
+fn an_unread_page_names_the_tab_address_or_says_it_is_the_one_opened() {
+    let failed = AppError::timeout("snapshot failed");
+    let landed = PageInfo {
+        url: "http://a.test/landed".into(),
+        title: "Landed".into(),
+    };
+    let report = unread_page("http://a.test/hop", Ok(landed), &failed);
+    assert_eq!(
+        report.text,
+        "page \"Landed\" http://a.test/landed\n\
+         note: could not read the page (snapshot failed); run tabref snap to see it"
+    );
+    assert_eq!(report.data["url"], "http://a.test/landed");
+    assert_eq!(report.data["title"], "Landed");
+
+    let report = unread_page(
+        "http://a.test/hop",
+        Err(AppError::timeout("tab gone")),
+        &failed,
+    );
+    let said = "could not read the page or the address it ended at (snapshot failed); \
+                run tabref snap to see it; the address shown is the one opened";
+    assert_eq!(
+        report.text,
+        format!("opened http://a.test/hop\nnote: {said}")
+    );
+    assert_eq!(report.data["url"], "http://a.test/hop");
+    assert_eq!(report.data["report_error"], said);
 }

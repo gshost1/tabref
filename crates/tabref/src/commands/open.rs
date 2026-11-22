@@ -15,8 +15,10 @@ use super::new_tab::{in_new_tab, new_tab_address, open_tab};
 use super::open_request::OpenRequest;
 use super::open_settle::{STILL_RENDERING, settle_after};
 use super::page_url::resolve_url;
+use super::page_view::{record_unread, unread_note};
 use crate::output::outcome::Outcome;
 use crate::session::Session;
+use crate::view::node_line::quote_text;
 use crate::view::snapshot_view::snapshot_view;
 use crate::view::view_request::ViewRequest;
 use crate::view::view_scope::ViewScope;
@@ -120,9 +122,7 @@ fn load(
             Err(error) => return Err(error),
         };
         let rendering = settled.is_some_and(|settled| settled.still_rendering());
-        let captured = session.shared_capture()?;
-        let options = ViewRequest::default().snap_options(&captured.info.url)?;
-        let mut report = snapshot_view(session, &captured, &options, &ViewScope::Page)?;
+        let mut report = page_report(session, page, url);
         if unfinished {
             report.push_line(
                 "note: the page had not finished loading; snap again if parts are missing",
@@ -142,6 +142,45 @@ fn load(
     let outcome = after().map_err(|error| error_with_dialogs(error, &dialogs));
     settle_after(session, watch, false, deadline);
     outcome
+}
+
+/// The loaded page's view or, when it cannot be read, the address and
+/// title the tab ended at and a note: the page loaded all the same.
+fn page_report(session: &mut Session, page: &PageSession, url: &str) -> Outcome {
+    let deadline = session.deadline();
+    let view = session.shared_capture().and_then(|captured| {
+        let options = ViewRequest::default().snap_options(&captured.info.url)?;
+        snapshot_view(session, &captured, &options, &ViewScope::Page)
+    });
+    view.unwrap_or_else(|error| {
+        let info = PageInfo::read(session.connection(), &page.target_id, deadline);
+        unread_page(url, info, &error)
+    })
+}
+
+/// The report of a loaded page whose snapshot failed with `error`: the
+/// tab's own address and title, or the address opened when even those
+/// could not be read, and the note saying so.
+fn unread_page(url: &str, info: Result<PageInfo, AppError>, error: &AppError) -> Outcome {
+    let (text, data, note) = match info {
+        Ok(info) => (
+            format!("page {} {}", quote_text(info.title.trim()), info.url),
+            serde_json::json!({ "url": info.url, "title": info.title }),
+            unread_note("the page", error),
+        ),
+        Err(_) => (
+            format!("opened {url}"),
+            serde_json::json!({ "url": url, "title": null }),
+            format!(
+                "{}; the address shown is the one opened",
+                unread_note("the page or the address it ended at", error)
+            ),
+        ),
+    };
+    let mut report = Outcome::new(text, data);
+    report.push_line(&note);
+    record_unread(&mut report.data, &note);
+    report
 }
 
 /// An `open` whose address downloaded: one line per download, the page
