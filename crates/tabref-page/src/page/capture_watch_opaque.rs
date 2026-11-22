@@ -34,7 +34,7 @@ pub(super) fn prepare(
     dom_off?;
     record(
         "opaque.events",
-        || json!({"late":late.iter().map(|event| json!({"method":event.method,"params":event.params})).collect::<Vec<_>>(),"dropped":connection.dropped_event_count() - dropped,"graph":graph.len()}),
+        || json!({"late":late.iter().map(|event| &event.method).collect::<Vec<_>>(),"dropped":connection.dropped_event_count() - dropped,"graph":graph.len()}),
     );
     if connection.dropped_event_count() != dropped
         || late.iter().any(|event| event.method != "CSS.fontsUpdated")
