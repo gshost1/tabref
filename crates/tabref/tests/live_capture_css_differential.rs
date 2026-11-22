@@ -42,6 +42,17 @@ fn sheets() -> Vec<String> {
         "url(x\t)",
         "url( x/**/)",
         "'unterminated",
+        "'nul\0x'",
+        "'replacement\u{fffd}'",
+        "'surrogate\u{e000}'",
+        "'escaped\\d800 x'",
+        "'backslash\\\ny'",
+        "U+0000-00FF",
+        "U+4??",
+        "[a;b]",
+        "func(a;b)",
+        ";color:blue",
+        "[unbalanced",
     ];
     let wrappers = ["plain", "media", "supports", "layer", "nested", "container"];
     let mut seed = 0xd1ff_e2e1_u64;
@@ -50,19 +61,34 @@ fn sheets() -> Vec<String> {
         ".a{b:url(x/*)}@container (min-width:1px){.x{color:red}}.c{d:e*/)}".into(),
         ".a{--v:\"\u{000C}}@container (min-width:1px){.x{color:red}}.c{--w:\"}".into(),
     ];
-    for i in 0..600 {
+    for import in [
+        "@import url('data:text/css,') layer(example);",
+        "@import url('data:text/css,') supports(display:grid);",
+    ] {
+        for wrapper in ["@media screen", "@supports(display:grid)", "@layer outer"] {
+            result.push(format!("{wrapper}{{{import}.nested{{color:red}}}}"));
+        }
+    }
+    for i in 0..1200 {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         let value = values[(seed >> 32) as usize % values.len()];
-        let base = format!(".a{{--v:{value};color:red}}");
+        let selector = [
+            ".a",
+            ".a/**/.b",
+            "a/**/b",
+            ".a/*x*/ > .b",
+            ".a[title='/*x*/']",
+        ][i % 5];
+        let base = format!("{selector}{{--v:{value};color:red;unicode-range:U+0000-00FF}}");
         let mut sheet = match wrappers[i % wrappers.len()] {
-            "media" => format!("@media screen and (min-width:1px){{{base}}}"),
-            "supports" => format!("@supports(display:grid){{{base}}}"),
-            "layer" => format!("@layer example{{{base}}}"),
+            "media" => format!("@MeDiA screen and (min-width:1px){{{base}}}"),
+            "supports" => format!("@\\73 upports(display:grid){{{base}}}"),
+            "layer" => format!("@LAYER example{{{base}}}"),
             "nested" => format!("@layer example{{@media screen{{{base}}}}}"),
             "container" => format!("@container(width>1px){{{base}}}"),
             _ => base,
         };
-        match i % 9 {
+        match i % 14 {
             0 => sheet.push_str("@container(width>1px){.x{color:red}}"),
             1 => sheet.push_str(".z{color:blue}"),
             2 => sheet.insert_str(0, "<!--"),
@@ -70,6 +96,12 @@ fn sheets() -> Vec<String> {
             4 => sheet.insert_str(0, "/* { @container */"),
             5 => sheet.push_str("@\\63 ontainer(width>1px){.x{color:red}}"),
             6 => sheet.push_str(".x:ha\\73(b){color:red}"),
+            7 => sheet.insert_str(0, "@import url('data:text/css,') layer(example);"),
+            8 => sheet.insert_str(0, "@import url('data:text/css,') supports(display:grid);"),
+            9 => sheet = format!("@media screen{{<!--{sheet}-->}}"),
+            10 => sheet = format!("@supports(display:grid){{;{sheet}}}"),
+            11 => sheet = format!("@layer outer{{{sheet}}}"),
+            12 => sheet = format!("@\\6d edia screen{{{sheet}}}"),
             _ => {}
         }
         result.push(sheet);
@@ -103,8 +135,15 @@ fn approved_rule_structure_matches_chrome_cssom() {
         r"(async () => {{
         if (document.readyState !== 'complete') await new Promise(r => addEventListener('load', r, {{once:true}}));
         return {}.map(text => {{
-            const el = document.createElement('style'); el.textContent = text; document.head.append(el);
-            const names = [...el.sheet.cssRules].map(rule => rule.type === CSSRule.STYLE_RULE ? 'style' : rule.cssText.match(/^@([\w-]+)/)[1].toLowerCase());
+            const el = document.createElement('style'); el.textContent = text.replaceAll('\uE000', '\uD800'); document.head.append(el);
+            const names = [];
+            const walk = (rules, path = []) => [...rules].forEach((rule, index) => {{
+                const here = [...path, index];
+                const kind = rule.constructor.name;
+                names.push(here.join('/') + ':' + kind);
+                if (rule.cssRules) walk(rule.cssRules, here);
+            }});
+            walk(el.sheet.cssRules);
             el.remove(); return names;
         }});
     }})()",
@@ -124,9 +163,11 @@ fn approved_rule_structure_matches_chrome_cssom() {
     let mut rejected = 0;
     let mut disagreements = Vec::new();
     for (text, names) in sheets.iter().zip(chrome) {
-        if let Some(parsed) = classifier::structure::structure(text) {
+        let normalized = text.replace('\u{e000}', "\u{fffd}");
+        if classifier::classify("differential-tree", &normalized).is_some() {
             approved += 1;
-            if json!(parsed) != *names {
+            let parsed = classifier::structure::tree(&normalized);
+            if parsed.as_ref().is_none_or(|parsed| json!(parsed) != *names) {
                 disagreements.push(format!("{text:?}: classifier={parsed:?}, Chrome={names}"));
             }
         } else {

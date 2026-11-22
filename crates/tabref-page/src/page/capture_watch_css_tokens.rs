@@ -30,6 +30,11 @@ pub(super) fn tokens(text: &str) -> Option<Vec<Token>> {
                 lexer.pos += 1;
             }
             lexer.pos += 2;
+            if matches!(result.last(), Some(Token::Word(_)))
+                && (lexer.ident_start() || lexer.peek(0).is_some_and(|c| c.is_ascii_digit()))
+            {
+                return None;
+            }
             continue;
         }
         if lexer.rest("<!--") {

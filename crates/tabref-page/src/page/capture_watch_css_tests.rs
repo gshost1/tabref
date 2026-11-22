@@ -1,6 +1,47 @@
 use super::classify;
 
 #[test]
+fn differential_tree_preserves_nested_rule_paths() {
+    assert_eq!(super::structure::tree(""), Some(Vec::new()));
+    assert_eq!(super::structure::tree("@container(width>1px){}"), None);
+    assert_eq!(
+        super::structure::tree("@layer a;@layer b{}"),
+        Some(vec![
+            "0:CSSLayerStatementRule".into(),
+            "1:CSSLayerBlockRule".into()
+        ])
+    );
+    assert_eq!(
+        super::structure::tree(
+            "@media screen{@supports(display:grid){@layer x{a{color:red}}}b{color:blue}}c{color:red}"
+        ),
+        Some(
+            [
+                "0:CSSMediaRule",
+                "0/0:CSSSupportsRule",
+                "0/0/0:CSSLayerBlockRule",
+                "0/0/0/0:CSSStyleRule",
+                "0/1:CSSStyleRule",
+                "1:CSSStyleRule"
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+        )
+    );
+}
+
+#[test]
+fn comments_cannot_join_separate_selector_names() {
+    for css in [
+        "a/**/b{color:red}",
+        "@media screen{@supports(display:grid){a/**/b{color:red}}}",
+    ] {
+        assert_eq!(classify("comment-selector", css), None);
+    }
+}
+
+#[test]
 fn cdo_and_cdc_are_top_level_tokens_not_identifier_fragments() {
     let css = "<!--a{color:red}-->@media screen{a{color:blue}}";
     assert_eq!(classify("cdo-cdc", css), Some(Vec::new()));
