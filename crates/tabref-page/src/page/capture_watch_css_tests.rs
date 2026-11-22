@@ -119,14 +119,24 @@ fn excessive_input_and_nesting_fail_closed() {
 
 #[test]
 fn malformed_declarations_are_blind() {
-    for css in ["a{color red}", "a{:red}", "a{color:}", "a{color:red; broken}", "a{color:red!important!important}"] {
+    for css in [
+        "a{color red}",
+        "a{:red}",
+        "a{color:}",
+        "a{color:red; broken}",
+        "a{color:red!important!important}",
+    ] {
         assert_eq!(classify("malformed", css), None, "{css}");
     }
 }
 
 #[test]
 fn tracked_state_selectors_are_safe() {
-    for css in ["a:hover{visibility:hidden}", "input:checked+a{display:none}", "a:focus{opacity:0}"] {
+    for css in [
+        "a:hover{visibility:hidden}",
+        "input:checked+a{display:none}",
+        "a:focus{opacity:0}",
+    ] {
         assert!(classify("states", css).is_some(), "{css}");
     }
 }

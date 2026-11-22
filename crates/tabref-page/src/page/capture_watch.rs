@@ -27,7 +27,7 @@
 //! without observable mutations, including scoped registries. Manual slots,
 //! until-found content and container queries are blind. Opaque stylesheet
 //! identity, href, disabled and media state are recorded, but unreadable
-//! rules may contain container queries, so these sheets are blind too,
+//! rules require fail-closed CDP text classification before approval,
 //! including imports inside readable sheets. Other stylesheet errors and oversized
 //! form or stylesheet state are blind rather than sampled.
 //! Supported state pseudo-classes are fingerprinted by matched node identity.
@@ -41,7 +41,13 @@ use crate::{CdpConnection, PageSession};
 
 const MAX_ELEMENTS: usize = 30_000;
 
-const SCAN: &str = r"const scan = () => {
+#[path = "capture_watch_css.rs"]
+mod css;
+#[path = "capture_watch_opaque.rs"]
+mod opaque;
+
+const SCAN: &str = r"const scan = (approved = []) => {
+    const opaque = [];
     const roots = [];
     const sheetObjects = [];
     const animations = [];
@@ -53,6 +59,7 @@ const SCAN: &str = r"const scan = () => {
     let visibility = 0;
     let forms = 0;
     let styleSize = 0;
+    let ruleCount = 0;
     const visibilityOptions = { opacityProperty: true, visibilityProperty: true };
     const frames = 'iframe, frame, object, embed';
     const moving = root => {
@@ -78,6 +85,7 @@ const SCAN: &str = r"const scan = () => {
         if (sheet.media.mediaText) state += realm.matchMedia(sheet.media.mediaText).matches;
         const rules = list => {
           for (const rule of list) {
+            if (++ruleCount > 10000) { blind = true; return; }
             const text = rule.cssText;
             if (text.startsWith('@container')) { blind = true; return; }
             styleSize += text.length;
@@ -90,8 +98,11 @@ const SCAN: &str = r"const scan = () => {
           }
         };
         try { rules(sheet.cssRules); } catch (error) {
-          if (error.name === 'SecurityError') state += ':opaque';
-          blind = true;
+          if (error.name === 'SecurityError' && realm === window) {
+            state += ':opaque';
+            if (!approved.some(entry => entry.sheet === sheet && entry.href === sheet.href)) opaque.push({sheet, href: sheet.href});
+            if (opaque.length > 128) blind = true;
+          } else blind = true;
         }
         if (blind) return;
       }
@@ -122,7 +133,7 @@ const SCAN: &str = r"const scan = () => {
         '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)',
         '(prefers-contrast: more)', '(prefers-contrast: less)', '(prefers-contrast: custom)',
         '(prefers-contrast: no-preference)', '(forced-colors: active)', '(forced-colors: none)',
-        '(orientation: portrait)', '(orientation: landscape)']) state += ':' + realm.matchMedia(query).matches;
+        '(orientation: portrait)', '(orientation: landscape)', 'screen', 'print', 'all']) state += ':' + realm.matchMedia(query).matches;
       styles([...(root.styleSheets ?? []), ...(root.adoptedStyleSheets ?? [])], doc.defaultView);
       if (blind) return;
       state += ':' + doc.defaultView.scrollX + ':' + doc.defaultView.scrollY
@@ -169,7 +180,7 @@ const SCAN: &str = r"const scan = () => {
     const box = document.documentElement;
     const place = [location.href, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio,
       box ? box.scrollWidth : 0, box ? box.scrollHeight : 0].join('\u0004');
-    return { roots, sheets: sheetObjects, animations, states, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
+    return { roots, sheets: sheetObjects, animations, states, opaque, blind, active, print: place + '\u0005' + state + '\u0007' + visible + ':' + visibility };
   };";
 
 /// How long the arm script waits for an idle main thread before it arms
@@ -181,10 +192,18 @@ const ARM: &str = r"await new Promise(resolve => { const arm = () => resolve((()
   KEY_AND_SCAN
   const old = window[key];
   if (old) old.stop();
-  const now = scan();
+  const pending = window[Symbol.for('tabref.capture-opaque')];
+  const opaque = pending?.token === TOKEN ? pending.approved ?? [] : [];
+  delete window[Symbol.for('tabref.capture-opaque')];
+  const now = scan(opaque);
   if (now.blind) { delete window[key]; return { blind: true }; }
+  if (now.opaque.length) {
+    window[Symbol.for('tabref.capture-opaque')] = {token: TOKEN, entries: now.opaque};
+    delete window[key];
+    return {blind: true, opaque: now.opaque.map(entry => entry.href)};
+  }
   const watch = { token: TOKEN, doc: document, dirty: false, observers: [], roots: now.roots,
-    sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind };
+    sheets: now.sheets, animations: now.animations, states: now.states, active: now.active, print: now.print, blind: now.blind, opaque };
   const restore = [];
   watch.stop = () => {
     if (watch.dirty) return;
@@ -246,8 +265,8 @@ const CHECK: &str = r"(() => {
   if (watch.observers.some(observer => observer.takeRecords().length > 0)) watch.stop();
   if (watch.dirty) return 'mutated';
   if (watch.blind) return 'blind';
-  const now = scan();
-  if (now.blind) return 'blind';
+  const now = scan(watch.opaque);
+  if (now.blind || now.opaque.length) return 'blind';
   if (now.roots.length !== watch.roots.length || now.roots.some((root, i) => root !== watch.roots[i])) return 'roots';
   if (now.sheets.length !== watch.sheets.length || now.sheets.some((sheet, i) => sheet !== watch.sheets[i])) return 'state';
   if (now.states.length !== watch.states.length || now.states.some((node, i) => node !== watch.states[i])) return 'state';
@@ -275,7 +294,12 @@ pub fn arm_capture_watch(
     token: &str,
     deadline: Deadline,
 ) -> Result<CaptureWatch, AppError> {
-    let reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
+    let mut reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
+    if let Some(urls) = reply.get("opaque").and_then(Value::as_array) {
+        if opaque::prepare(connection, session, token, urls, deadline).is_ok() {
+            reply = evaluate_quietly(connection, session, &script(ARM, token), deadline)?;
+        }
+    }
     Ok(CaptureWatch {
         token: token.to_owned(),
         blind: reply.get("blind").and_then(Value::as_bool).unwrap_or(true),

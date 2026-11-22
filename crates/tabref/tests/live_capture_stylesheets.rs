@@ -159,6 +159,25 @@ fn unsafe_opaque_rules_are_blind() {
 }
 
 #[test]
+fn opaque_container_queries_are_blind() {
+    check_opaque_sheet(false, "@container(width>1px){#go{visibility:hidden}}", true);
+}
+
+#[test]
+fn opaque_untracked_media_are_blind() {
+    check_opaque_sheet(false, "@media(hover:hover){#go{visibility:hidden}}", true);
+}
+
+#[test]
+fn opaque_relational_pseudo_classes_are_blind() {
+    check_opaque_sheet(
+        false,
+        "body:has(#toggle:checked) #go{visibility:hidden}",
+        true,
+    );
+}
+
+#[test]
 fn malformed_and_huge_opaque_sheets_are_blind() {
     for body in ["#go{visibility hidden}", "#go{visibility:}"] {
         check_opaque_sheet(false, body, true);
@@ -209,12 +228,46 @@ fn opaque_imports_are_classified_recursively() {
 
 #[test]
 fn a_safe_opaque_sheet_allows_daemon_read_reuse() {
+    daemon_reuse("button{color:red}", None, true);
+}
+
+#[test]
+fn opaque_state_visibility_changes_do_not_reuse_daemon_captures() {
+    for (css, change) in [
+        ("button:hover{visibility:hidden}", "hover"),
+        (
+            "input:checked+button{visibility:hidden}",
+            "document.querySelector('input').checked=true",
+        ),
+        (
+            "button:focus{visibility:hidden}",
+            "document.querySelector('button').focus()",
+        ),
+    ] {
+        daemon_reuse(css, Some(change), false);
+    }
+}
+
+#[test]
+fn unclassifiable_opaque_sheets_do_not_reuse_daemon_captures() {
+    for css in [
+        "button{visibility hidden}",
+        "@container(width>1px){button{visibility:hidden}}",
+        "@media(hover:hover){button{visibility:hidden}}",
+        "body:has(input:checked) button{visibility:hidden}",
+    ] {
+        daemon_reuse(css, None, false);
+    }
+    daemon_reuse(&" ".repeat(1_000_001), None, false);
+}
+
+fn daemon_reuse(css: &str, change: Option<&str>, reuse: bool) {
     if !common::live() {
         return;
     }
-    let css = stylesheet("@media(prefers-color-scheme:dark){button{color:white}}button{color:red}");
+    let css = stylesheet(css);
     let html = format!(
-        "<!doctype html><link rel=stylesheet href='http://127.0.0.1:{css}/style.css'><button>Go</button>"
+        "<!doctype html><link rel=stylesheet href='http://127.0.0.1:{css}/style.css'><input type=checkbox><button style='position:absolute;left:20px;top:20px'>Go</button>"
     );
     let port = common::serve(&[("/", &html)]);
     let harness = common::harness("opaque-reuse");
@@ -242,7 +295,31 @@ fn a_safe_opaque_sheet_allows_daemon_read_reuse() {
     };
     run(&["open", &format!("http://127.0.0.1:{port}/")]);
     let snap = run(&["snap"]);
+    if let Some(change) = change {
+        let deadline = Deadline::after(30_000).unwrap();
+        let mut connection = connect(&harness.browser.endpoint().unwrap(), deadline).unwrap();
+        let target = list_page_targets(&mut connection, deadline)
+            .unwrap()
+            .remove(0);
+        let page = attach_to_target(&mut connection, &target.target_id, deadline).unwrap();
+        if change == "hover" {
+            connection
+                .call(
+                    "Input.dispatchMouseEvent",
+                    json!({"type":"mouseMoved","x":25,"y":25}),
+                    Some(&page.session_id),
+                    deadline,
+                )
+                .unwrap();
+        } else {
+            evaluate(&mut connection, &page, change);
+        }
+    }
     let find = run(&["find", "Go"]);
-    assert_eq!(snap["data"]["snapshot_id"], find["data"]["snapshot_id"]);
+    assert_eq!(
+        snap["data"]["snapshot_id"] == find["data"]["snapshot_id"],
+        reuse,
+        "{css}: {change:?}"
+    );
     run(&["daemon", "stop"]);
 }

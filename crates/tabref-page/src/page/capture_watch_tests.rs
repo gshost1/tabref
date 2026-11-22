@@ -2,6 +2,9 @@ use serde_json::json;
 
 use super::{ARM, CHECK, has_closed_shadow_root, script};
 
+#[path = "capture_watch_protocol_tests.rs"]
+mod protocol;
+
 #[test]
 fn a_closed_shadow_root_in_any_document_is_found() {
     let capture = json!({
