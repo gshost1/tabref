@@ -1,0 +1,81 @@
+<!doctype html><title>Combobox read-back and search</title>
+<button id=person role=combobox aria-controls=people aria-label=Person aria-expanded=false>Nobody</button>
+<ul id=people role=listbox hidden><li role=option><span>Alice</span> <small>alice@example.com</small></li><li role=option><span>Bob</span> <small>bob@example.com</small></li></ul>
+<label for=fruit>Fruit</label><input id=fruit role=combobox aria-controls=fruitMenu aria-expanded=false>
+<ul id=fruitMenu role=listbox></ul>
+<div><label for=tagInput>Tags</label><input id=tagInput role=combobox aria-controls=tags aria-expanded=false><div id=chips><button aria-label="Remove Existing">Existing</button></div></div>
+<ul id=tags role=listbox hidden><li role=option>Alpha</li></ul>
+<label for=place>Place</label><input id=place role=combobox aria-controls=places aria-expanded=false readonly value=None>
+<div id=places role=listbox hidden style="height:80px;overflow:auto;position:relative"><div id=spacer></div></div>
+<button id=prefix role=combobox aria-controls=prefixMenu aria-label=Prefix aria-expanded=false>None</button>
+<ul id=prefixMenu role=listbox hidden><li role=option>New Belgium</li><li role=option>Spain</li></ul>
+<script>
+const show = (box, list, open) => {
+  list.hidden = !open;
+  box.setAttribute('aria-expanded', String(open));
+};
+const connect = (box, list, pick) => {
+  box.onclick = () => show(box, list, true);
+  box.onkeydown = e => { if (e.key === 'Escape') show(box, list, false); };
+  list.onclick = e => {
+    const option = e.target.closest('[role=option]');
+    if (option) { pick(option); show(box, list, false); }
+  };
+};
+connect(person, people, option => {
+  if (person.dataset.mode === 'selected') option.setAttribute('aria-selected', 'true');
+  else person.textContent = person.dataset.mode ?? option.firstElementChild.textContent;
+});
+fruit.onclick = () => {
+  fruitMenu.innerHTML = ['Apple','Banana','Cherry'].map(x => '<li role=option>' + x + '</li>').join('');
+  fruit.setAttribute('aria-expanded', 'true');
+};
+fruitMenu.onclick = e => {
+  if (e.target.getAttribute('role') !== 'option') return;
+  fruit.value = e.target.textContent;
+  fruitMenu.replaceChildren();
+  fruit.setAttribute('aria-expanded', 'false');
+};
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && fruit.value && fruit.getAttribute('aria-expanded') === 'false') fruit.value = '';
+});
+connect(tagInput, tags, option => {
+  tagInput.value = '';
+  const tag = document.createElement('button');
+  tag.textContent = option.textContent;
+  tag.setAttribute('aria-label', 'Remove ' + option.textContent);
+  chips.append(tag);
+});
+connect(prefix, prefixMenu, option => { prefix.textContent = option.textContent; });
+const all = Array.from({length:100}, (_, i) => 'Place ' + String(i).padStart(3,'0'));
+all[5] = 'British Virgin Islands';
+all[90] = 'U.S. Virgin Islands';
+let results = all;
+const render = () => {
+  const first = Math.floor(places.scrollTop / 20);
+  places.querySelectorAll('[role=option]').forEach(node => node.remove());
+  results.slice(first, first + 4).forEach((label, k) => {
+    const option = document.createElement('div');
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-posinset', first + k + 1);
+    option.setAttribute('aria-setsize', results.length);
+    option.style = 'position:absolute;top:' + ((first+k)*20) + 'px;height:20px';
+    option.textContent = label;
+    places.append(option);
+  });
+};
+const update = (matches = all) => {
+  results = matches;
+  spacer.style.height = results.length * 20 + 'px';
+  places.scrollTop = 0;
+  render();
+};
+places.onscroll = render;
+connect(place, places, option => { place.value = option.textContent; });
+place.onclick = () => { show(place, places, true); update(); };
+place.oninput = () => {
+  place.dataset.filter = place.value;
+  show(place, places, true);
+  update(all.filter(name => name.toLowerCase().includes(place.value.toLowerCase())));
+};
+</script>
