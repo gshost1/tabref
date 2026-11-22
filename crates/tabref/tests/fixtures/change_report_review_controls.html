@@ -5,6 +5,9 @@
   <button>Quiet</button>
   <button onclick="reveal()">Reveal cards</button>
   <button onclick="placeOrder()">Place order</button>
+  <button onclick="revealButtonFirst(2)">Reveal two button-first cards</button>
+  <button onclick="revealButtonFirst(3)">Reveal three button-first cards</button>
+  <button onclick="revealButtonFirst(3, true)">Reveal ambiguous cards</button>
   <main id="cards" hidden>
     <div>
       <h3>Card A</h3>
@@ -13,6 +16,7 @@
       <p><button onclick="selectCard('Card B')">Actions</button></p>
     </div>
   </main>
+  <div id="button-first"></div>
   <div id="toast" hidden><button>Undo</button></div>
   <p id="status"></p>
   <output id="orders">0</output>
@@ -24,6 +28,16 @@ function reveal() {
 }
 function selectCard(title) {
   document.getElementById('status').textContent = 'Selected ' + title;
+}
+function revealButtonFirst(count, ambiguous = false) {
+  document.getElementById('button-first').innerHTML = ['Card A', 'Card B', 'Card C']
+    .slice(0, count)
+    .map((title, index) => {
+      const button = `<button onclick="selectCard('${title}')">Actions</button>`;
+      const heading = `<h3>${title}</h3>`;
+      return ambiguous && index === 1 ? heading + button : button + heading;
+    })
+    .join('');
 }
 function placeOrder() {
   const orders = document.getElementById('orders');

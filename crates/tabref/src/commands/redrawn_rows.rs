@@ -11,6 +11,10 @@ use crate::view::action_changes::{location, prepare};
 use crate::view::node_line::{escape_line, node_line, quote_text};
 use crate::view::rows_replaced;
 
+#[path = "redrawn_rows/headings.rs"]
+mod headings;
+use headings::{ControlKey, HeadingControls, HeadingLabel, control_key, ref_nodes};
+
 const NEW_SHOWN: usize = 8;
 const NEW_LINE_CHARS: usize = 80;
 
@@ -27,8 +31,8 @@ struct NewControl<'a> {
 }
 
 impl<'a> NewControl<'a> {
-    fn key(&self) -> (&'a str, Option<&'a str>) {
-        (&self.node.role, self.node.display_name())
+    fn key(&self) -> ControlKey<'a> {
+        control_key(self.node)
     }
 }
 
@@ -52,7 +56,7 @@ pub(super) fn control_report(
         rows_replaced::other_changes(page),
         |target| documents(target).zip(snapshot.dom_reply(target)),
         |nodes| {
-            preview = preview_controls(&page.changes, nodes, documents);
+            preview = preview_controls(&page.changes, nodes, documents, ref_nodes(&snapshot.tree));
             preview
                 .shown
                 .iter()
@@ -79,10 +83,11 @@ pub(super) fn control_report(
     }
 }
 
-fn preview_controls<'d>(
+fn preview_controls<'n, 'd>(
     changes: &[TextChange],
-    nodes: &[&AccessibilityNode],
+    nodes: &[&'n AccessibilityNode],
     documents: impl Fn(&str) -> Option<&'d [DomTree]>,
+    all_controls: impl IntoIterator<Item = &'n AccessibilityNode>,
 ) -> ControlPreview {
     let (run, table) = changes
         .iter()
@@ -105,8 +110,9 @@ fn preview_controls<'d>(
     let mut outside = Vec::new();
     let mut counts = HashMap::new();
     let mut in_rows = 0;
+    let heading_controls = HeadingControls::new(nodes, all_controls, &documents);
     for node in nodes {
-        let context = context(node, &documents, &reordered);
+        let context = context(node, &documents, &reordered, &heading_controls);
         let control = NewControl {
             node,
             changed: context
@@ -188,7 +194,7 @@ fn distinct_labels(controls: &[NewControl<'_>]) -> Vec<Option<String>> {
 fn order_preview(
     found: &[NewControl<'_>],
     outside: &mut [usize],
-    counts: &HashMap<(&str, Option<&str>), usize>,
+    counts: &HashMap<ControlKey<'_>, usize>,
     run: &[String],
 ) {
     let labels: HashSet<_> = outside
@@ -247,12 +253,14 @@ fn context<'a>(
     control: &AccessibilityNode,
     documents: &impl Fn(&str) -> Option<&'a [DomTree]>,
     reordered: &HashSet<&str>,
+    heading_controls: &HeadingControls<'_, 'a>,
 ) -> Context {
     let Some((doc, index)) = location(control, documents) else {
         return Context::default();
     };
     let name = control.display_name().unwrap_or_default().trim();
     let mut result = Context::default();
+    let mut heading_scope_found = false;
     let ancestors = doc.ancestors(index);
     for &ancestor in &ancestors {
         let Some(node) = doc.node(ancestor) else {
@@ -276,16 +284,18 @@ fn context<'a>(
                 .is_some_and(|name| !name.trim().is_empty())
                 && reordered.contains(text.as_str());
             result.row_text = Some(escape_line(&text, false));
-            if ancestor != index && result.label.is_none() {
+            if ancestor != index && !heading_scope_found {
                 result.label = row_label(doc, node, name, &text, &ancestors);
             }
             break;
         }
         if ancestor != index
-            && result.label.is_none()
+            && !heading_scope_found
             && matches!(node.tag(), "DIV" | "ARTICLE" | "SECTION")
+            && let HeadingLabel::InScope(label) = heading_controls.label(control, doc, node, index)
         {
-            result.label = heading_label(doc, node, index, name);
+            result.label = label;
+            heading_scope_found = true;
         }
     }
     result
@@ -339,36 +349,6 @@ fn row_label(
         .then_some(first_cell)
     })?;
     let text = subtree_text(doc, label);
-    useful_label(&text, name).then_some(text)
-}
-
-fn heading_label(doc: &DomTree, container: &DomNode, control: usize, name: &str) -> Option<String> {
-    let mut pending: Vec<_> = container.children.iter().rev().copied().collect();
-    let mut heading = None;
-    let mut past_control = false;
-    while let Some(at) = pending.pop() {
-        if at == control {
-            if heading.is_some() {
-                break;
-            }
-            past_control = true;
-            continue;
-        }
-        let Some(node) = doc.node(at) else {
-            continue;
-        };
-        if node.is_shown()
-            && (matches!(node.tag(), "H1" | "H2" | "H3" | "H4" | "H5" | "H6")
-                || role(node) == Some("heading"))
-        {
-            if past_control && heading.is_some() {
-                return None;
-            }
-            heading = Some(at);
-        }
-        pending.extend(node.children.iter().rev().copied());
-    }
-    let text = subtree_text(doc, heading?);
     useful_label(&text, name).then_some(text)
 }
 

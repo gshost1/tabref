@@ -2,6 +2,8 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+#[path = "live_change_report_controls/card_headings.rs"]
+mod card_headings;
 mod common;
 
 use common::{Harness, harness, live, serve};
@@ -285,21 +287,6 @@ fn board_redraw_labels_containers_and_prefers_distinct_controls() {
     let moved_ref = new_ref(&text, "button \"Card actions\" in \"Fix login bug\"");
     let reopened = tabref.ok(&["click", &moved_ref]).stdout;
     assert!(reopened.contains("Assign"), "{reopened}");
-}
-
-#[test]
-fn flat_cards_use_their_own_preceding_headings() {
-    if !live() {
-        return;
-    }
-    let (tabref, base) = site();
-    tabref.ok(&["open", &format!("{base}/review")]);
-    let text = tabref.ok(&["click", "Reveal cards"]).stdout;
-    let a = new_ref(&text, "button \"Actions\" in \"Card A\"");
-    let b = new_ref(&text, "button \"Actions\" in \"Card B\"");
-    assert_ne!(a, b, "{text}");
-    let clicked = tabref.ok(&["click", &b]).stdout;
-    assert!(clicked.contains("Selected Card B"), "{clicked}");
 }
 
 #[test]

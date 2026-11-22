@@ -16,7 +16,12 @@ fn control(role: &str, name: Option<&str>, backend_id: i64) -> AccessibilityNode
 #[test]
 fn without_a_reorder_every_new_control_is_listed() {
     let undo = control("button", Some("Undo"), 1);
-    let preview = preview_controls(&[TextChange::Added("Saved".into())], &[&undo], |_| None);
+    let preview = preview_controls(
+        &[TextChange::Added("Saved".into())],
+        &[&undo],
+        |_| None,
+        [&undo],
+    );
     assert!(preview.summary.is_empty());
     assert_eq!(preview.shown, [0]);
 }
@@ -54,7 +59,8 @@ fn only_named_controls_inside_reordered_rows_are_summarized() {
         run: vec!["P-2 44 kg".into(), "Close 12 kg".into()],
         table: true,
     };
-    let preview = preview_controls(&[sorted], &[&link, &unnamed, &close], |_| Some(&documents));
+    let controls = [&link, &unnamed, &close];
+    let preview = preview_controls(&[sorted], &controls, |_| Some(&documents), controls);
     assert_eq!(
         preview.summary,
         ["rows drawn again: 1 new refs, earlier refs in them are stale: tabref snap"]
@@ -94,7 +100,7 @@ fn a_flat_container_uses_the_preceding_heading_for_each_control() {
     }];
     let a = control("button", Some("Actions"), 3);
     let b = control("button", Some("Actions"), 6);
-    let preview = preview_controls(&[], &[&a, &b], |_| Some(&documents));
+    let preview = preview_controls(&[], &[&a, &b], |_| Some(&documents), [&a, &b]);
     assert_eq!(
         preview.labels,
         [Some("Card A".into()), Some("Card B".into())]
