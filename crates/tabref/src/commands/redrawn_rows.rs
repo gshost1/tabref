@@ -222,7 +222,8 @@ fn context<'a>(
     };
     let name = control.display_name().unwrap_or_default().trim();
     let mut result = Context::default();
-    for ancestor in doc.ancestors(index) {
+    let ancestors = doc.ancestors(index);
+    for &ancestor in &ancestors {
         let Some(node) = doc.node(ancestor) else {
             break;
         };
@@ -244,8 +245,8 @@ fn context<'a>(
                 .is_some_and(|name| !name.trim().is_empty())
                 && reordered.contains(text.as_str());
             result.row_text = Some(escape_line(&text, false));
-            if result.label.is_none() {
-                result.label = row_label(doc, node, name, &text);
+            if ancestor != index && result.label.is_none() {
+                result.label = row_label(doc, node, name, &text, &ancestors);
             }
             break;
         }
@@ -273,12 +274,44 @@ fn is_row(node: &DomNode, role: Option<&str>) -> bool {
         || matches!(node.display(), "table-row" | "list-item")
 }
 
-fn row_label(doc: &DomTree, row: &DomNode, name: &str, text: &str) -> Option<String> {
-    child_label(doc, row, name, |child| {
-        matches!(child.tag(), "TD" | "TH")
-            || matches!(role(child), Some("cell" | "gridcell" | "rowheader"))
-    })
-    .or_else(|| useful_label(text, name).then(|| text.to_owned()))
+fn row_label(
+    doc: &DomTree,
+    row: &DomNode,
+    name: &str,
+    text: &str,
+    ancestors: &[usize],
+) -> Option<String> {
+    if row.tag() == "LI" || role(row) == Some("listitem") || row.display() == "list-item" {
+        return useful_label(text, name).then(|| text.to_owned());
+    }
+    let mut cells = row.children.iter().copied().filter(|index| {
+        doc.node(*index).is_some_and(|child| {
+            child.is_shown()
+                && (matches!(child.tag(), "TD" | "TH")
+                    || matches!(
+                        role(child),
+                        Some("cell" | "gridcell" | "rowheader" | "columnheader")
+                    ))
+        })
+    });
+    let first_cell = cells.next()?;
+    let header = std::iter::once(first_cell).chain(cells).find(|index| {
+        doc.node(*index).is_some_and(|child| {
+            !ancestors.contains(index)
+                && (role(child) == Some("rowheader")
+                    || (child.tag() == "TH" && child.attr("scope") == Some("row")))
+        })
+    });
+    let label = header.or_else(|| {
+        (row.tag() == "TR"
+            && !ancestors.contains(&first_cell)
+            && doc
+                .node(first_cell)
+                .is_some_and(|child| child.tag() == "TD"))
+        .then_some(first_cell)
+    })?;
+    let text = subtree_text(doc, label);
+    useful_label(&text, name).then_some(text)
 }
 
 fn child_label(
