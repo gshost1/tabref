@@ -3,6 +3,15 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Publish an existing GitHub release to npm without rebuilding: run from
+  # main with the release's tag. Uses that release's binaries and main's
+  # README.md and npm/ tooling.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish to npm, e.g. v0.2.0"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,6 +22,7 @@ env:
 jobs:
   build:
     name: ${{ matrix.target }}
+    if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -92,18 +102,25 @@ jobs:
     name: Publish to npm
     # After the GitHub release: an npm version can't be taken back, so it
     # only goes out once the release and SHA256SUMS it points at exist.
+    # A dispatch skips both and must come from main.
     needs: [build, publish]
-    if: github.repository == 'gshost1/tabref'
+    if: >-
+      !cancelled() && github.repository == 'gshost1/tabref' &&
+      ((github.event_name == 'push' && needs.build.result == 'success' && needs.publish.result == 'success') ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     environment: Release
     timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       # Trusted publishing needs npm 11.5.1 or later, which ships with Node 24.
       - uses: actions/setup-node@v4
@@ -114,10 +131,19 @@ jobs:
       - name: Prepare npm package
         id: version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          CARGO_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "FAIL: '$TAG' is not a release tag like v0.2.0"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          # The version the tagged source declares, also on a dispatch from main.
+          CARGO_VERSION=$(git show "refs/tags/$TAG:Cargo.toml" | python3 -c "import sys, tomllib; print(tomllib.loads(sys.stdin.read())['workspace']['package']['version'])")
           if [ "$VERSION" != "$CARGO_VERSION" ]; then
-            echo "FAIL: tag $GITHUB_REF_NAME does not match the Cargo.toml version $CARGO_VERSION"
+            echo "FAIL: tag $TAG does not match its Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+          if npm view "@gshost1/tabref@$VERSION" version 2>/dev/null | grep -q .; then
+            echo "FAIL: @gshost1/tabref@$VERSION is already on npm"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -128,14 +154,32 @@ jobs:
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           echo "npm package version set to ${VERSION}"
-          cp ../README.md ../LICENSE ../NOTICE .
-          cp ../CHANGELOG.md . 2>/dev/null || true
+          cp ../LICENSE ../NOTICE .
+          # An npm version's README can't be changed later, so never publish
+          # without one.
+          if [ ! -f ../README.md ]; then
+            echo "FAIL: no README.md to publish; merge it to main, then dispatch this workflow from main with the tag"
+            exit 1
+          fi
+          cp ../README.md .
+          # The changelog as of the tag, also on a dispatch from a later main.
+          git show "refs/tags/$TAG:CHANGELOG.md" > CHANGELOG.md 2>/dev/null || rm -f CHANGELOG.md
 
       - name: Download built release archives
+        if: github.event_name == 'push'
         uses: actions/download-artifact@v4
         with:
           path: ${{ runner.temp }}/npm-release
           merge-multiple: true
+
+      - name: Download the existing release's archives
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/npm-release" --pattern 'tabref-*'
+          ls -l "$RUNNER_TEMP/npm-release"
 
       - name: Bundle built binaries
         env:
