@@ -25,7 +25,7 @@
 - Changes inside shadow roots and frames are reported (#56); visible panes inside hidden wrappers show (#76); reordered views report redrawn rows (#60); fresh refs after same-address reloads (#79).
 - `select` matches the label printed in the page view (#69). Upload finds hidden file inputs within the target (#58). Long `fill` values are previewed, not echoed (#66).
 - Connect and launch: find Chromium past a stale port file, verify the browser before attaching or closing, suggest a WebSocket URL when discovery fails, shorter logged-in browser warning (#55, #62-#65, #75, #81, #86).
-- Downloads: refuse profile aliases before creating folders; no-daemon leftover downloads are held to the cap (#93, #101).
+- Downloads: refuse profile aliases before creating folders; no-daemon leftover downloads stay within the size limit (#93, #101).
 - Windows: tests check out text files with LF (#53).
 
 ### Benchmarks
