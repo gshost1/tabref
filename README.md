@@ -20,7 +20,7 @@ An agent opens a page with `tabref open` and reads a plain-text snapshot where e
 - **Fast repeated reads:** A fresh capture is reused for up to 5 s while the page stays unchanged. On an RFC page (10 release runs, PR #122), `open` + `snap` + `find` + `find` dropped from 4.9 s to 2.2 s, and `find` after `open` dropped from 1,196 ms to 66.6 ms (9/10 reused).
 - **Short guide and safer actions:** `tabref skill` prints the full agent guide in 39 lines, `tabref do` batches steps into one shell call (10 s default per step, 120 s overall), and an action that was sent is never reported as safe to retry (PR #118, PR #120).
 
-https://github.com/user-attachments/assets/466ccbe8-43c7-433e-bf5f-5d8cf1ed67c9
+[▶ Watch the demo (21 s)](https://github.com/gshost1/tabref/releases/download/v0.2.0/tabref-race-v3.mp4)
 
 ## Results
 
