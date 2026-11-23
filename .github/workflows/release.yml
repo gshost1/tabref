@@ -142,6 +142,10 @@ jobs:
             echo "FAIL: tag $TAG does not match its Cargo.toml version $CARGO_VERSION"
             exit 1
           fi
+          if npm view "@gshost1/tabref@$VERSION" version 2>/dev/null | grep -q .; then
+            echo "FAIL: @gshost1/tabref@$VERSION is already on npm"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           cd npm
           VERSION="$VERSION" node -e "
@@ -151,15 +155,15 @@ jobs:
           "
           echo "npm package version set to ${VERSION}"
           cp ../LICENSE ../NOTICE .
-          # A dispatch exists to publish with main's README, so require it there.
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ ! -f ../README.md ]; then
-            echo "FAIL: main has no README.md to publish"
+          # An npm version's README can't be changed later, so never publish
+          # without one.
+          if [ ! -f ../README.md ]; then
+            echo "FAIL: no README.md to publish; merge it to main, then dispatch this workflow from main with the tag"
             exit 1
           fi
-          # Optional on a tag push: the package installs and runs without them.
-          for doc in README.md CHANGELOG.md; do
-            if [ -f "../$doc" ]; then cp "../$doc" .; fi
-          done
+          cp ../README.md .
+          # The changelog as of the tag, also on a dispatch from a later main.
+          git show "refs/tags/$TAG:CHANGELOG.md" > CHANGELOG.md 2>/dev/null || rm -f CHANGELOG.md
 
       - name: Download built release archives
         if: github.event_name == 'push'
