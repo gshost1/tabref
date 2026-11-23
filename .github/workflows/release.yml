@@ -128,8 +128,11 @@ jobs:
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           echo "npm package version set to ${VERSION}"
-          cp ../README.md ../LICENSE ../NOTICE .
-          cp ../CHANGELOG.md . 2>/dev/null || true
+          cp ../LICENSE ../NOTICE .
+          # Optional: the package still installs and runs without them.
+          for doc in README.md CHANGELOG.md; do
+            if [ -f "../$doc" ]; then cp "../$doc" .; fi
+          done
 
       - name: Download built release archives
         uses: actions/download-artifact@v4
