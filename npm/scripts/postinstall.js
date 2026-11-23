@@ -52,8 +52,15 @@ function isNodeLauncher(path) {
   }
 }
 
+// pnpm's bin entries are shell shims that run `node bin/tabref`, on every
+// OS, so swapping bin/tabref for the native binary would break them. npm,
+// yarn and bun symlink (POSIX) or write npm-style shims (Windows).
+function launcherRequired(userAgent = process.env.npm_config_user_agent || '') {
+  return userAgent.startsWith('pnpm/');
+}
+
 function linkBinEntry(directory, binaryName, osPlatform = platform()) {
-  if (!isInstalledPackage(directory)) return false;
+  if (!isInstalledPackage(directory) || launcherRequired()) return false;
   if (osPlatform === 'win32') {
     return require('../lib/windows-bin')(directory, binaryName);
   }
@@ -88,8 +95,13 @@ function main() {
   if (!entry) {
     log(`no prebuilt binary for ${platform()}-${arch()}; prebuilt platforms: ${platformKeys().join(', ')}.`);
     log('Build from source: https://github.com/gshost1/tabref');
+    process.exitCode = 1;
     return;
   }
+
+  // In the source checkout (npm install or npm link inside npm/) there are
+  // no bundled binaries yet; nothing to check or link.
+  if (!isInstalledPackage(binDir)) return;
 
   const binaryPath = join(binDir, entry.binaryName);
   if (!existsSync(binaryPath) || !matchesRecordedDigest(binaryPath)) {
@@ -109,4 +121,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { linkBinEntry, matchesRecordedDigest };
+module.exports = { launcherRequired, linkBinEntry, matchesRecordedDigest };

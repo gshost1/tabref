@@ -25,7 +25,8 @@
     "lib",
     "scripts",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=18"

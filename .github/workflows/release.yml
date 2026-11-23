@@ -90,7 +90,9 @@ jobs:
   # automatically.
   publish-npm:
     name: Publish to npm
-    needs: build
+    # After the GitHub release: an npm version can't be taken back, so it
+    # only goes out once the release and SHA256SUMS it points at exist.
+    needs: [build, publish]
     if: github.repository == 'gshost1/tabref'
     runs-on: ubuntu-latest
     environment: Release
@@ -150,7 +152,7 @@ jobs:
           fi
 
       # A prerelease version (anything with a hyphen) goes to the "next"
-      # dist-tag so `npm install -g tabref` keeps resolving to the stable one.
+      # dist-tag so `npm install -g @gshost1/tabref` keeps resolving to the stable one.
       - name: Publish to npm
         working-directory: npm
         env:

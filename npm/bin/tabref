@@ -39,14 +39,22 @@ function main() {
   }
 
   const child = spawn(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
+  // Pass termination signals on, so a caller that stops this launcher
+  // doesn't leave the native process running.
+  const forwarded = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+  const forward = (signal) => { try { child.kill(signal); } catch {} };
+  for (const signal of forwarded) process.on(signal, forward);
   child.on('error', (err) => {
     console.error(`tabref: cannot run the binary: ${err.message}`);
     process.exit(1);
   });
   child.on('close', (code, signal) => {
     if (signal) {
-      console.error(`tabref: terminated by signal ${signal}`);
-      process.exit(1);
+      // Die by the same signal so the caller sees the real status.
+      for (const name of forwarded) process.removeListener(name, forward);
+      process.kill(process.pid, signal);
+      setTimeout(() => process.exit(1), 1000).unref();
+      return;
     }
     process.exit(code ?? 0);
   });

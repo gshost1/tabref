@@ -1,5 +1,8 @@
 // Windows has no usable hard-link trick for npm's bin shims, so point the
 // tabref.cmd and tabref.ps1 shims npm generated straight at the native .exe.
+// The rewritten shims keep npm's own relative form ("%~dp0\..." and
+// "$basedir/..."), so npm's read-cmd-shim still resolves them into this
+// package and a later reinstall or upgrade doesn't fail with EEXIST.
 const { existsSync, realpathSync, readFileSync, writeFileSync } = require('fs');
 const { dirname, join, relative, resolve } = require('path');
 const { name: PACKAGE_NAME, bin: COMMANDS } = require('../package.json');
@@ -11,10 +14,14 @@ function rewriteShims(destination, command, binary, targets) {
   try {
     const contents = readFileSync(shim, 'utf8').replace(/\\/g, '/');
     if (!matches(contents)) return false;
-    writeFileSync(shim, `@echo off\r\n"${binary}" %*\r\nexit /b %errorlevel%\r\n`);
+    const fromShim = relative(destination, binary);
+    if (/[%!"`$\r\n]/.test(fromShim)) return false;
+    writeFileSync(shim, `@echo off\r\n"%~dp0\\${fromShim.replace(/\//g, '\\')}" %*\r\nexit /b %errorlevel%\r\n`);
     const powershell = join(destination, `${command}.ps1`);
     if (existsSync(powershell) && matches(readFileSync(powershell, 'utf8').replace(/\\/g, '/'))) {
-      writeFileSync(powershell, `& '${binary.replace(/'/g, "''")}' @args\r\nexit $LASTEXITCODE\r\n`);
+      writeFileSync(powershell,
+        `$basedir = Split-Path $MyInvocation.MyCommand.Definition -Parent\r\n` +
+        `& "$basedir/${fromShim.replace(/\\/g, '/')}" $args\r\nexit $LASTEXITCODE\r\n`);
     }
     return true;
   } catch (error) {
