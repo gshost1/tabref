@@ -21,7 +21,7 @@ function main() {
   const binaryPath = join(__dirname, entry.binaryName);
   if (!existsSync(binaryPath)) {
     console.error(`tabref: native binary missing at ${binaryPath}`);
-    console.error('The installed package is incomplete. Reinstall tabref.');
+    console.error('The installed package is incomplete. Reinstall @gshost1/tabref.');
     process.exit(1);
   }
 

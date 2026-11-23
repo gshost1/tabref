@@ -37,10 +37,11 @@ function matchesRecordedDigest(path) {
   }
 }
 
-// Only link inside a real install (…/node_modules/tabref/bin), never in the
-// source checkout.
+// Only link inside a real install (…/node_modules/@gshost1/tabref/bin),
+// never in the source checkout.
 function isInstalledPackage(directory) {
-  return basename(dirname(dirname(directory))) === 'node_modules';
+  const scope = dirname(dirname(directory));
+  return basename(scope) === '@gshost1' && basename(dirname(scope)) === 'node_modules';
 }
 
 function isNodeLauncher(path) {
@@ -93,7 +94,7 @@ function main() {
   const binaryPath = join(binDir, entry.binaryName);
   if (!existsSync(binaryPath) || !matchesRecordedDigest(binaryPath)) {
     log(`the bundled binary ${entry.binaryName} is missing or does not match its recorded digest.`);
-    log('Reinstall tabref, or download a release from https://github.com/gshost1/tabref/releases');
+    log('Reinstall @gshost1/tabref, or download a release from https://github.com/gshost1/tabref/releases');
     process.exitCode = 1;
     return;
   }

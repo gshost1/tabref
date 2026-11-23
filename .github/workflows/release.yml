@@ -84,9 +84,10 @@ jobs:
         run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
 
   # npm trusted publishing: npm trades this job's OIDC token for a one-time
-  # publish credential, so no npm token is stored anywhere. npmjs.com must list
-  # gshost1/tabref, workflow release.yml, environment Release as a trusted
-  # publisher. Provenance is attached automatically.
+  # publish credential, so no npm token is stored anywhere. On npmjs.com,
+  # @gshost1/tabref must list repo gshost1/tabref, workflow release.yml,
+  # environment Release as its trusted publisher. Provenance is attached
+  # automatically.
   publish-npm:
     name: Publish to npm
     needs: build

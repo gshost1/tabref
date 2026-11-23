@@ -1,5 +1,5 @@
 {
-  "name": "tabref",
+  "name": "@gshost1/tabref",
   "version": "0.0.0",
   "description": "A Chrome DevTools CLI that AI agents call to read and drive web pages",
   "license": "Apache-2.0",
@@ -16,6 +16,9 @@
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "bin",

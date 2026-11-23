@@ -22,7 +22,7 @@ const [report] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json'],
 }));
 
 const problems = [];
-if (report.name !== 'tabref') problems.push(`package name is ${report.name}, expected tabref`);
+if (report.name !== '@gshost1/tabref') problems.push(`package name is ${report.name}, expected @gshost1/tabref`);
 if (report.version !== expectedVersion) {
   problems.push(`package version is ${report.version}, expected ${expectedVersion}`);
 }
