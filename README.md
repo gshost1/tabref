@@ -1,6 +1,14 @@
 # tabref
 
+[![npm](https://img.shields.io/npm/v/@gshost1/tabref)](https://www.npmjs.com/package/@gshost1/tabref)
+
 A Chrome DevTools CLI that lets AI agents read and drive browser tabs from the shell.
+
+```bash
+npm i -g @gshost1/tabref
+```
+
+Installs the `tabref` command.
 
 ## What it is
 
