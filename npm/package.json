@@ -1,0 +1,53 @@
+{
+  "name": "@gshost1/tabref",
+  "version": "0.0.0",
+  "description": "A Chrome DevTools CLI that AI agents call to read and drive web pages",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gshost1/tabref.git"
+  },
+  "homepage": "https://github.com/gshost1/tabref#readme",
+  "bugs": {
+    "url": "https://github.com/gshost1/tabref/issues"
+  },
+  "bin": {
+    "tabref": "bin/tabref"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "scripts",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "browser",
+    "chrome",
+    "devtools",
+    "cdp",
+    "automation",
+    "cli",
+    "agent",
+    "ai-agents"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ]
+}

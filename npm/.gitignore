@@ -1,0 +1,7 @@
+# Filled in by the release workflow, never committed.
+bin/tabref-*
+README.md
+CHANGELOG.md
+LICENSE
+NOTICE
+*.tgz
