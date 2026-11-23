@@ -44,9 +44,13 @@ On an RFC page (10 release runs, PR #122), capture reuse across cross-origin sty
 
 ## Install
 
-Download a release archive from [GitHub Releases](https://github.com/gshost1/tabref/releases), unpack it, and put `tabref` (or `tabref.exe` on Windows) on your `PATH`. There is no npm or Homebrew package.
+Via npm (from v0.2.0; installs the `tabref` command):
 
-Prebuilt archives are published with `SHA256SUMS` for:
+```bash
+npm i -g @gshost1/tabref
+```
+
+Or download a release archive from [GitHub Releases](https://github.com/gshost1/tabref/releases), unpack it, and put `tabref` (or `tabref.exe` on Windows) on your `PATH`. Prebuilt archives are published with `SHA256SUMS` for:
 
 - Linux x86_64 (`x86_64-unknown-linux-gnu`, `.tar.gz`)
 - macOS Apple Silicon (`aarch64-apple-darwin`, `.tar.gz`)
