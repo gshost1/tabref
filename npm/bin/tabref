@@ -1,0 +1,55 @@
+#!/usr/bin/env node
+
+// npm points the `tabref` command here. postinstall replaces this file with a
+// hard link to the native binary, so this launcher only runs when install
+// scripts were skipped (for example --ignore-scripts).
+const { spawn } = require('child_process');
+const { accessSync, chmodSync, constants, existsSync } = require('fs');
+const { join } = require('path');
+const { arch, platform } = require('os');
+const { platformKeys, resolve } = require('../lib/platform');
+
+function main() {
+  const entry = resolve(platform(), arch());
+  if (!entry) {
+    console.error(`tabref: no prebuilt binary for ${platform()}-${arch()}`);
+    console.error(`Prebuilt platforms: ${platformKeys().join(', ')}`);
+    console.error('Build from source: https://github.com/gshost1/tabref');
+    process.exit(1);
+  }
+
+  const binaryPath = join(__dirname, entry.binaryName);
+  if (!existsSync(binaryPath)) {
+    console.error(`tabref: native binary missing at ${binaryPath}`);
+    console.error('The installed package is incomplete. Reinstall tabref.');
+    process.exit(1);
+  }
+
+  if (platform() !== 'win32') {
+    try {
+      accessSync(binaryPath, constants.X_OK);
+    } catch {
+      try {
+        chmodSync(binaryPath, 0o755);
+      } catch (err) {
+        console.error(`tabref: cannot make the binary executable: ${err.message}`);
+        process.exit(1);
+      }
+    }
+  }
+
+  const child = spawn(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
+  child.on('error', (err) => {
+    console.error(`tabref: cannot run the binary: ${err.message}`);
+    process.exit(1);
+  });
+  child.on('close', (code, signal) => {
+    if (signal) {
+      console.error(`tabref: terminated by signal ${signal}`);
+      process.exit(1);
+    }
+    process.exit(code ?? 0);
+  });
+}
+
+main();

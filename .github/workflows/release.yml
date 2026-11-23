@@ -82,3 +82,81 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+
+  # npm trusted publishing: npm trades this job's OIDC token for a one-time
+  # publish credential, so no npm token is stored anywhere. npmjs.com must list
+  # gshost1/tabref, workflow release.yml, environment Release as a trusted
+  # publisher. Provenance is attached automatically.
+  publish-npm:
+    name: Publish to npm
+    needs: build
+    if: github.repository == 'gshost1/tabref'
+    runs-on: ubuntu-latest
+    environment: Release
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Trusted publishing needs npm 11.5.1 or later, which ships with Node 24.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+
+      - name: Prepare npm package
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "FAIL: tag $GITHUB_REF_NAME does not match the Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          cd npm
+          VERSION="$VERSION" node -e "
+            const pkg = require('./package.json');
+            pkg.version = process.env.VERSION;
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "npm package version set to ${VERSION}"
+          cp ../README.md ../LICENSE ../NOTICE .
+          cp ../CHANGELOG.md . 2>/dev/null || true
+
+      - name: Download built release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/npm-release
+          merge-multiple: true
+
+      - name: Bundle built binaries
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cat "$RUNNER_TEMP/npm-release"/*.sha256 > "$RUNNER_TEMP/npm-release/SHA256SUMS"
+          node npm/tools/prepare-binaries.js "$RUNNER_TEMP/npm-release"
+          node npm/tools/check-package.js "$VERSION"
+          REPORTED=$(npm/bin/tabref-linux-x64 --version)
+          echo "$REPORTED"
+          if [ "$REPORTED" != "tabref $VERSION" ]; then
+            echo "FAIL: the bundled Linux binary reports '$REPORTED', expected 'tabref $VERSION'"
+            exit 1
+          fi
+
+      # A prerelease version (anything with a hyphen) goes to the "next"
+      # dist-tag so `npm install -g tabref` keeps resolving to the stable one.
+      - name: Publish to npm
+        working-directory: npm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ "$VERSION" == *-* ]]; then
+            npm publish --access public --tag next
+          else
+            npm publish --access public
+          fi
