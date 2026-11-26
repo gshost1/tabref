@@ -90,20 +90,28 @@ pub(crate) fn handshake_rejected(status: u16, port: u16) -> AppError {
     .with_disposition(DeliverySemantics::not_delivered())
 }
 
+/// A connection the browser did not approve before the deadline, and that
+/// tabref dropped: the browser's prompt for it stays on screen but no longer
+/// approves anything, and every new connection opens one more prompt.
 pub(crate) fn approval_pending(port: u16, elapsed_ms: u128) -> AppError {
     AppError::new(
         ErrorCode::PermDenied,
         format!(
-            "The browser on port {port} did not approve the DevTools connection before the deadline"
+            "The browser on port {port} did not approve the DevTools connection before the \
+             deadline: it is asking its user 'Allow remote debugging?'"
         ),
     )
     .with_suggestion(
-        "Accept the browser's 'Allow remote debugging' prompt, then retry with a longer timeout",
+        "Do not just retry: each new connection opens one more prompt, and this one's prompt \
+         stays on screen but approves nothing now. Cancel the prompts left on screen, run the \
+         command once with --timeout 60000, and while it waits have its prompt answered with \
+         Allow (by the user, or with agent-desktop: the prompt is a sheet on the browser window)",
     )
     .with_details(serde_json::json!({
         "kind": "cdp_approval_pending",
         "port": port,
         "elapsed_ms": elapsed_ms,
+        "prompt_kept": false,
         "retryable": true,
     }))
     .with_disposition(DeliverySemantics::not_delivered())

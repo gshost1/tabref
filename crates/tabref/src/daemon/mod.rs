@@ -33,6 +33,8 @@ pub(crate) mod spawn;
 #[cfg(unix)]
 pub(crate) mod stale_sweep;
 #[cfg(unix)]
+pub(crate) mod user_browser_turn;
+#[cfg(unix)]
 pub(crate) mod wire_io;
 
 use tabref_core::AppError;

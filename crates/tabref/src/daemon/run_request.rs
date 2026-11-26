@@ -37,15 +37,21 @@ pub(crate) fn run_request(
     if !reads {
         state.captures.clear();
     }
-    let mut session = state.checkout(&options, cancel)?;
+    let (mut session, turn) = state.checkout(&options, cancel)?;
     if reads {
         session.keep_captures(Arc::clone(&state.captures));
     }
-    let outcome = commands::dispatch_cli(&mut session, &cli);
+    let outcome = match cli.command {
+        Command::Connect {
+            user_chrome: true, ..
+        } => commands::connect::report(&mut session),
+        _ => commands::dispatch_cli(&mut session, &cli),
+    };
     if !reads {
         state.captures.clear();
     }
     let outcome = session.with_warning(outcome);
     state.checkin(session);
+    drop(turn);
     outcome
 }

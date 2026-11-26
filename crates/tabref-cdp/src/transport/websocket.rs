@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use tabref_core::{AppError, Deadline};
 use tungstenite::client::IntoClientRequest;
-use tungstenite::handshake::HandshakeError;
+use tungstenite::error::ProtocolError;
+use tungstenite::handshake::client::ClientHandshake;
+use tungstenite::handshake::{HandshakeError, MidHandshake};
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Error as WsError, Message, WebSocket};
 
@@ -39,6 +41,21 @@ impl WebSocketTransport {
         deadline: Deadline,
         before_upgrade: &dyn Fn() -> Result<(), AppError>,
     ) -> Result<Self, AppError> {
+        match Self::start_checked(url, deadline, before_upgrade)? {
+            Upgrade::Done(transport) => Ok(transport),
+            Upgrade::Held(_) => Err(transport_timeout("handshake")),
+        }
+    }
+
+    /// [`connect_checked`](Self::connect_checked) that keeps an upgrade the
+    /// server still holds at `deadline` (a browser waiting on its user's
+    /// approval), so it can be resumed later on the same TCP connection
+    /// instead of opening another one, which would ask the user again.
+    pub fn start_checked(
+        url: &WebSocketUrl,
+        deadline: Deadline,
+        before_upgrade: &dyn Fn() -> Result<(), AppError>,
+    ) -> Result<Upgrade, AppError> {
         let stream = TcpStream::connect_timeout(&url.socket_addr(), io_slice(deadline)?)
             .map_err(|error| connect_failed(url, &error))?;
         before_upgrade()?;
@@ -53,23 +70,72 @@ impl WebSocketTransport {
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_MESSAGE_BYTES))
             .max_frame_size(Some(MAX_MESSAGE_BYTES));
-        let mut pending = tungstenite::client::client_with_config(request, stream, Some(config));
-        loop {
-            match pending {
-                Ok((socket, _)) => return Ok(Self { socket }),
-                Err(HandshakeError::Interrupted(mut mid)) => {
-                    if deadline.is_expired() {
-                        return Err(transport_timeout("handshake"));
-                    }
-                    apply_timeouts(mid.get_mut().get_mut(), deadline)?;
-                    pending = mid.handshake();
+        let pending = tungstenite::client::client_with_config(request, stream, Some(config));
+        drive(pending, deadline, url.port())
+    }
+}
+
+/// How a WebSocket upgrade stood at its deadline.
+#[derive(Debug)]
+pub enum Upgrade {
+    Done(WebSocketTransport),
+    /// The server took the request and has not answered it yet.
+    Held(PendingUpgrade),
+}
+
+type Handshake = MidHandshake<ClientHandshake<TcpStream>>;
+
+/// A WebSocket upgrade request that was sent and not answered yet, on its
+/// open TCP connection.
+#[derive(Debug)]
+pub struct PendingUpgrade {
+    handshake: Handshake,
+    port: u16,
+}
+
+impl PendingUpgrade {
+    /// Waits for the answer until `deadline`, on the same connection.
+    pub fn resume(self, deadline: Deadline) -> Result<Upgrade, AppError> {
+        let mut handshake = self.handshake;
+        apply_timeouts(handshake.get_mut().get_mut(), deadline)?;
+        drive(handshake.handshake(), deadline, self.port)
+    }
+}
+
+fn drive(
+    mut pending: Result<
+        (
+            WebSocket<TcpStream>,
+            tungstenite::handshake::client::Response,
+        ),
+        HandshakeError<ClientHandshake<TcpStream>>,
+    >,
+    deadline: Deadline,
+    port: u16,
+) -> Result<Upgrade, AppError> {
+    loop {
+        match pending {
+            Ok((socket, _)) => return Ok(Upgrade::Done(WebSocketTransport { socket })),
+            Err(HandshakeError::Interrupted(mut mid)) => {
+                if deadline.is_expired() {
+                    return Ok(Upgrade::Held(PendingUpgrade {
+                        handshake: mid,
+                        port,
+                    }));
                 }
-                Err(HandshakeError::Failure(WsError::Http(response))) => {
-                    return Err(handshake_rejected(response.status().as_u16(), url.port()));
-                }
-                Err(HandshakeError::Failure(error)) => {
-                    return Err(map_ws_error("handshake", error));
-                }
+                apply_timeouts(mid.get_mut().get_mut(), deadline)?;
+                pending = mid.handshake();
+            }
+            Err(HandshakeError::Failure(WsError::Http(response))) => {
+                return Err(handshake_rejected(response.status().as_u16(), port));
+            }
+            Err(HandshakeError::Failure(WsError::Protocol(ProtocolError::HandshakeIncomplete))) => {
+                return Err(transport_closed(
+                    "the server closed the connection before it answered the upgrade",
+                ));
+            }
+            Err(HandshakeError::Failure(error)) => {
+                return Err(map_ws_error("handshake", error));
             }
         }
     }

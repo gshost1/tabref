@@ -16,7 +16,10 @@ pub use cdp::dialog_choice::DialogChoice;
 pub use cdp::protocol_error::{is_node_gone, is_protocol_error, is_target_gone, target_gone};
 pub use discovery::active_port::{ActivePort, parse_active_port, read_active_port};
 pub use discovery::browser_endpoint::BrowserEndpoint;
-pub use discovery::connect::{connect, connect_held, connect_with};
+pub use discovery::connect::{
+    Approval, PendingApproval, connect, connect_awaiting, connect_held, connect_held_awaiting,
+    connect_with,
+};
 pub use discovery::default_profiles::{default_user_data_dirs, is_default_user_data_dir};
 pub use discovery::endpoint_source::EndpointSource;
 pub use discovery::endpoint_spec::EndpointSpec;
@@ -57,4 +60,4 @@ pub use transport::scripted_transport::ScriptedTransport;
 pub use transport::transport_error::{
     is_timeout, transport_closed, transport_failed, transport_timeout,
 };
-pub use transport::websocket::WebSocketTransport;
+pub use transport::websocket::{PendingUpgrade, Upgrade, WebSocketTransport};
