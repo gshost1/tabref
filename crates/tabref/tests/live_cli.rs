@@ -174,7 +174,35 @@ fn dialogs_are_accepted_and_new_tabs_become_current() {
         tabs.stdout
     );
     let closed = tabref.ok(&["close"]);
-    assert!(closed.stdout.contains("\"Shop\""), "{}", closed.stdout);
+    assert!(
+        closed.stdout.contains("1 tab left, current [0] id="),
+        "{}",
+        closed.stdout
+    );
+    assert!(!closed.stdout.contains("Shop"), "{}", closed.stdout);
+    assert!(!closed.stdout.contains("http"), "{}", closed.stdout);
+}
+
+#[test]
+fn close_lists_the_tabs_left_only_when_asked() {
+    if !live() {
+        return;
+    }
+    let (tabref, url) = shop();
+    tabref.ok(&["open", &url]);
+    tabref.ok(&["js", "window.open('/done'); 1"]);
+    tabref.ok(&["js", "window.open('/other'); 1"]);
+    let counted = tabref.ok(&["--json", "close", "2"]).json();
+    assert_eq!(counted["data"]["tabs_left"], 2);
+    assert!(counted["data"]["current"]["index"].is_u64(), "{counted}");
+    assert!(counted["data"].get("tabs").is_none(), "{counted}");
+    let listed = tabref.ok(&["close", "1", "--list"]);
+    assert!(
+        listed.stdout.starts_with("closed; tabs left:"),
+        "{}",
+        listed.stdout
+    );
+    assert!(listed.stdout.contains("\"Shop\""), "{}", listed.stdout);
 }
 
 #[test]
@@ -235,7 +263,7 @@ fn tab_indices_keep_naming_the_tabs_the_agent_listed() {
         .find(|line| line.contains("[2]"))
         .unwrap();
     assert!(!third.contains(&second), "{}", reordered.stdout);
-    let closed = tabref.ok(&["close", "1"]);
+    let closed = tabref.ok(&["close", "1", "--list"]);
     assert!(!closed.stdout.contains(&second), "{}", closed.stdout);
     assert_eq!(
         closed

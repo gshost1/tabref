@@ -49,6 +49,6 @@ pub(crate) fn tab_list(tabs: &[PageTarget], current: &str) -> Outcome {
 }
 
 /// The first eight characters of a target id, enough for `tab <id>`.
-fn short_id(target_id: &str) -> &str {
+pub(crate) fn short_id(target_id: &str) -> &str {
     target_id.get(..8).unwrap_or(target_id)
 }

@@ -219,6 +219,9 @@ pub(crate) enum Command {
         /// Quit the browser 'open --launch' started (never one tabref did not launch)
         #[arg(long)]
         browser: bool,
+        /// Also list the tabs left (titles and URLs); without it only their count is printed
+        #[arg(long, conflicts_with = "browser")]
+        list: bool,
     },
     /// Opt in to driving your own, logged-in Chrome, or stop (--off)
     Connect {
