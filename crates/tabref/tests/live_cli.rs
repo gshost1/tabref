@@ -198,7 +198,7 @@ fn close_lists_the_tabs_left_only_when_asked() {
     assert!(counted["data"].get("tabs").is_none(), "{counted}");
     let listed = tabref.ok(&["close", "1", "--list"]);
     assert!(
-        listed.stdout.starts_with("closed; tabs left:"),
+        listed.stdout.contains("tab left, current [0] id="),
         "{}",
         listed.stdout
     );
@@ -264,13 +264,15 @@ fn tab_indices_keep_naming_the_tabs_the_agent_listed() {
         .unwrap();
     assert!(!third.contains(&second), "{}", reordered.stdout);
     let closed = tabref.ok(&["close", "1", "--list"]);
-    assert!(!closed.stdout.contains(&second), "{}", closed.stdout);
+    let (head, listed) = closed.stdout.split_once('\n').unwrap();
+    assert!(
+        head.starts_with(&format!("closed {second};")),
+        "{}",
+        closed.stdout
+    );
+    assert!(!listed.contains(&second), "{}", closed.stdout);
     assert_eq!(
-        closed
-            .stdout
-            .lines()
-            .filter(|line| line.contains("id="))
-            .count(),
+        listed.lines().filter(|line| line.contains("id=")).count(),
         2
     );
 }

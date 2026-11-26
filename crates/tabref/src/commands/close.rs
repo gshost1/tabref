@@ -43,42 +43,46 @@ pub(crate) fn run(
     } else {
         current
     };
-    if list {
-        let mut outcome = tab_list(&remaining, &now);
-        let note = if remaining.is_empty() {
-            "closed the last tab"
-        } else {
-            "closed; tabs left:"
-        };
-        outcome.text = format!("{note}\n{}", outcome.text).trim_end().to_owned();
-        return Ok(outcome);
-    }
-    Ok(counted(&tab, &remaining, &now))
+    Ok(report(&tab, &remaining, &now, list))
 }
 
-/// The default report: the count of tabs left and the current one, with
-/// no title or URL.
-fn counted(closed: &str, remaining: &[PageTarget], now: &str) -> Outcome {
+/// What `close` prints: the closed tab's id, the count of tabs left and the
+/// current one by index and id, with no title or URL; `list` adds the tabs
+/// left as `tabs` lists them. The JSON has `closed`, `tabs_left` and
+/// `current` either way, and `tabs` only with `list`.
+fn report(closed: &str, remaining: &[PageTarget], now: &str, list: bool) -> Outcome {
     let current = remaining
         .iter()
         .position(|open| open.target_id == now)
         .map(|index| (index, &remaining[index].target_id));
-    let text = match (remaining.len(), current) {
-        (0, _) => "closed the last tab".to_owned(),
-        (left, Some((index, id))) => format!(
-            "closed; {left} tab{} left, current [{index}] id={}; 'tabref tabs' lists them",
-            if left == 1 { "" } else { "s" },
+    let left = remaining.len();
+    let plural = if left == 1 { "" } else { "s" };
+    let head = format!("closed id={}", short_id(closed));
+    let mut text = match current {
+        _ if left == 0 => format!("{head}, the last tab"),
+        Some((index, id)) => format!(
+            "{head}; {left} tab{plural} left, current [{index}] id={}",
             short_id(id)
         ),
-        (left, None) => format!(
-            "closed; {left} tab{} left; 'tabref tabs' lists them",
-            if left == 1 { "" } else { "s" }
-        ),
+        None => format!("{head}; {left} tab{plural} left"),
     };
-    let data = json!({
+    let mut data = json!({
         "closed": closed,
-        "tabs_left": remaining.len(),
+        "tabs_left": left,
         "current": current.map(|(index, id)| json!({ "index": index, "id": id })),
     });
+    if list && left > 0 {
+        let listed = tab_list(remaining, now);
+        text = format!("{text}:\n{}", listed.text);
+        data["tabs"] = listed.data["tabs"].clone();
+    } else if list {
+        data["tabs"] = json!([]);
+    } else if left > 0 {
+        text.push_str("; 'tabref tabs' lists them");
+    }
     Outcome::new(text, data)
 }
+
+#[cfg(test)]
+#[path = "close_tests.rs"]
+mod tests;
