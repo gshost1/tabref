@@ -12,6 +12,9 @@
 - `close` prints the closed tab's id, how many tabs are left and the current one's index and id, not every tab's title and URL: in your own browser those are your tabs. `close --list` lists them as before.
 - `close --json` data is now `{closed, tabs_left, current}`; `tabs` is there only with `--list`.
 
+### Left-over files in your browser's profile
+- A profile whose lock, left from a crash, names the process of another profile's browser is refused (`cdp_user_chrome_lock_shared`) instead of attaching to that other browser under this profile's name.
+
 ## 0.2.0 (unreleased)
 
 ### Safer actions

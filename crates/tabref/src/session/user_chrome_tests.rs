@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use tabref_cdp::{LaunchOptions, ProcessView, UserBrowser, process_start};
 use tabref_core::RefStore;
 
-use super::{find_user_chrome, listeners_are, only_profile, runs_profile, same_process, shown_dir};
+use super::{
+    find_user_chrome, listeners_are, lock_shared_with, only_profile, runs_profile, same_process,
+    shown_dir,
+};
 use crate::session::session_options::SessionOptions;
 use crate::session::user_chrome_record::{
     UserChromeRecord, choice_in_use, forget_user_chrome, opt_in_guard, save_user_chrome,
@@ -266,4 +269,24 @@ fn a_port_file_an_exited_browser_left_does_not_shadow_the_running_one() {
     assert_eq!(none.kind(), Some("cdp_user_chrome_not_found"));
     assert!(none.message.contains("None of your browsers"));
     assert_eq!(both.kind(), Some("cdp_user_chrome_ambiguous"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lock_naming_the_pid_of_another_profiles_browser_is_found() {
+    let stale = profile("stale-lock", std::process::id());
+    let live = profile("live-lock", std::process::id());
+    let alone = profile("alone-lock", 1);
+    let browsers = vec![browser("Google Chrome", &stale), browser("Chromium", &live)];
+
+    let shared = lock_shared_with(&stale, std::process::id(), &browsers);
+    let not_shared = lock_shared_with(&alone, 1, &browsers);
+    let itself = lock_shared_with(&stale, std::process::id(), &browsers[..1]);
+    for dir in [&stale, &live, &alone] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    assert_eq!(shared, Some(live));
+    assert_eq!(not_shared, None);
+    assert_eq!(itself, None, "a profile shares its lock with itself");
 }

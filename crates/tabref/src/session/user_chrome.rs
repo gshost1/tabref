@@ -46,6 +46,9 @@ pub(crate) fn find_user_chrome(dir: Option<&Path>) -> Result<UserChromeRecord, A
         None => only_profile(default_user_data_dirs())?,
     };
     let pid = profile_lock_pid(&dir).ok_or_else(|| not_running(&dir))?;
+    if let Some(other) = lock_shared_with(&dir, pid, &default_user_data_dirs()) {
+        return Err(lock_shared(&dir, &other, pid));
+    }
     let started = process_start(pid);
     if START_TIMES && started.is_none() {
         return Err(not_running(&dir));
@@ -115,6 +118,42 @@ pub(crate) fn only_profile(
         .with_details(serde_json::json!({ "kind": "cdp_user_chrome_ambiguous" }))
         .with_disposition(DeliverySemantics::not_delivered())),
     }
+}
+
+/// Another of `browsers`' profiles whose lock names `pid` too. A browser
+/// holds one profile, so one of the two locks is left from an earlier run
+/// (a crash), and its pid now belongs to the browser of the other profile:
+/// taking that browser for `dir` would attach to the wrong one.
+pub(crate) fn lock_shared_with(dir: &Path, pid: u32, browsers: &[UserBrowser]) -> Option<PathBuf> {
+    let same = |a: &Path, b: &Path| {
+        std::fs::canonicalize(a)
+            .ok()
+            .is_some_and(|a| std::fs::canonicalize(b).ok() == Some(a))
+    };
+    browsers
+        .iter()
+        .map(|browser| &browser.user_data_dir)
+        .find(|other| !same(other, dir) && profile_lock_pid(other) == Some(pid))
+        .cloned()
+}
+
+fn lock_shared(dir: &Path, other: &Path, pid: u32) -> AppError {
+    AppError::new(
+        ErrorCode::AmbiguousTarget,
+        format!(
+            "The browser process {pid} that the lock of {} names also holds {}: one of the two \
+             locks is left from an earlier run, so tabref cannot tell which browser this profile is",
+            shown_dir(dir),
+            shown_dir(other)
+        ),
+    )
+    .with_suggestion(
+        "Quit and restart the browser of the profile you want; if it is not running, delete \
+         that profile's SingletonLock (left from a crash) and run 'tabref connect --user-chrome' \
+         again",
+    )
+    .with_details(serde_json::json!({ "kind": "cdp_user_chrome_lock_shared" }))
+    .with_disposition(DeliverySemantics::not_delivered())
 }
 
 /// Whether a live browser process holds the profile's lock.

@@ -66,7 +66,7 @@ jobs:
         env:
           TABREF_LIVE: "1"
           TABREF_CHROME_ARGS: "--no-sandbox"
-        run: cargo test --locked -p tabref-page --test live_page && cargo test --locked -p tabref --test live_cli --test live_bot_check --test user_chrome_prompts && cargo test --locked -p tabref --test live_dialogs && TABREF_NO_DAEMON=1 cargo test --locked -p tabref --test live_dialogs
+        run: cargo test --locked -p tabref-page --test live_page && cargo test --locked -p tabref --test live_cli --test live_bot_check --test user_chrome_prompts --test user_chrome_stale_port && cargo test --locked -p tabref --test live_dialogs && TABREF_NO_DAEMON=1 cargo test --locked -p tabref --test live_dialogs
 
       - name: Live Windows download tests
         if: runner.os == 'Windows'
