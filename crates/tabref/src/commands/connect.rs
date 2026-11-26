@@ -46,7 +46,8 @@ pub(crate) fn run(
         ));
     }
     let record = find_user_chrome(user_data_dir)?;
-    if load_user_chrome(&store).as_ref() != Some(&record) {
+    let again = load_user_chrome(&store).as_ref() == Some(&record);
+    if !again {
         stop_endpoint_less()?;
         save_user_chrome(&store, &record)?;
     }
@@ -64,12 +65,21 @@ pub(crate) fn run(
             }
             Err(error)
         }
+        Err(error) if again && !declined(&error) => Err(error),
         Err(error) => {
             forget_user_chrome(&store)?;
+            stop_endpoint_less()?;
             Err(error)
         }
         Ok(outcome) => Ok(outcome),
     }
+}
+
+/// Whether the user's browser refused the connection (its prompt answered
+/// with Cancel), which ends even an opt-in made before this `connect`; a
+/// passing failure (a busy turn, a lost reply) leaves that one as it was.
+fn declined(error: &AppError) -> bool {
+    error.kind() == Some("cdp_connection_rejected")
 }
 
 /// Whether `error` is a connection to the user's browser that the daemon

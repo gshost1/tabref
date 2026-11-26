@@ -10,19 +10,19 @@
 //! says so in a warning.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::Duration;
 
 use tabref_cdp::{
-    Approval, BrowserEndpoint, ListenerVerdict, PendingApproval, ProcessView, UserBrowser,
-    check_listener, connect_awaiting, connect_held_awaiting, default_user_data_dirs,
-    endpoint_from_user_data_dir, is_chrome_family, listener_pids, process_start, profile_lock_pid,
-    read_active_port,
+    Approval, BrowserEndpoint, ListenerVerdict, ProcessView, UserBrowser, check_listener,
+    connect_awaiting, connect_held_awaiting, default_user_data_dirs, endpoint_from_user_data_dir,
+    is_chrome_family, listener_pids, process_start, profile_lock_pid, read_active_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::connected_browser::ConnectedBrowser;
 use super::user_chrome_record::UserChromeRecord;
+use super::user_chrome_waiting::{
+    Waiting, WaitingKey, connecting_turn, put_waiting, take_waiting, waiting_for_approval,
+};
 
 const AGAIN: &str = "Turn remote debugging on at chrome://inspect/#remote-debugging and run \
                      'tabref connect --user-chrome' again";
@@ -125,32 +125,31 @@ fn is_running(dir: &Path) -> bool {
     }
 }
 
-/// The connection to the user's browser that is still waiting for its
-/// user's approval, kept by the daemon between commands so the prompt the
-/// browser shows for it stays the one that counts: the next command waits on
-/// it instead of opening another connection, which would open one more
-/// prompt. Keyed by profile, browser process and port.
-static WAITING: Mutex<Option<Waiting>> = Mutex::new(None);
-
-struct Waiting {
-    key: WaitingKey,
-    pending: PendingApproval,
-}
-
-type WaitingKey = (PathBuf, u32, u16);
-
 /// Connects to the user's browser `record` names: only while the very
 /// process the user opted in to still holds the profile, and only after
 /// checking that it alone holds the port its profile advertises. A browser
 /// that exited or restarted is kind `cdp_user_chrome_gone`. A connection
 /// the browser has not approved by `deadline` is kept in the daemon (see
-/// [`WAITING`]), and the next command resumes it.
+/// `user_chrome_waiting`), and the next command resumes it.
 pub(crate) fn connect_user_chrome(
     record: &UserChromeRecord,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
+    let _turn = connecting_turn(deadline)?;
+    let connected = connect_or_resume(record, deadline);
+    if let Err(error) = &connected {
+        if error.kind() != Some("cdp_approval_pending") {
+            drop(take_waiting(None));
+        }
+    }
+    connected
+}
+
+fn connect_or_resume(
+    record: &UserChromeRecord,
+    deadline: Deadline,
+) -> Result<ConnectedBrowser, AppError> {
     if !same_process(record) {
-        drop(take_waiting(None));
         return Err(gone(record));
     }
     let endpoint = endpoint_from_user_data_dir(&record.user_data_dir).map_err(|_| gone(record))?;
@@ -198,79 +197,6 @@ fn finish(
         choice: None,
         started_headless_profile: false,
     })
-}
-
-/// The kept connection for `key`; any kept for another browser or port is
-/// dropped (`None` drops whatever is kept).
-fn take_waiting(key: Option<&WaitingKey>) -> Option<PendingApproval> {
-    let mut slot = WAITING.lock().ok()?;
-    let waiting = slot.take()?;
-    (Some(&waiting.key) == key).then_some(waiting.pending)
-}
-
-fn put_waiting(waiting: Waiting) {
-    if let Ok(mut slot) = WAITING.lock() {
-        *slot = Some(waiting);
-    }
-}
-
-/// The error for a connection the user's browser has not approved yet.
-/// `kept`: the daemon keeps it waiting, so the prompt on screen is still the
-/// one that counts and the next command opens no new one; otherwise it was
-/// dropped (see `tabref_cdp`'s own `cdp_approval_pending`).
-pub(crate) fn waiting_for_approval(
-    record: &UserChromeRecord,
-    port: u16,
-    waited: Duration,
-    kept: bool,
-    resumed: bool,
-) -> AppError {
-    let browser = &record.name;
-    let seconds = waited.as_secs();
-    let (message, suggestion) = if kept {
-        (
-            format!(
-                "Your {browser} is asking you 'Allow remote debugging?' for tabref's connection \
-                 and has not been answered{}",
-                if resumed {
-                    format!(" (the same prompt, open for {seconds} s; no new prompt was opened)")
-                } else {
-                    String::new()
-                }
-            ),
-            format!(
-                "tabref keeps this connection waiting, so the prompt on screen is the one that \
-                 counts: have it answered with Allow (by the user, or with agent-desktop: \
-                 'snapshot --app \"{browser}\" --surface sheet -i', then click Allow), then run \
-                 the command again; it opens no new prompt. A longer --timeout lets one command \
-                 wait for the answer"
-            ),
-        )
-    } else {
-        (
-            format!(
-                "Your {browser} did not approve tabref's connection before the deadline: it is \
-                 asking you 'Allow remote debugging?'"
-            ),
-            format!(
-                "Do not just retry: each new connection opens one more prompt, and this one's \
-                 prompt stays on screen but approves nothing now. Cancel the prompts left on \
-                 screen, run the command once with --timeout 60000, and while it waits have its \
-                 prompt answered with Allow (by the user, or with agent-desktop: 'snapshot --app \
-                 \"{browser}\" --surface sheet -i', then click Allow)"
-            ),
-        )
-    };
-    AppError::new(ErrorCode::PermDenied, message)
-        .with_suggestion(suggestion)
-        .with_details(serde_json::json!({
-            "kind": "cdp_approval_pending",
-            "port": port,
-            "elapsed_ms": waited.as_millis(),
-            "prompt_kept": kept,
-            "retryable": true,
-        }))
-        .with_disposition(DeliverySemantics::not_delivered())
 }
 
 /// Whether the profile is still held by the process the user opted in to:

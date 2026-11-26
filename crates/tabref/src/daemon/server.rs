@@ -20,9 +20,8 @@ use super::private_dir::ensure_private_dir;
 use super::server_connection::{peer_is_this_user, serve_connection};
 use super::server_state::ServerState;
 use super::stale_sweep::sweep_stale_dirs;
-use super::{CDP_ENV, IDLE_ENV, build_id::build_id};
+use super::{CDP_ENV, build_id::build_id, idle_timeout};
 
-const DEFAULT_IDLE: Duration = Duration::from_secs(600);
 const LOCK_WAIT: Duration = Duration::from_millis(1_500);
 const LOCK_POLL: Duration = Duration::from_millis(5);
 const IDLE_CHECK: Duration = Duration::from_millis(500);
@@ -115,11 +114,4 @@ fn retire(state: &ServerState, address: &DaemonAddress) {
         };
     }
     std::process::exit(0);
-}
-
-fn idle_timeout() -> Duration {
-    std::env::var(IDLE_ENV)
-        .ok()
-        .and_then(|ms| ms.parse::<u64>().ok())
-        .map_or(DEFAULT_IDLE, Duration::from_millis)
 }

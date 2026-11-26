@@ -123,6 +123,7 @@ impl ApprovingBrowser {
         std::fs::write(&script, PROXY).unwrap();
         let _ = std::fs::remove_file(profile.join("DevToolsActivePort"));
         let binary = python_named_chrome(tools);
+        let log = tools.join("approving.log");
         let proxy = spawn_retrying(|| {
             Command::new(&binary)
                 .arg(&script)
@@ -131,12 +132,16 @@ impl ApprovingBrowser {
                 .arg(real.port.to_string())
                 .arg(&real.websocket_path)
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stderr(std::fs::File::create(&log)?)
                 .process_group(0)
                 .spawn()
         });
-        wait_for(|| tabref_cdp::read_active_port(profile).ok())
-            .expect("the approving browser never wrote its DevToolsActivePort");
+        if wait_for(|| tabref_cdp::read_active_port(profile).ok()).is_none() {
+            panic!(
+                "the approving browser never wrote its DevToolsActivePort: {}",
+                std::fs::read_to_string(&log).unwrap_or_default()
+            );
+        }
         Self {
             control,
             proxy,

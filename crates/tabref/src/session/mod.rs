@@ -24,6 +24,7 @@ pub(crate) mod tab_claim;
 pub(crate) mod tab_order;
 pub(crate) mod user_chrome;
 pub(crate) mod user_chrome_record;
+pub(crate) mod user_chrome_waiting;
 pub(crate) mod visible_tab;
 
 use std::collections::HashMap;

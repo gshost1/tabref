@@ -196,3 +196,20 @@ fn without_the_daemon_the_hint_says_the_prompt_no_longer_counts() {
     );
     assert_eq!(browser.prompts(), 2);
 }
+
+#[test]
+fn connecting_again_to_the_same_browser_asks_nothing() {
+    if !live() {
+        return;
+    }
+    let (home, browser) = setup("prompts-again");
+    let connected = connect_allowed(&home, &browser);
+    assert!(connected.ok, "{}{}", connected.stdout, connected.stderr);
+
+    let again = home.tabref(&["--timeout", "3000", "connect", "--user-chrome"]);
+    let tabs = home.tabref(&["tabs"]);
+
+    assert!(again.ok, "{}{}", again.stdout, again.stderr);
+    assert!(tabs.ok, "{}{}", tabs.stdout, tabs.stderr);
+    assert_eq!(browser.prompts(), 1, "a repeated connect asked again");
+}

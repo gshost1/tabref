@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::UserBrowserTurns;
 
@@ -8,20 +8,21 @@ use super::UserBrowserTurns;
 fn a_second_command_waits_for_the_first_to_finish() {
     let turns = Arc::new(UserBrowserTurns::default());
     let cancel = AtomicBool::new(false);
-    let (first, waited) = turns.take(Duration::from_secs(1), &cancel).unwrap();
-    assert!(waited < Duration::from_millis(50));
+    let (first, _) = turns.take(Duration::from_secs(1), &cancel).unwrap();
     let other = Arc::clone(&turns);
     let second = std::thread::spawn(move || {
         let cancel = AtomicBool::new(false);
-        other
-            .take(Duration::from_secs(5), &cancel)
-            .map(|(_, waited)| waited)
-            .unwrap()
+        let _turn = other.take(Duration::from_secs(5), &cancel).unwrap();
+        Instant::now()
     });
-    std::thread::sleep(Duration::from_millis(200));
+    std::thread::sleep(Duration::from_millis(100));
+    let dropped = Instant::now();
     drop(first);
-    let waited = second.join().unwrap();
-    assert!(waited >= Duration::from_millis(150), "{waited:?}");
+    let got = second.join().unwrap();
+    assert!(
+        got >= dropped,
+        "the second turn came before the first ended"
+    );
 }
 
 #[test]

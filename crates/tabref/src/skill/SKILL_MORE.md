@@ -20,7 +20,7 @@ Only when the user asks for their own browser: `tabref connect --user-chrome` (o
 logged-in Chrome and its sessions); `tabref connect --off` stops. Their browser asks them "Allow remote
 debugging?" for tabref's connection; until it is answered commands fail with `cdp_approval_pending`. Do not
 retry in a loop: have the prompt answered (the user, or a desktop tool), then run one command; tabref keeps
-that one connection, so later commands ask nothing.
+that one connection, so later commands ask nothing (and run one at a time there).
 
 Apps built on Chrome (Electron, reached with `--cdp PORT`): `open URL`, `open --new-tab URL` and `close` are refused,
 as the windows are the app; read and act with snap, click and fill (js to read).
