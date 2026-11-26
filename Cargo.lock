@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "tabref"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "rustix",
@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "tabref-cdp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rustix",
  "serde",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "tabref-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "tabref-page"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
