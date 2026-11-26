@@ -1,21 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 ### Your own browser asks less
-- In your own browser, the daemon keeps the one connection you allowed in its "Allow remote debugging?" prompt, and `connect --user-chrome` makes it there, so the first command after `connect` no longer asks again.
-- A command that times out on the prompt leaves its connection waiting in the daemon: the prompt on screen stays the one that counts, and a retry waits on it instead of opening another prompt. The error says so (`details.prompt_kept`), and without the daemon it says the prompt no longer counts and that retrying adds prompts.
-- Commands that come together in your browser take turns on that one connection instead of each opening a prompt.
-- A prompt answered with Cancel during the upgrade is reported as declined (`cdp_connection_rejected`).
+- In your own browser, the daemon keeps the one connection you allowed in its "Allow remote debugging?" prompt, and `connect --user-chrome` makes it there, so the first command after `connect` no longer asks again (#130).
+- A command that times out on the prompt leaves its connection waiting in the daemon: the prompt on screen stays the one that counts, and a retry waits on it instead of opening another prompt (#130). The error says so (`details.prompt_kept`), and without the daemon it says the prompt no longer counts and that retrying adds prompts.
+- Commands that come together in your browser take turns on that one connection instead of each opening a prompt (#130).
+- A prompt answered with Cancel during the upgrade is reported as declined (`cdp_connection_rejected`) (#130).
 
 ### `close` keeps your tabs to itself (output change)
-- `close` prints the closed tab's id, how many tabs are left and the current one's index and id, not every tab's title and URL: in your own browser those are your tabs. `close --list` lists them as before.
-- `close --json` data is now `{closed, tabs_left, current}`; `tabs` is there only with `--list`.
+- `close` prints the closed tab's id, how many tabs are left and the current one's index and id, not every tab's title and URL: in your own browser those are your tabs. `close --list` lists them as before (#131).
+- `close --json` data is now `{closed, tabs_left, current}`; `tabs` is there only with `--list` (#131).
 
 ### Left-over files in your browser's profile
-- A profile whose lock, left from a crash, names a pid that now belongs to another browser is not taken for running: tabref checks that the process has files open in that profile (`/proc` on Linux, `lsof` on macOS), so it no longer attaches to the other browser under this profile's name, and a plain `connect --user-chrome` picks the browser that really runs.
+- A profile whose lock, left from a crash, names a pid that now belongs to another browser is not taken for running: tabref checks that the process has files open in that profile (`/proc` on Linux, `lsof` on macOS), so it no longer attaches to the other browser under this profile's name, and a plain `connect --user-chrome` picks the browser that really runs (#132).
 
-## 0.2.0 (unreleased)
+## 0.2.0
 
 ### Safer actions
 - An action that was sent is never reported as safe to retry. A failure after delivery (a busy tab, a failed settle or attach, a read of the page that follows) is reported as delivered with a note and a `tabref snap` hint, so an agent does not click, order or delete twice (#118, #120).
