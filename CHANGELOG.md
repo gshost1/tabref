@@ -12,6 +12,9 @@
 - `close` prints the closed tab's id, how many tabs are left and the current one's index and id, not every tab's title and URL: in your own browser those are your tabs. `close --list` lists them as before.
 - `close --json` data is now `{closed, tabs_left, current}`; `tabs` is there only with `--list`.
 
+### Left-over files in your browser's profile
+- A profile whose lock, left from a crash, names a pid that now belongs to another browser is not taken for running: tabref checks that the process has files open in that profile (`/proc` on Linux, `lsof` on macOS), so it no longer attaches to the other browser under this profile's name, and a plain `connect --user-chrome` picks the browser that really runs.
+
 ## 0.2.0 (unreleased)
 
 ### Safer actions

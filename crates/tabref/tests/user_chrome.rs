@@ -47,6 +47,7 @@ fn a_profile_pointing_at_another_program_is_never_contacted() {
         home.profile().join("SingletonLock"),
     )
     .unwrap();
+    let _open = std::fs::File::create(home.profile().join("History")).unwrap();
 
     let without = home.tabref(&["--json", "tabs"]);
     let refused = home.tabref(&["--json", "connect", "--user-chrome"]);

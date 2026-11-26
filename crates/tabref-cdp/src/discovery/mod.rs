@@ -13,6 +13,7 @@ pub(crate) mod listener_owner;
 pub(crate) mod listener_verdict;
 pub(crate) mod lsof_owner;
 pub(crate) mod process_view;
+pub(crate) mod profile_holder;
 pub(crate) mod profile_lock;
 pub(crate) mod user_browser;
 pub(crate) mod user_data_dir;

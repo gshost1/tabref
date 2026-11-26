@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use tabref_cdp::{
     Approval, BrowserEndpoint, ListenerVerdict, ProcessView, UserBrowser, check_listener,
     connect_awaiting, connect_held_awaiting, default_user_data_dirs, endpoint_from_user_data_dir,
-    is_chrome_family, listener_pids, process_start, profile_lock_pid, read_active_port,
+    holds_profile, is_chrome_family, listener_pids, process_start, profile_lock_pid,
+    read_active_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
@@ -46,6 +47,9 @@ pub(crate) fn find_user_chrome(dir: Option<&Path>) -> Result<UserChromeRecord, A
         None => only_profile(default_user_data_dirs())?,
     };
     let pid = profile_lock_pid(&dir).ok_or_else(|| not_running(&dir))?;
+    if holds_profile(pid, &dir) == Some(false) {
+        return Err(not_running(&dir));
+    }
     let started = process_start(pid);
     if START_TIMES && started.is_none() {
         return Err(not_running(&dir));
@@ -117,10 +121,13 @@ pub(crate) fn only_profile(
     }
 }
 
-/// Whether a live browser process holds the profile's lock.
+/// Whether a live browser process holds the profile's lock and runs it:
+/// a lock a crash left names a pid that may now be another browser's.
 fn is_running(dir: &Path) -> bool {
     match profile_lock_pid(dir) {
-        Some(pid) => !START_TIMES || process_start(pid).is_some(),
+        Some(pid) => {
+            (!START_TIMES || process_start(pid).is_some()) && holds_profile(pid, dir) != Some(false)
+        }
         None => false,
     }
 }
@@ -149,7 +156,7 @@ fn connect_or_resume(
     record: &UserChromeRecord,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
-    if !same_process(record) {
+    if !same_process(record) || holds_profile(record.pid, &record.user_data_dir) == Some(false) {
         return Err(gone(record));
     }
     let endpoint = endpoint_from_user_data_dir(&record.user_data_dir).map_err(|_| gone(record))?;

@@ -26,7 +26,8 @@ fn temp(name: &str) -> PathBuf {
     dir
 }
 
-/// A profile whose lock names `pid`, with remote debugging on.
+/// A profile whose lock names `pid`, with remote debugging on; when `pid`
+/// is this test process, it holds the profile open like a browser.
 #[cfg(unix)]
 fn profile(name: &str, pid: u32) -> PathBuf {
     let dir = temp(name);
@@ -36,7 +37,17 @@ fn profile(name: &str, pid: u32) -> PathBuf {
     )
     .unwrap();
     std::os::unix::fs::symlink(format!("myhost-{pid}"), dir.join("SingletonLock")).unwrap();
+    if pid == std::process::id() {
+        hold_open(&dir);
+    }
     dir
+}
+
+/// Keeps a file open under `dir` for the rest of the test run, as a
+/// browser keeps its profile's databases open.
+#[cfg(unix)]
+fn hold_open(dir: &Path) {
+    std::mem::forget(std::fs::File::create(dir.join("History")).unwrap());
 }
 
 #[test]
@@ -266,4 +277,24 @@ fn a_port_file_an_exited_browser_left_does_not_shadow_the_running_one() {
     assert_eq!(none.kind(), Some("cdp_user_chrome_not_found"));
     assert!(none.message.contains("None of your browsers"));
     assert_eq!(both.kind(), Some("cdp_user_chrome_ambiguous"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lock_naming_a_process_that_does_not_run_the_profile_is_left_over() {
+    let me = std::process::id();
+    let stale = temp("stale-lock");
+    std::fs::write(
+        stale.join("DevToolsActivePort"),
+        "40123\n/devtools/browser/abc\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(format!("myhost-{me}"), stale.join("SingletonLock")).unwrap();
+
+    let named = find_user_chrome(Some(&stale)).unwrap_err();
+    let picked = only_profile(vec![browser("Google Chrome", &stale)]).unwrap_err();
+    let _ = std::fs::remove_dir_all(&stale);
+
+    assert_eq!(named.kind(), Some("cdp_user_chrome_not_found"));
+    assert_eq!(picked.kind(), Some("cdp_user_chrome_not_found"));
 }

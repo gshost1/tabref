@@ -13,44 +13,57 @@ const LSOF_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
 pub fn listener_pids(port: u16) -> Option<Vec<u32>> {
     #[cfg(target_os = "macos")]
     {
-        use std::io::Read;
-        let mut child = std::process::Command::new("/usr/sbin/lsof")
-            .args([
-                "-b",
-                "-w",
-                "-nP",
-                &format!("-iTCP:{port}"),
-                "-sTCP:LISTEN",
-                "-Fp",
-            ])
-            .env("LC_ALL", "C")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .ok()?;
-        let started = std::time::Instant::now();
-        let status = loop {
-            if let Ok(Some(status)) = child.try_wait() {
-                break status;
-            }
-            if started.elapsed() > LSOF_LIMIT {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        };
-        let mut text = String::new();
-        child.stdout.take()?.read_to_string(&mut text).ok()?;
-        let ran = status.success() || (status.code() == Some(1) && text.is_empty());
-        ran.then(|| parse_lsof_pids(&text))
+        let text = run_lsof(&[
+            "-b",
+            "-w",
+            "-nP",
+            &format!("-iTCP:{port}"),
+            "-sTCP:LISTEN",
+            "-Fp",
+        ])?;
+        Some(parse_lsof_pids(&text))
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = port;
         None
     }
+}
+
+/// `/usr/sbin/lsof` with `args`, killed after [`LSOF_LIMIT`]: its output,
+/// empty when it found nothing (exit 1 with no output), `None` when it
+/// failed or did not finish in time.
+#[cfg(target_os = "macos")]
+pub(crate) fn run_lsof(args: &[&str]) -> Option<String> {
+    use std::io::Read;
+    let mut child = std::process::Command::new("/usr/sbin/lsof")
+        .args(args)
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        stdout.read_to_string(&mut text).ok().map(|_| text)
+    });
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            break status;
+        }
+        if started.elapsed() > LSOF_LIMIT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let text = reader.join().ok()??;
+    let ran = status.success() || (status.code() == Some(1) && text.is_empty());
+    ran.then_some(text)
 }
 
 /// The pids in `lsof -Fp` output.
