@@ -2,7 +2,8 @@
 //! chrome://inspect, which asks its user to allow every new DevTools
 //! connection. It is a proxy in front of a real headless Chrome, run as a
 //! copy of the Python interpreter named `chrome` that holds the "user's"
-//! profile (its lock and its `DevToolsActivePort`), so tabref's owner checks
+//! profile (its lock, its `DevToolsActivePort` and an open file in it, as a
+//! browser keeps its databases open), so tabref's owner checks
 //! take it for the browser. Each connection it accepts is a prompt: it holds
 //! the WebSocket upgrade, writes `pending-N` in its control folder, and goes
 //! on only once the test writes `allow-N` (or closes the connection for
@@ -25,6 +26,7 @@ lock = os.path.join(profile, 'SingletonLock')
 if os.path.lexists(lock):
     os.remove(lock)
 os.symlink('host-%d' % os.getpid(), lock)
+held = open(os.path.join(profile, 'History'), 'a')
 port_file = os.path.join(profile, 'DevToolsActivePort')
 open(port_file + '.tmp', 'w').write('%d\n%s\n' % (s.getsockname()[1], real_path))
 os.replace(port_file + '.tmp', port_file)

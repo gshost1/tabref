@@ -13,7 +13,7 @@
 - `close --json` data is now `{closed, tabs_left, current}`; `tabs` is there only with `--list`.
 
 ### Left-over files in your browser's profile
-- A profile whose lock, left from a crash, names the process of another profile's browser is refused (`cdp_user_chrome_lock_shared`) instead of attaching to that other browser under this profile's name.
+- A profile whose lock, left from a crash, names a pid that now belongs to another browser is not taken for running: tabref checks that the process has files open in that profile (`/proc` on Linux, `lsof` on macOS), so it no longer attaches to the other browser under this profile's name, and a plain `connect --user-chrome` picks the browser that really runs.
 
 ## 0.2.0 (unreleased)
 

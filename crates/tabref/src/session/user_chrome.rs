@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use tabref_cdp::{
     Approval, BrowserEndpoint, ListenerVerdict, ProcessView, UserBrowser, check_listener,
     connect_awaiting, connect_held_awaiting, default_user_data_dirs, endpoint_from_user_data_dir,
-    is_chrome_family, listener_pids, process_start, profile_lock_pid, read_active_port,
+    holds_profile, is_chrome_family, listener_pids, process_start, profile_lock_pid,
+    read_active_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
@@ -46,8 +47,8 @@ pub(crate) fn find_user_chrome(dir: Option<&Path>) -> Result<UserChromeRecord, A
         None => only_profile(default_user_data_dirs())?,
     };
     let pid = profile_lock_pid(&dir).ok_or_else(|| not_running(&dir))?;
-    if let Some(other) = lock_shared_with(&dir, pid, &default_user_data_dirs()) {
-        return Err(lock_shared(&dir, &other, pid));
+    if holds_profile(pid, &dir) == Some(false) {
+        return Err(not_running(&dir));
     }
     let started = process_start(pid);
     if START_TIMES && started.is_none() {
@@ -120,46 +121,13 @@ pub(crate) fn only_profile(
     }
 }
 
-/// Another of `browsers`' profiles whose lock names `pid` too. A browser
-/// holds one profile, so one of the two locks is left from an earlier run
-/// (a crash), and its pid now belongs to the browser of the other profile:
-/// taking that browser for `dir` would attach to the wrong one.
-pub(crate) fn lock_shared_with(dir: &Path, pid: u32, browsers: &[UserBrowser]) -> Option<PathBuf> {
-    let same = |a: &Path, b: &Path| {
-        std::fs::canonicalize(a)
-            .ok()
-            .is_some_and(|a| std::fs::canonicalize(b).ok() == Some(a))
-    };
-    browsers
-        .iter()
-        .map(|browser| &browser.user_data_dir)
-        .find(|other| !same(other, dir) && profile_lock_pid(other) == Some(pid))
-        .cloned()
-}
-
-fn lock_shared(dir: &Path, other: &Path, pid: u32) -> AppError {
-    AppError::new(
-        ErrorCode::AmbiguousTarget,
-        format!(
-            "The browser process {pid} that the lock of {} names also holds {}: one of the two \
-             locks is left from an earlier run, so tabref cannot tell which browser this profile is",
-            shown_dir(dir),
-            shown_dir(other)
-        ),
-    )
-    .with_suggestion(
-        "Quit and restart the browser of the profile you want; if it is not running, delete \
-         that profile's SingletonLock (left from a crash) and run 'tabref connect --user-chrome' \
-         again",
-    )
-    .with_details(serde_json::json!({ "kind": "cdp_user_chrome_lock_shared" }))
-    .with_disposition(DeliverySemantics::not_delivered())
-}
-
-/// Whether a live browser process holds the profile's lock.
+/// Whether a live browser process holds the profile's lock and runs it:
+/// a lock a crash left names a pid that may now be another browser's.
 fn is_running(dir: &Path) -> bool {
     match profile_lock_pid(dir) {
-        Some(pid) => !START_TIMES || process_start(pid).is_some(),
+        Some(pid) => {
+            (!START_TIMES || process_start(pid).is_some()) && holds_profile(pid, dir) != Some(false)
+        }
         None => false,
     }
 }
@@ -188,7 +156,7 @@ fn connect_or_resume(
     record: &UserChromeRecord,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
-    if !same_process(record) {
+    if !same_process(record) || holds_profile(record.pid, &record.user_data_dir) == Some(false) {
         return Err(gone(record));
     }
     let endpoint = endpoint_from_user_data_dir(&record.user_data_dir).map_err(|_| gone(record))?;

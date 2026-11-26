@@ -22,8 +22,19 @@ use common::live;
 use tabref_cdp::{find_chrome, profile_lock_pid, read_active_port};
 use user_home::{UserHome, kill};
 
+/// The other browser, killed when dropped, so a failed test leaves none.
+struct Other(Option<Child>);
+
+impl Drop for Other {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.take() {
+            kill(child);
+        }
+    }
+}
+
 /// A headless Chrome debugging on the profile at `dir`.
-fn start_on(dir: &Path) -> Child {
+fn start_on(dir: &Path) -> Other {
     std::fs::create_dir_all(dir).unwrap();
     let browser = Command::new(find_chrome().unwrap())
         .args([
@@ -42,8 +53,9 @@ fn start_on(dir: &Path) -> Child {
         std::thread::sleep(Duration::from_millis(100));
         read_active_port(dir).is_ok() && profile_lock_pid(dir).is_some()
     });
+    let other = Other(Some(browser));
     assert!(up, "the other browser never came up");
-    browser
+    other
 }
 
 /// The user's Chrome profile with only a port file left from an earlier
@@ -74,7 +86,7 @@ fn a_stale_port_file_naming_another_browsers_port_is_refused_for_its_profile() {
         home.profile().to_str().unwrap(),
     ]);
     let kept = home.state.join("user_chrome.json").exists();
-    kill(other);
+    drop(other);
 
     assert!(
         !named.ok,
@@ -102,7 +114,7 @@ fn a_plain_connect_names_the_browser_that_really_holds_the_port() {
     let connected = home.tabref(&["--json", "connect", "--user-chrome"]);
     let record = std::fs::read_to_string(home.state.join("user_chrome.json")).unwrap_or_default();
     let _ = home.tabref(&["connect", "--off"]);
-    kill(other);
+    drop(other);
 
     assert!(connected.ok, "{}{}", connected.stdout, connected.stderr);
     let data = &connected.json()["data"];
@@ -138,13 +150,27 @@ fn a_stale_lock_pointing_at_another_browser_is_not_taken_for_the_profile() {
         home.profile().to_str().unwrap(),
     ]);
     let kept = home.state.join("user_chrome.json").exists();
+    let plain = home.tabref(&["--json", "connect", "--user-chrome"]);
+    let plain_record =
+        std::fs::read_to_string(home.state.join("user_chrome.json")).unwrap_or_default();
     let _ = home.tabref(&["connect", "--off"]);
-    kill(other);
+    drop(other);
 
     assert!(
         !named.ok,
         "took the other browser for this profile: {}",
         named.stdout
     );
+    assert_eq!(
+        named.json()["error"]["details"]["kind"],
+        "cdp_user_chrome_not_found",
+        "{}",
+        named.stdout
+    );
     assert!(!kept, "a refused profile was opted in to");
+    assert!(plain.ok, "{}{}", plain.stdout, plain.stderr);
+    assert!(
+        plain_record.contains("chromium") && !plain_record.contains("google-chrome"),
+        "a plain connect took the stale profile: {plain_record}"
+    );
 }
