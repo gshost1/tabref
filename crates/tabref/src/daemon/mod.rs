@@ -33,6 +33,8 @@ pub(crate) mod spawn;
 #[cfg(unix)]
 pub(crate) mod stale_sweep;
 #[cfg(unix)]
+pub(crate) mod user_browser_turn;
+#[cfg(unix)]
 pub(crate) mod wire_io;
 
 use tabref_core::AppError;
@@ -48,6 +50,18 @@ pub(crate) const CDP_ENV: &str = "TABREF_DAEMON_CDP";
 pub(crate) const IDLE_ENV: &str = "TABREF_DAEMON_IDLE_MS";
 /// Any non-empty value runs every command in-process.
 pub(crate) const NO_DAEMON_ENV: &str = "TABREF_NO_DAEMON";
+
+/// How long the daemon waits without a command before it exits:
+/// `TABREF_DAEMON_IDLE_MS`, else ten minutes.
+pub(crate) fn idle_timeout() -> std::time::Duration {
+    std::env::var(IDLE_ENV)
+        .ok()
+        .and_then(|ms| ms.parse::<u64>().ok())
+        .map_or(
+            std::time::Duration::from_secs(600),
+            std::time::Duration::from_millis,
+        )
+}
 
 /// Whether this process was started as a daemon.
 pub(crate) fn is_daemon_process() -> bool {

@@ -1,16 +1,19 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use serde_json::json;
-use tabref_core::AppError;
+use tabref_core::{AppError, RefStore};
 
 use super::activity::Activity;
 use super::tab_locks::TabLocks;
+use super::user_browser_turn::{UserBrowserTurn, UserBrowserTurns};
 use crate::commands::{download_tend, downloads};
 use crate::session::Session;
 use crate::session::capture_cache::CaptureCache;
 use crate::session::session_options::SessionOptions;
 use crate::session::tab_claim::TabClaim;
+use crate::session::user_chrome_record::choice_in_use;
 
 const MAX_IDLE_SESSIONS: usize = 4;
 
@@ -29,6 +32,7 @@ pub(crate) struct ServerState {
     next_owner: AtomicU64,
     running: Mutex<Option<Vec<Weak<AtomicBool>>>>,
     pub(crate) captures: Arc<CaptureCache>,
+    user_browser: UserBrowserTurns,
 }
 
 impl ServerState {
@@ -42,6 +46,7 @@ impl ServerState {
             next_owner: AtomicU64::new(1),
             running: Mutex::new(Some(Vec::new())),
             captures: Arc::new(CaptureCache::default()),
+            user_browser: UserBrowserTurns::default(),
         }
     }
 
@@ -89,24 +94,37 @@ impl ServerState {
     /// A session ready for the next command: a kept one whose connection
     /// still answers, or a new connection. A kept session whose browser went
     /// away is dropped here, so the command reconnects instead of failing.
+    /// A command in the user's own browser first waits for its turn there
+    /// (see [`UserBrowserTurns`]), which it holds until after its checkin;
+    /// the wait comes out of its deadline.
     pub(crate) fn checkout(
         &self,
         options: &SessionOptions,
         cancel: &Arc<AtomicBool>,
-    ) -> Result<Session, AppError> {
+    ) -> Result<(Session, Option<UserBrowserTurn<'_>>), AppError> {
+        let mut options = options.clone();
+        let turn = if uses_user_browser(&options) {
+            let limit = Duration::from_millis(options.timeout_ms);
+            let (turn, waited) = self.user_browser.take(limit, cancel)?;
+            let waited = u64::try_from(waited.as_millis()).unwrap_or(u64::MAX);
+            options.timeout_ms = options.timeout_ms.saturating_sub(waited).max(1);
+            Some(turn)
+        } else {
+            None
+        };
         let owner = self.next_owner.fetch_add(1, Ordering::SeqCst);
         while let Some(mut session) = self.take_idle() {
             let claim = TabClaim::new(Arc::clone(&self.locks), owner, Arc::clone(cancel));
-            if session.begin(options, Some(claim)).is_ok() {
+            if session.begin(&options, Some(claim)).is_ok() {
                 downloads::begin_command(&session);
-                return Ok(session);
+                return Ok((session, turn));
             }
         }
         let claim = TabClaim::new(Arc::clone(&self.locks), owner, Arc::clone(cancel));
-        let mut session = Session::open_claimed(options, Some(claim))?;
+        let mut session = Session::open_claimed(&options, Some(claim))?;
         session.connection().set_attach_probe(false);
         downloads::begin_command(&session);
-        Ok(session)
+        Ok((session, turn))
     }
 
     /// Returns a session after its command, unless its connection broke.
@@ -169,6 +187,13 @@ impl ServerState {
     fn take_idle(&self) -> Option<Session> {
         self.pool.lock().ok()?.pop()
     }
+}
+
+/// Whether a command with `options` runs in the user's own browser.
+fn uses_user_browser(options: &SessionOptions) -> bool {
+    RefStore::open()
+        .ok()
+        .is_some_and(|store| choice_in_use(&store, options).is_some())
 }
 
 #[cfg(test)]

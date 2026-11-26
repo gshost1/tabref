@@ -76,7 +76,13 @@ fn a_silent_active_port_browser_reports_pending_approval() {
     let details = error.details.as_ref().unwrap();
     assert_eq!(details["kind"], "cdp_approval_pending");
     assert_eq!(details["port"], 9222);
-    assert!(error.suggestion.unwrap().contains("Allow remote debugging"));
+    assert_eq!(details["prompt_kept"], false);
+    assert!(
+        error.message.contains("Allow remote debugging?"),
+        "{}",
+        error.message
+    );
+    assert!(error.suggestion.unwrap().contains("Do not just retry"));
 }
 
 #[test]

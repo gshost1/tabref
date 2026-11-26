@@ -12,14 +12,17 @@
 use std::path::{Path, PathBuf};
 
 use tabref_cdp::{
-    ListenerVerdict, ProcessView, UserBrowser, check_listener, connect_held, connect_with,
-    default_user_data_dirs, endpoint_from_user_data_dir, is_chrome_family, listener_pids,
-    process_start, profile_lock_pid, read_active_port,
+    Approval, BrowserEndpoint, ListenerVerdict, ProcessView, UserBrowser, check_listener,
+    connect_awaiting, connect_held_awaiting, default_user_data_dirs, endpoint_from_user_data_dir,
+    is_chrome_family, listener_pids, process_start, profile_lock_pid, read_active_port,
 };
 use tabref_core::{AppError, Deadline, DeliverySemantics, ErrorCode};
 
 use super::connected_browser::ConnectedBrowser;
 use super::user_chrome_record::UserChromeRecord;
+use super::user_chrome_waiting::{
+    Waiting, WaitingKey, connecting_turn, put_waiting, take_waiting, waiting_for_approval,
+};
 
 const AGAIN: &str = "Turn remote debugging on at chrome://inspect/#remote-debugging and run \
                      'tabref connect --user-chrome' again";
@@ -125,8 +128,24 @@ fn is_running(dir: &Path) -> bool {
 /// Connects to the user's browser `record` names: only while the very
 /// process the user opted in to still holds the profile, and only after
 /// checking that it alone holds the port its profile advertises. A browser
-/// that exited or restarted is kind `cdp_user_chrome_gone`.
+/// that exited or restarted is kind `cdp_user_chrome_gone`. A connection
+/// the browser has not approved by `deadline` is kept in the daemon (see
+/// `user_chrome_waiting`), and the next command resumes it.
 pub(crate) fn connect_user_chrome(
+    record: &UserChromeRecord,
+    deadline: Deadline,
+) -> Result<ConnectedBrowser, AppError> {
+    let _turn = connecting_turn(deadline)?;
+    let connected = connect_or_resume(record, deadline);
+    if let Err(error) = &connected {
+        if error.kind() != Some("cdp_approval_pending") {
+            drop(take_waiting(None));
+        }
+    }
+    connected
+}
+
+fn connect_or_resume(
     record: &UserChromeRecord,
     deadline: Deadline,
 ) -> Result<ConnectedBrowser, AppError> {
@@ -135,14 +154,41 @@ pub(crate) fn connect_user_chrome(
     }
     let endpoint = endpoint_from_user_data_dir(&record.user_data_dir).map_err(|_| gone(record))?;
     let port = endpoint.port();
-    let connection = match check_listener(port, &runs_profile(Some(record.pid))) {
-        ListenerVerdict::Trusted(held) => connect_held(&endpoint, &held, deadline)?,
+    let key = (record.user_data_dir.clone(), record.pid, port);
+    if let Some(pending) = take_waiting(Some(&key)) {
+        let approval = pending.resume(deadline)?;
+        return finish(approval, record, endpoint, key, true);
+    }
+    let approval = match check_listener(port, &runs_profile(Some(record.pid))) {
+        ListenerVerdict::Trusted(held) => connect_held_awaiting(&endpoint, &held, deadline)?,
         ListenerVerdict::Unknown => {
             listener_is(port, record)?;
-            connect_with(&endpoint, deadline, &|| listener_is(port, record))?
+            connect_awaiting(&endpoint, deadline, &|| listener_is(port, record))?
         }
         ListenerVerdict::Nothing => return Err(gone(record)),
         refused => return Err(not_the_profile(record, port, &refused)),
+    };
+    finish(approval, record, endpoint, key, false)
+}
+
+fn finish(
+    approval: Approval,
+    record: &UserChromeRecord,
+    endpoint: BrowserEndpoint,
+    key: WaitingKey,
+    resumed: bool,
+) -> Result<ConnectedBrowser, AppError> {
+    let connection = match approval {
+        Approval::Approved(connection) => connection,
+        Approval::Pending(pending) => {
+            let kept = crate::daemon::is_daemon_process();
+            let error =
+                waiting_for_approval(record, pending.port(), pending.waited(), kept, resumed);
+            if kept {
+                put_waiting(Waiting { key, pending });
+            }
+            return Err(error);
+        }
     };
     Ok(ConnectedBrowser {
         endpoint,

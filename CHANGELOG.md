@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Your own browser asks less
+- In your own browser, the daemon keeps the one connection you allowed in its "Allow remote debugging?" prompt, and `connect --user-chrome` makes it there, so the first command after `connect` no longer asks again.
+- A command that times out on the prompt leaves its connection waiting in the daemon: the prompt on screen stays the one that counts, and a retry waits on it instead of opening another prompt. The error says so (`details.prompt_kept`), and without the daemon it says the prompt no longer counts and that retrying adds prompts.
+- Commands that come together in your browser take turns on that one connection instead of each opening a prompt.
+- A prompt answered with Cancel during the upgrade is reported as declined (`cdp_connection_rejected`).
+
 ## 0.2.0 (unreleased)
 
 ### Safer actions

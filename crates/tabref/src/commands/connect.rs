@@ -1,9 +1,13 @@
 //! `tabref connect --user-chrome`: the explicit opt-in to driving the user's
-//! own, logged-in browser, and `tabref connect --off` to stop. It runs in the
-//! client, never in the daemon. Either way it stops this state directory's
-//! daemon (the one without an endpoint, which is the one that uses the
-//! user's browser), cancelling what it runs and waiting for its process to
-//! exit, so no connection made before the change stays open. A command
+//! own, logged-in browser, and `tabref connect --off` to stop. The opt-in is
+//! changed in the client, never in the daemon. A change either way stops
+//! this state directory's daemon (the one without an endpoint, which is the
+//! one that uses the user's browser), cancelling what it runs and waiting for
+//! its process to exit, so no connection made before the change stays open.
+//! The first connection after an opt-in is then made by the daemon, so the
+//! one the user approves in the browser's prompt is the one later commands
+//! keep using; a repeated opt-in to the same browser keeps the daemon and
+//! the connection (or the prompt) it holds. A command
 //! running elsewhere (another shell, `TABREF_NO_DAEMON`) stops at its next
 //! request, as its connection checks the opt-in.
 
@@ -42,15 +46,59 @@ pub(crate) fn run(
         ));
     }
     let record = find_user_chrome(user_data_dir)?;
-    stop_endpoint_less()?;
-    save_user_chrome(&store, &record)?;
-    let mut session = match Session::open(&crate::commands::session_options(cli)) {
-        Ok(session) => session,
+    let again = load_user_chrome(&store).as_ref() == Some(&record);
+    if !again {
+        stop_endpoint_less()?;
+        save_user_chrome(&store, &record)?;
+    }
+    let attached = crate::daemon::run_through_daemon(cli).unwrap_or_else(|| {
+        let mut session = Session::open(&crate::commands::session_options(cli))?;
+        let outcome = report(&mut session);
+        session.with_warning(outcome)
+    });
+    match attached {
+        Err(mut error) if kept_waiting(&error) => {
+            if let Some(suggestion) = error.suggestion.as_mut() {
+                suggestion.push_str(
+                    ". The opt-in is kept while the prompt waits; 'tabref connect --off' drops it",
+                );
+            }
+            Err(error)
+        }
+        Err(error) if again && !declined(&error) => Err(error),
         Err(error) => {
             forget_user_chrome(&store)?;
-            return Err(error);
+            stop_endpoint_less()?;
+            Err(error)
         }
-    };
+        Ok(outcome) => Ok(outcome),
+    }
+}
+
+/// Whether the user's browser refused the connection (its prompt answered
+/// with Cancel), which ends even an opt-in made before this `connect`; a
+/// passing failure (a busy turn, a lost reply) leaves that one as it was.
+fn declined(error: &AppError) -> bool {
+    error.kind() == Some("cdp_connection_rejected")
+}
+
+/// Whether `error` is a connection to the user's browser that the daemon
+/// keeps waiting for the user's approval.
+fn kept_waiting(error: &AppError) -> bool {
+    error.kind() == Some("cdp_approval_pending")
+        && error
+            .details
+            .as_ref()
+            .is_some_and(|details| details["prompt_kept"] == json!(true))
+}
+
+/// What `connect --user-chrome` reports once `session` reached the user's
+/// browser: run in the daemon, so the approved connection is the one later
+/// commands use, or in-process when no daemon can run.
+pub(crate) fn report(session: &mut Session) -> Result<Outcome, AppError> {
+    let record = load_user_chrome(session.store()).ok_or_else(|| {
+        AppError::invalid_args("The opt-in to your browser was removed while connecting")
+    })?;
     let deadline = session.deadline();
     let product = session
         .connection()
@@ -75,7 +123,7 @@ pub(crate) fn run(
         "pid": record.pid,
         "port": session.endpoint().port(),
     });
-    session.with_warning(Ok(Outcome::new(text, data)))
+    Ok(Outcome::new(text, data))
 }
 
 /// Removes the opt-in (confirmed gone), then stops this state directory's
