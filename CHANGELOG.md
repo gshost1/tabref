@@ -8,6 +8,10 @@
 - Commands that come together in your browser take turns on that one connection instead of each opening a prompt.
 - A prompt answered with Cancel during the upgrade is reported as declined (`cdp_connection_rejected`).
 
+### `close` keeps your tabs to itself (output change)
+- `close` prints the closed tab's id, how many tabs are left and the current one's index and id, not every tab's title and URL: in your own browser those are your tabs. `close --list` lists them as before.
+- `close --json` data is now `{closed, tabs_left, current}`; `tabs` is there only with `--list`.
+
 ## 0.2.0 (unreleased)
 
 ### Safer actions

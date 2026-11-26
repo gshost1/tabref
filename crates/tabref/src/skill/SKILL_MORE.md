@@ -34,7 +34,7 @@ Waits: `tabref wait --text X`, `--gone X`, `--url TEXT` (the address contains it
 `--ref T --state enabled|visible|hidden|gone|value=X`. Every command takes `--timeout MS`
 and `--json` (the `{version, ok, command, data|error}` envelope). Each command's options: `--help` after it.
 
-Tabs: `tabref tabs`, `tabref tab N`, `tabref open --new-tab URL`. `tabref js "EXPR"` returns a page value as JSON.
+Tabs: `tabref tabs`, `tabref tab N`, `tabref open --new-tab URL`, `tabref close [N]` (prints the count left; `--list` lists them). `tabref js "EXPR"` returns a page value as JSON.
 
 More actions: `focus T`, `double-click T`, `press KEY [T]` (the key in T). `tabref read` prints the main text.
 Dates and times take plain values (`2027-07-31`, `14:30`). Single commands take the same target words, value last:

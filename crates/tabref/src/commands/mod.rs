@@ -289,7 +289,7 @@ pub(crate) fn dispatch(session: &mut Session, command: &Command) -> Result<Outco
         Command::Close { browser: true, .. } => Err(AppError::invalid_args(
             "'close --browser' is handled by the client, not inside a session",
         )),
-        Command::Close { tab, .. } => close::run(session, tab.as_deref()),
+        Command::Close { tab, list, .. } => close::run(session, tab.as_deref(), *list),
         Command::Skill { topic } => Ok(skill::run(topic.as_deref())),
         Command::Daemon { action } => crate::daemon::control::run_in_session(session, action),
         Command::Connect { .. } => Err(AppError::invalid_args(
