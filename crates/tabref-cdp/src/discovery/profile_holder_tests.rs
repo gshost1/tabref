@@ -1,4 +1,4 @@
-use super::{holds_profile, parse_lsof_names};
+use super::parse_lsof_names;
 
 #[test]
 fn lsof_names_are_read_from_n_lines() {
@@ -12,6 +12,8 @@ fn lsof_names_are_read_from_n_lines() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_process_holds_the_folders_of_the_files_it_has_open() {
+    use super::holds_profile;
+
     let dir = std::env::temp_dir().join(format!("tabref-holder-{}", std::process::id()));
     let other = std::env::temp_dir().join(format!("tabref-holder-other-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("Default")).unwrap();
